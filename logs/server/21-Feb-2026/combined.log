@@ -1,6 +1,0 @@
-2026-02-21 15:01:54 info [utils]: server started [env, port] = [development, 8000]
-2026-02-21 15:01:54 info [utils]: Successfully connected to localhost Postgres in development mode.
-2026-02-21 23:36:34 info [utils]: server started [env, port] = [development, 8000]
-2026-02-21 23:36:34 info [utils]: Successfully connected to localhost Postgres in development mode.
-2026-02-21 23:40:48 info [utils]: server started [env, port] = [development, 8000]
-2026-02-21 23:40:48 info [utils]: Successfully connected to localhost Postgres in development mode.
