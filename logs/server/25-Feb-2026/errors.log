@@ -1,0 +1,16 @@
+2026-02-25 11:25:11 error [utils]: [PGP] error No data returned from the query.
+2026-02-25 12:35:08 error [utils]: [PGP] error duplicate key value violates unique constraint "instrument_authority_id_kind_short_code_key"
+2026-02-25 17:34:47 error [utils]: [PGP] error pg_hba.conf rejects connection for host "49.47.199.137", user "postgres", database "floora-ai", no encryption
+2026-02-25 17:36:41 error [utils]: [PGP] error relation "app_user" does not exist
+2026-02-25 20:11:32 error [utils]: [PGP] error The server does not support SSL connections
+2026-02-25 20:11:38 error [utils]: [PGP] error The server does not support SSL connections
+2026-02-25 20:11:41 error [utils]: [PGP] error The server does not support SSL connections
+2026-02-25 20:29:10 error [utils]: [PGP] error column "pincode" of relation "chat_session" does not exist
+2026-02-25 20:31:42 error [utils]: [PGP] error column "authority_ids" is of type uuid[] but expression is of type text[]
+2026-02-25 20:38:45 error [utils]: [PGP] error syntax error at or near "::"
+2026-02-25 20:43:56 error [utils]: [PGP] error No data returned from the query.
+2026-02-25 20:44:09 error [utils]: [PGP] error column "retrieved" is of type jsonb but expression is of type text[]
+2026-02-25 21:14:26 error [utils]: [PGP] error column "citations" is of type jsonb but expression is of type text[]
+2026-02-25 21:25:10 error [utils]: [PGP] error invalid input syntax for type json
+2026-02-25 21:30:27 error [utils]: [PGP] error column "citations" is of type jsonb but expression is of type text[]
+2026-02-25 21:33:37 error [utils]: [PGP] error column "citations" is of type jsonb but expression is of type text[]
