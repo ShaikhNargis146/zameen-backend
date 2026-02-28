@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS app_user (
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_app_user_phone UNIQUE (phone),
+  CONSTRAINT uq_app_user_phone UNIQUE (phone)
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_user_org_id ON app_user(org_id);
@@ -183,7 +183,6 @@ CREATE TABLE IF NOT EXISTS listing (
 CREATE INDEX IF NOT EXISTS idx_listing_owner ON listing(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_listing_org ON listing(org_id);
 CREATE INDEX IF NOT EXISTS idx_listing_status ON listing(status);
-CREATE INDEX IF NOT EXISTS idx_listing_location ON listing(location_id);
 CREATE INDEX IF NOT EXISTS idx_listing_geo ON listing(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_listing_verified ON listing(is_verified);
 CREATE INDEX IF NOT EXISTS idx_listing_hot ON listing(is_hot_sale);
