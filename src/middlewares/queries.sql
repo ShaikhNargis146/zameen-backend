@@ -22,7 +22,7 @@ $$ LANGUAGE plpgsql;
 -- Enums
 -- --------------------------
 DO $$ BEGIN
-  CREATE TYPE user_role AS ENUM ('buyer', 'seller', 'agent', 'corporate', 'admin');
+  CREATE TYPE user_role AS ENUM ('user', 'agent', 'corporate', 'admin');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS app_user (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id        uuid REFERENCES org(id) ON DELETE SET NULL,
 
-  role          user_role NOT NULL DEFAULT 'buyer',
+  role          user_role NOT NULL DEFAULT 'user',
 
   full_name     text NOT NULL,
   phone         text NOT NULL,
@@ -87,7 +87,6 @@ CREATE TABLE IF NOT EXISTS app_user (
   updated_at    timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_app_user_phone UNIQUE (phone),
-  CONSTRAINT uq_app_user_email UNIQUE (email)
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_user_org_id ON app_user(org_id);
@@ -145,10 +144,15 @@ CREATE TABLE IF NOT EXISTS listing (
   area_unit       text,                   -- "sqft", "sqmt", "acre", "guntha", etc.
 
   -- Address + geo (store as plain fields to keep Phase-1 simple)
-  location_id     uuid REFERENCES location(id) ON DELETE SET NULL,
   address_line    text,
   latitude        numeric(10,7),
   longitude       numeric(10,7),
+  state         text,
+  district      text,
+  city          text,
+  area          text,         -- locality / village / panchayat name
+  pincode       text,
+  landmark       text,         -- landmark 
 
   -- Land attributes (keep as columns for common fields; jsonb for extra)
   road_access     boolean,
