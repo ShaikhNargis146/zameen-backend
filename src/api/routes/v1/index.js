@@ -1,8 +1,10 @@
 import express from "express";
 
 // import all the routes here
+import adminAuthRoutes from "../../adminAuth/adminAuth.routes.js";
 import adminUsersRoutes from "../../adminUsers/adminUsers.routes.js";
-import authRoutes from "../../auth/auth.routes.js";
+import appUsersRoutes from "../../appUsers/appUsers.routes.js";
+import userAuthRoutes from "../../userAuth/userAuth.routes.js";
 
 const router = express.Router();
 
@@ -18,7 +20,9 @@ router.get("/status", (req, res) => {
   });
 });
 
-router.use("/admin", adminUsersRoutes);
-router.use("/auth", authRoutes);
+router.use("/admin-auth", adminAuthRoutes);
+router.use("/admin-users", adminUsersRoutes);
+router.use("/app-users", appUsersRoutes);
+router.use("/user-auth", userAuthRoutes);
 
 export default router;

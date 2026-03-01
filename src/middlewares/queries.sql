@@ -22,15 +22,51 @@ $$ LANGUAGE plpgsql;
 -- Enums
 -- --------------------------
 DO $$ BEGIN
-  CREATE TYPE user_role AS ENUM ('user', 'agent', 'corporate', 'admin');
+  CREATE TYPE user_role AS ENUM (
+    'user',
+    'agent',
+    'org_admin',
+    'org_member',
+    'admin',
+    'super_admin'
+  );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'org_admin';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'org_member';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'super_admin';
 
 DO $$ BEGIN
   CREATE TYPE listing_status AS ENUM ('draft', 'pending', 'live', 'rejected', 'sold');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
+  CREATE TYPE user_status AS ENUM ('active', 'inactive', 'blocked');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
   CREATE TYPE land_kind AS ENUM ('agri', 'na', 'commercial', 'industrial', 'residential_plot', 'other');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE listing_intent AS ENUM ('sell', 'buy');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE area_unit_kind AS ENUM (
+    'sqft',
+    'sqyd',
+    'sqmt',
+    'acre',
+    'hectare',
+    'guntha',
+    'bigha',
+    'kanal',
+    'marla',
+    'cent',
+    'ground',
+    'other'
+  );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -63,9 +99,18 @@ CREATE TABLE IF NOT EXISTS org (
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TRIGGER trg_org_updated_at
-BEFORE UPDATE ON org
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_org_updated_at'
+      AND tgrelid = 'org'::regclass
+  ) THEN
+    CREATE TRIGGER trg_org_updated_at
+    BEFORE UPDATE ON org
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  END IF;
+END $$;
 
 -- --------------------------
 -- Users
@@ -75,26 +120,131 @@ CREATE TABLE IF NOT EXISTS app_user (
   org_id        uuid REFERENCES org(id) ON DELETE SET NULL,
 
   role          user_role NOT NULL DEFAULT 'user',
+  is_internal   boolean NOT NULL DEFAULT false,
+  status        user_status NOT NULL DEFAULT 'active',
 
-  full_name     text NOT NULL,
+  name          text NOT NULL,
   phone         text NOT NULL,
   email         citext,
 
-  -- auth fields can be expanded later (OTP, password hash, etc.)
-  is_active     boolean NOT NULL DEFAULT true,
+  last_login_at timestamptz,
+  last_login_ip inet,
+  last_login_user_agent text,
+
+  created_by    uuid REFERENCES app_user(id) ON DELETE SET NULL,
+  updated_by    uuid REFERENCES app_user(id) ON DELETE SET NULL,
 
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_app_user_phone UNIQUE (phone),
+  CONSTRAINT chk_app_user_phone_len CHECK (char_length(phone) BETWEEN 10 AND 20),
+  CONSTRAINT chk_app_user_role_scope CHECK (
+    (is_internal = true AND role IN ('admin', 'super_admin') AND org_id IS NULL)
+    OR
+    (is_internal = false AND role IN ('user', 'agent', 'org_admin', 'org_member'))
+  ),
+  CONSTRAINT chk_app_user_org_role CHECK (
+    (role IN ('org_admin', 'org_member') AND org_id IS NOT NULL)
+    OR
+    (role NOT IN ('org_admin', 'org_member'))
+  )
 );
+
+ALTER TABLE app_user
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS is_internal boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS status user_status DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS last_login_at timestamptz,
+  ADD COLUMN IF NOT EXISTS last_login_ip inet,
+  ADD COLUMN IF NOT EXISTS last_login_user_agent text,
+  ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES app_user(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES app_user(id) ON DELETE SET NULL;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'app_user'
+      AND column_name = 'full_name'
+  ) THEN
+    EXECUTE 'UPDATE app_user SET name = COALESCE(name, full_name) WHERE name IS NULL';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'app_user'
+      AND column_name = 'is_active'
+  ) THEN
+    EXECUTE $sql$
+      UPDATE app_user
+      SET status = CASE WHEN is_active = true THEN 'active'::user_status ELSE 'inactive'::user_status END
+      WHERE status IS NULL
+    $sql$;
+  END IF;
+END $$;
+
+UPDATE app_user
+SET name = COALESCE(name, 'User ' || RIGHT(phone, 4))
+WHERE name IS NULL;
+
+UPDATE app_user
+SET is_internal = false
+WHERE is_internal IS NULL;
+
+UPDATE app_user
+SET status = 'active'
+WHERE status IS NULL;
+
+ALTER TABLE app_user
+  ALTER COLUMN name SET NOT NULL,
+  ALTER COLUMN is_internal SET NOT NULL,
+  ALTER COLUMN is_internal SET DEFAULT false,
+  ALTER COLUMN status SET NOT NULL,
+  ALTER COLUMN status SET DEFAULT 'active';
 
 CREATE INDEX IF NOT EXISTS idx_app_user_org_id ON app_user(org_id);
 CREATE INDEX IF NOT EXISTS idx_app_user_role ON app_user(role);
+CREATE INDEX IF NOT EXISTS idx_app_user_internal_status ON app_user(is_internal, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_app_user_email ON app_user(email) WHERE email IS NOT NULL;
 
-CREATE TRIGGER trg_app_user_updated_at
-BEFORE UPDATE ON app_user
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_app_user_updated_at'
+      AND tgrelid = 'app_user'::regclass
+  ) THEN
+    CREATE TRIGGER trg_app_user_updated_at
+    BEFORE UPDATE ON app_user
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  END IF;
+END $$;
+
+-- --------------------------
+-- Auth Sessions (OTP login)
+-- --------------------------
+CREATE TABLE IF NOT EXISTS auth_session (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+  token_hash     text NOT NULL,
+  expires_at     timestamptz NOT NULL,
+  revoked_at     timestamptz,
+  ip             inet,
+  user_agent     text,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT uq_auth_session_token_hash UNIQUE (token_hash),
+  CONSTRAINT chk_auth_session_expiry CHECK (expires_at > created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_session_user ON auth_session(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_session_expires_at ON auth_session(expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_session_revoked_at ON auth_session(revoked_at);
 
 -- --------------------------
 -- Locations (simple Phase-1)
@@ -114,10 +264,20 @@ CREATE TABLE IF NOT EXISTS location (
 CREATE INDEX IF NOT EXISTS idx_location_pincode ON location(pincode);
 CREATE INDEX IF NOT EXISTS idx_location_district ON location(district);
 CREATE INDEX IF NOT EXISTS idx_location_city ON location(city);
+CREATE INDEX IF NOT EXISTS idx_location_state_district_city ON location(state, district, city);
 
-CREATE TRIGGER trg_location_updated_at
-BEFORE UPDATE ON location
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_location_updated_at'
+      AND tgrelid = 'location'::regclass
+  ) THEN
+    CREATE TRIGGER trg_location_updated_at
+    BEFORE UPDATE ON location
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  END IF;
+END $$;
 
 -- --------------------------
 -- Listings (LAND ONLY)
@@ -127,21 +287,24 @@ CREATE TABLE IF NOT EXISTS listing (
 
   owner_user_id   uuid NOT NULL REFERENCES app_user(id) ON DELETE RESTRICT,
   org_id          uuid REFERENCES org(id) ON DELETE SET NULL,
+  location_id     uuid REFERENCES location(id) ON DELETE SET NULL,
 
   status          listing_status NOT NULL DEFAULT 'draft',
+  intent          listing_intent NOT NULL DEFAULT 'sell',
 
   title           text NOT NULL,
   description     text,
 
   land_type       land_kind NOT NULL DEFAULT 'other',
+  currency_code   char(3) NOT NULL DEFAULT 'INR',
 
   -- Pricing
-  price_total     numeric(14,2),          -- total asking price
+  price_total     numeric(14,2) NOT NULL, -- total asking price / budget
   price_per_unit  numeric(14,2),          -- optional
 
   -- Area
-  area_value      numeric(14,2),
-  area_unit       text,                   -- "sqft", "sqmt", "acre", "guntha", etc.
+  area_value      numeric(14,2) NOT NULL,
+  area_unit       area_unit_kind NOT NULL,
 
   -- Address + geo (store as plain fields to keep Phase-1 simple)
   address_line    text,
@@ -177,24 +340,49 @@ CREATE TABLE IF NOT EXISTS listing (
   sort_score      integer NOT NULL DEFAULT 0,
 
   created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now()
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_listing_title_len CHECK (char_length(title) BETWEEN 10 AND 150),
+  CONSTRAINT chk_listing_price_total CHECK (price_total > 0),
+  CONSTRAINT chk_listing_price_per_unit CHECK (price_per_unit IS NULL OR price_per_unit > 0),
+  CONSTRAINT chk_listing_area_value CHECK (area_value > 0),
+  CONSTRAINT chk_listing_latitude CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
+  CONSTRAINT chk_listing_longitude CHECK (longitude IS NULL OR (longitude >= -180 AND longitude <= 180)),
+  CONSTRAINT chk_listing_sort_score CHECK (sort_score >= 0),
+  CONSTRAINT chk_listing_publish_state CHECK (
+    published_at IS NULL OR status IN ('live', 'sold')
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_listing_owner ON listing(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_listing_org ON listing(org_id);
 CREATE INDEX IF NOT EXISTS idx_listing_status ON listing(status);
 CREATE INDEX IF NOT EXISTS idx_listing_location ON listing(location_id);
+CREATE INDEX IF NOT EXISTS idx_listing_intent_status ON listing(intent, status);
+CREATE INDEX IF NOT EXISTS idx_listing_land_type ON listing(land_type);
+CREATE INDEX IF NOT EXISTS idx_listing_state_district_city ON listing(state, district, city);
+CREATE INDEX IF NOT EXISTS idx_listing_pincode ON listing(pincode);
 CREATE INDEX IF NOT EXISTS idx_listing_geo ON listing(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_listing_verified ON listing(is_verified);
 CREATE INDEX IF NOT EXISTS idx_listing_hot ON listing(is_hot_sale);
 CREATE INDEX IF NOT EXISTS idx_listing_published ON listing(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_listing_search_live ON listing(status, intent, land_type, district, city, price_total);
 
 -- JSONB basic index for attrs search later
 CREATE INDEX IF NOT EXISTS idx_listing_attrs_gin ON listing USING gin (attrs);
 
-CREATE TRIGGER trg_listing_updated_at
-BEFORE UPDATE ON listing
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_listing_updated_at'
+      AND tgrelid = 'listing'::regclass
+  ) THEN
+    CREATE TRIGGER trg_listing_updated_at
+    BEFORE UPDATE ON listing
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  END IF;
+END $$;
 
 -- --------------------------
 -- Listing Media (images/docs)
@@ -216,6 +404,7 @@ CREATE TABLE IF NOT EXISTS listing_media (
 
 CREATE INDEX IF NOT EXISTS idx_listing_media_listing ON listing_media(listing_id);
 CREATE INDEX IF NOT EXISTS idx_listing_media_sort ON listing_media(listing_id, sort_order);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_listing_media_sort_order ON listing_media(listing_id, sort_order);
 
 -- --------------------------
 -- Enquiries (Buyer -> Listing)
@@ -236,16 +425,32 @@ CREATE TABLE IF NOT EXISTS inquiry (
   last_contacted_at timestamptz,
 
   created_at     timestamptz NOT NULL DEFAULT now(),
-  updated_at     timestamptz NOT NULL DEFAULT now()
+  updated_at     timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_inquiry_contact_presence CHECK (
+    buyer_user_id IS NOT NULL
+    OR buyer_phone IS NOT NULL
+    OR buyer_email IS NOT NULL
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_inquiry_listing ON inquiry(listing_id);
 CREATE INDEX IF NOT EXISTS idx_inquiry_status ON inquiry(status);
 CREATE INDEX IF NOT EXISTS idx_inquiry_assigned ON inquiry(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_inquiry_buyer_user ON inquiry(buyer_user_id);
 
-CREATE TRIGGER trg_inquiry_updated_at
-BEFORE UPDATE ON inquiry
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_inquiry_updated_at'
+      AND tgrelid = 'inquiry'::regclass
+  ) THEN
+    CREATE TRIGGER trg_inquiry_updated_at
+    BEFORE UPDATE ON inquiry
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  END IF;
+END $$;
 
 -- --------------------------
 -- Admin Actions (Audit Trail)
@@ -296,9 +501,18 @@ CREATE TABLE IF NOT EXISTS ad_campaign (
 CREATE INDEX IF NOT EXISTS idx_ad_campaign_status ON ad_campaign(status);
 CREATE INDEX IF NOT EXISTS idx_ad_campaign_dates ON ad_campaign(start_at, end_at);
 
-CREATE TRIGGER trg_ad_campaign_updated_at
-BEFORE UPDATE ON ad_campaign
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgname = 'trg_ad_campaign_updated_at'
+      AND tgrelid = 'ad_campaign'::regclass
+  ) THEN
+    CREATE TRIGGER trg_ad_campaign_updated_at
+    BEFORE UPDATE ON ad_campaign
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  END IF;
+END $$;
 
 -- Each campaign can have multiple creatives/placements
 CREATE TABLE IF NOT EXISTS ad_creative (
@@ -339,21 +553,23 @@ CREATE INDEX IF NOT EXISTS idx_ad_creative_active ON ad_creative(is_active);
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM app_user WHERE role = 'admin'
+    SELECT 1 FROM app_user WHERE role IN ('admin', 'super_admin')
   ) THEN
     INSERT INTO app_user (
-      full_name,
+      name,
       phone,
       email,
       role,
-      is_active
+      is_internal,
+      status
     )
     VALUES (
       'Super Admin',
       '9999999999',
       'admin@zameen.local',
-      'admin',
-      true
+      'super_admin',
+      true,
+      'active'
     );
   END IF;
 END $$;
