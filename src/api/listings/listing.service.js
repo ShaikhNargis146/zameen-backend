@@ -29,7 +29,7 @@ const ListingService = {
     try {
       const offset = (page - 1) * limit;
 
-      let query = `SELECT * FROM listing WHERE 1=1`;
+      let query = `SELECT * FROM listing WHERE is_active = true`;
       const params = [];
       let paramIndex = 1;
 
@@ -50,17 +50,17 @@ const ListingService = {
 
       const rows = await db.any(query, params);
 
-      const countQuery = `SELECT COUNT(*) as total FROM listing WHERE 1=1${status ? ` AND status = '${status}'` : ""
+      const countQuery = `SELECT COUNT(*) as total FROM listing WHERE is_active = true${status ? ` AND status = '${status}'` : ""
         }${land_type ? ` AND land_type = '${land_type}'` : ""}`;
-      const countResult = (await db.one(countQuery)).data;
+      const countResult = (await db.one(countQuery));
 
       return ok({
         listings: rows?.data || [],
         pagination: {
           page,
           limit,
-          total: parseInt(countResult?.total || 0),
-          pages: Math.ceil(parseInt(countResult?.total || 0) / limit)
+          total: parseInt(countResult?.data?.total || 0),
+          pages: Math.ceil(parseInt(countResult?.data?.total || 0) / limit)
         }
       });
     } catch (e) {
@@ -71,7 +71,7 @@ const ListingService = {
   // Get listing by ID
   getListingById: async id => {
     try {
-      const row = await db.oneOrNone(`SELECT * FROM listing WHERE id=$1`, [id]);
+      const row = await db.oneOrNone(`SELECT * FROM listing WHERE id=$1 AND is_active = true`, [id]);
       if (!row) return fail(new Error("Listing not found"));
       return ok(row?.data || {});
     } catch (e) {
@@ -85,22 +85,21 @@ const ListingService = {
       const offset = (page - 1) * limit;
 
       const rows = await db.any(
-        `SELECT * FROM listing WHERE owner_user_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+        `SELECT * FROM listing WHERE owner_user_id=$1 AND is_active = true ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
         [userId, limit, offset]
       );
 
       const countResult = await db.one(
-        `SELECT COUNT(*) as total FROM listing WHERE owner_user_id=$1`,
+        `SELECT COUNT(*) as total FROM listing WHERE owner_user_id=$1 AND is_active = true`,
         [userId]
       );
-
       return ok({
         listings: rows?.data || [],
         pagination: {
           page,
           limit,
-          total: parseInt(countResult?.total || 0),
-          pages: Math.ceil(parseInt(countResult?.total || 0) / limit)
+          total: parseInt(countResult?.data?.total || 0),
+          pages: Math.ceil(parseInt(countResult?.data?.total || 0) / limit)
         }
       });
     } catch (e) {
