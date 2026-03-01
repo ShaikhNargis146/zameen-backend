@@ -3,6 +3,7 @@ import express from "express";
 // import all the routes here
 import adminUsersRoutes from "../../adminUsers/adminUsers.routes.js";
 import authRoutes from "../../auth/auth.routes.js";
+import listingRoutes from "../../listings/listing.routes.js";
 
 const router = express.Router();
 
@@ -20,5 +21,6 @@ router.get("/status", (req, res) => {
 
 router.use("/admin", adminUsersRoutes);
 router.use("/auth", authRoutes);
+router.use("/property", listingRoutes);
 
 export default router;
