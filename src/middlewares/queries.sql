@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS listing (
   -- Visibility / ranking helpers
   published_at    timestamptz,
   sort_score      integer NOT NULL DEFAULT 0,
-
+  is_active       boolean NOT NULL DEFAULT true,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now()
 );

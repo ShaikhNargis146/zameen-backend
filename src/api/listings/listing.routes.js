@@ -1,32 +1,37 @@
 import { Router } from "express";
 import authenticateToken from "../../middlewares/authenticateToken.js";
-import { requireRole } from "../../middlewares/requireRole.js";
 import ListingController from "./listing.controller.js";
 
 const router = Router();
 
 // Public routes (read-only)
-router.get("/listings", ListingController.getAllListings);
-router.get("/listings/:id", ListingController.getListingById);
+router.get("/listings", authenticateToken, ListingController.getAllListings);
+router.get("/listing-by-owner", authenticateToken, ListingController.getAllListingsByOwner);
+router.get("/listing/:id", authenticateToken, ListingController.getListingById);
 router.post(
-  "/listings",
-//   authenticateToken,
+  "/listing",
+  authenticateToken,
   ListingController.createListing
 );
+router.post(
+  "/listing/create-or-update",
+  authenticateToken,
+  ListingController.createAndUpdateListing
+);
 router.put(
-  "/listings/:id",
-  // authenticateToken,
+  "/listing/:id",
+  authenticateToken,
   ListingController.updateListing
 );
 router.delete(
-  "/listings/:id",
-  // authenticateToken,
+  "/listing/:id",
+  authenticateToken,
   ListingController.deleteListing
 );
 router.patch(
   "/listings/:id/status",
-  // authenticateToken,
-  ListingController.updateStatus
+  authenticateToken,
+  ListingController.updateByAdmin
 );
 
 export default router;

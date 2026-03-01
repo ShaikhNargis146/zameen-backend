@@ -15,9 +15,8 @@ const ListingService = {
         values: listingData,
       };
       const response = await db.insertOne(params);
-      console.log('response----', response);
-      if (response && response.id)
-        return ok(response);
+      if (response && response.data)
+        return ok(response.data);
       else
         return fail(new Error('Incorrect Data !'));
     } catch (e) {
@@ -53,15 +52,15 @@ const ListingService = {
 
       const countQuery = `SELECT COUNT(*) as total FROM listing WHERE 1=1${status ? ` AND status = '${status}'` : ""
         }${land_type ? ` AND land_type = '${land_type}'` : ""}`;
-      const countResult = await db.one(countQuery);
+      const countResult = (await db.one(countQuery)).data;
 
       return ok({
-        listings: rows,
+        listings: rows?.data || [],
         pagination: {
           page,
           limit,
-          total: parseInt(countResult.total),
-          pages: Math.ceil(parseInt(countResult.total) / limit)
+          total: parseInt(countResult?.total || 0),
+          pages: Math.ceil(parseInt(countResult?.total || 0) / limit)
         }
       });
     } catch (e) {
@@ -74,7 +73,7 @@ const ListingService = {
     try {
       const row = await db.oneOrNone(`SELECT * FROM listing WHERE id=$1`, [id]);
       if (!row) return fail(new Error("Listing not found"));
-      return ok(row);
+      return ok(row?.data || {});
     } catch (e) {
       return fail(e);
     }
@@ -96,12 +95,12 @@ const ListingService = {
       );
 
       return ok({
-        listings: rows,
+        listings: rows?.data || [],
         pagination: {
           page,
           limit,
-          total: parseInt(countResult.total),
-          pages: Math.ceil(parseInt(countResult.total) / limit)
+          total: parseInt(countResult?.total || 0),
+          pages: Math.ceil(parseInt(countResult?.total || 0) / limit)
         }
       });
     } catch (e) {
@@ -112,6 +111,7 @@ const ListingService = {
   // Update listing
   updateListing: async ({ id, owner, updateData }) => {
     try {
+      
       // Check if listing exists and belongs to owner
       const existing = await db.oneOrNone(
         `SELECT id, owner_user_id, status FROM listing WHERE id=$1`,
@@ -119,21 +119,19 @@ const ListingService = {
       );
 
       if (!existing) return fail(new Error("Listing not found"));
-
-      if (existing.owner_user_id !== owner.id && owner.role !== "admin") {
+      if (existing.data.owner_user_id !== owner.id) {
         return fail(new Error("Forbidden"));
       }
-      const columns = Object.keys(updateData).map((k) => k);
-      const values = Object.values(updateData).map((k) => k);
-      const params = {
-        clause: `id=${parseInt(updateData.id)}`,
+
+      const response = await db.updateWhere({
         table: 'listing',
-        columns: columns,
-        values,
-      };
-      const response = await db.upsertOne(updateData, params);
-      if (response)
-        return ok(response);
+        set: updateData,
+        where: 'id = ${id}',
+        params: { id },
+        returning: '*'
+      });
+      if (response && response.ok)
+        return ok(response.data);
       else
         return fail(new Error('Incorrect Data !'));
     } catch (e) {
@@ -154,24 +152,6 @@ const ListingService = {
       if (existing.owner_user_id !== owner.id && owner.role !== "admin") {
         return fail(new Error("Forbidden"));
       }
-
-      // Validate status transition
-      const validTransitions = {
-        draft: ["pending", "live"],
-        pending: ["live", "rejected", "draft"],
-        live: ["sold", "draft"],
-        rejected: ["draft"],
-        sold: []
-      };
-
-      if (!validTransitions[existing.status]?.includes(status)) {
-        return fail(
-          new Error(
-            `Cannot transition from ${existing.status} to ${status}`
-          )
-        );
-      }
-
       const published_at =
         status === "live" && !existing.published_at ? new Date() : existing.published_at;
 

@@ -45,11 +45,11 @@ const AuthService = {
         [p]
       );
 
-      // If user does not exist, create as buyer by default (simple)
+      // If user does not exist, create as user by default (simple)
       if (!user) {
         user = await db.one(
           `INSERT INTO app_user (full_name, phone, role, is_active)
-           VALUES ($1, $2, 'buyer', true)
+           VALUES ($1, $2, 'user', true)
            RETURNING id, full_name, phone, email, role, is_active, org_id`,
           ["User", p]
         );
