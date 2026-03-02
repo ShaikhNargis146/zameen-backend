@@ -12,8 +12,8 @@ const allowedOrigins = new Set([
   "http://127.0.0.1:5173",
   "http://35.184.18.131",
   "http://35.184.18.131:8000",
-  "35.184.18.131:8000",
-  "35.184.18.131:8000"
+  "http://localhost:8080",
+  "localhost:8080"
 
   // add domain later:
   // "https://api.floora.ai",

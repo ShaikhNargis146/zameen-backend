@@ -75,7 +75,6 @@ const insertOne = async ({
     const row = await db.one(q);
     return ok(row);
   } catch (e) {
-    console.log("inside insertOne ", e);
     return fail(e);
   }
 };
@@ -255,6 +254,15 @@ const oneOrNone = async (query, params) => {
   }
 };
 
+const none = async (query, params) => {
+  try {
+    await db.none(query, params);
+    return ok(null);
+  } catch (e) {
+    return fail(e);
+  }
+};
+
 /**
  * Transaction wrapper
  */
@@ -279,5 +287,6 @@ export default {
   any,
   one,
   oneOrNone,
+  none,
   tx
 };

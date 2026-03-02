@@ -9,18 +9,22 @@ const normalizePhone = v => {
   return /^\d{10}$/.test(p) ? p : null;
 };
 
-class AdminUsersService {
+const APP_ROLES = ["user", "agent", "org_admin", "org_member"];
+const APP_STATUSES = ["active", "inactive", "blocked"];
+
+class AppUsersService {
   static list = async ({
     limit = 50,
     offset = 0,
     search = null,
     role = null,
-    status = null
+    status = null,
+    org_id = null
   }) => {
     try {
       const whereParts = [
-        "is_internal = true",
-        "role IN ('super_admin','admin')"
+        "is_internal = false",
+        "role IN ('user','agent','org_admin','org_member')"
       ];
       const params = { limit, offset };
 
@@ -32,6 +36,11 @@ class AdminUsersService {
       if (status) {
         whereParts.push("status = ${status}");
         params.status = status;
+      }
+
+      if (org_id) {
+        whereParts.push("org_id = ${org_id}");
+        params.org_id = org_id;
       }
 
       if (search) {
@@ -48,8 +57,6 @@ class AdminUsersService {
         orderKey: "newest",
         limit,
         offset
-        // If your pg.list supports selecting columns, add it.
-        // select: "id, name, phone, email, role, status, created_at, updated_at, last_login_at"
       });
 
       if (!r.ok) return response_handler.errorHandler("Internal_Server_Error");
@@ -59,43 +66,48 @@ class AdminUsersService {
         total_count: r.data.count
       });
     } catch (err) {
-      logger.error("error in adminUsers.list", err);
+      logger.error("error in appUsers.list", err);
       return response_handler.errorHandler("Internal_Server_Error");
     }
   };
 
   static create = async ({ data, actor }) => {
     try {
-      // Only super_admin should create admins
-      if (!actor || actor.role !== "super_admin") {
+      if (!actor || !["admin", "super_admin"].includes(actor.role)) {
         return { status: 403, ok: false, message: "FORBIDDEN" };
       }
 
       const phone = normalizePhone(data?.phone);
-      const name = data?.name?.trim();
+      const name = String(data?.name || "").trim();
       const email = data?.email?.trim() || null;
-      const role = data?.role || "admin"; // default
+      const role = data?.role || "user";
       const status = data?.status || "active";
+      const org_id = data?.org_id || null;
 
       if (!name)
         return response_handler.invalid({ message: "name is required" });
       if (!phone)
         return response_handler.invalid({ message: "valid phone is required" });
-      if (!["admin", "super_admin"].includes(role)) {
-        return response_handler.invalid({
-          message: "role must be admin or super_admin"
-        });
+      if (!APP_ROLES.includes(role)) {
+        return response_handler.invalid({ message: "invalid role" });
       }
-      if (!["active", "inactive", "blocked"].includes(status)) {
+      if (!APP_STATUSES.includes(status)) {
         return response_handler.invalid({ message: "invalid status" });
       }
+      if (["org_admin", "org_member"].includes(role) && !org_id) {
+        return response_handler.invalid({
+          message: "org_id is required for organization users"
+        });
+      }
+      if (!["org_admin", "org_member"].includes(role) && org_id) {
+        return response_handler.invalid({
+          message: "org_id is only allowed for organization users"
+        });
+      }
 
-      // If user exists already:
-      // - if internal admin already -> conflict
-      // - if exists but not internal -> you can either block OR convert (I recommend conflict)
       const existing = await pg.oneOrNone(
         `
-        SELECT id, is_internal, role
+        SELECT id
         FROM app_user
         WHERE phone = $1
         `,
@@ -103,36 +115,9 @@ class AdminUsersService {
       );
 
       if (existing?.ok && existing.data) {
-        const u = existing.data;
-        if (u.is_internal && ["super_admin", "admin"].includes(u.role)) {
-          return {
-            status: 409,
-            ok: false,
-            message: "Admin with this phone already exists"
-          };
-        }
-        // Safer: do NOT auto-convert a non-internal user to admin silently.
-        return {
-          status: 409,
-          ok: false,
-          message:
-            "User with this phone already exists (not admin). Use a different phone."
-        };
+        return { status: 409, ok: false, message: "Phone already exists" };
       }
 
-      const payload = {
-        name,
-        phone,
-        email,
-        role,
-        is_internal: true,
-        status,
-        created_by: actor.id || null,
-        updated_by: actor.id || null
-      };
-
-      // If your schema doesn't have created_by/updated_by columns yet,
-      // remove those keys or keep try/catch around insert.
       const r = await pg.insertOne({
         table: "app_user",
         columns: [
@@ -142,10 +127,21 @@ class AdminUsersService {
           "role",
           "is_internal",
           "status",
+          "org_id",
           "created_by",
           "updated_by"
         ],
-        values: payload,
+        values: {
+          name,
+          phone,
+          email,
+          role,
+          is_internal: false,
+          status,
+          org_id,
+          created_by: actor.id || null,
+          updated_by: actor.id || null
+        },
         returning: "id"
       });
 
@@ -158,29 +154,21 @@ class AdminUsersService {
 
       return response_handler.success({ id: r.data.id });
     } catch (err) {
-      logger.error("error in adminUsers.create", err);
+      logger.error("error in appUsers.create", err);
       return response_handler.errorHandler("Internal_Server_Error");
     }
   };
 
   static setStatus = async ({ id, status, actor }) => {
     try {
-      // Only super_admin should block/unblock
-      if (!actor || actor.role !== "super_admin") {
+      if (!actor || !["admin", "super_admin"].includes(actor.role)) {
         return { status: 403, ok: false, message: "FORBIDDEN" };
       }
 
       if (!id) return response_handler.invalid({ message: "id is required" });
-      if (!["active", "blocked", "inactive"].includes(status)) {
+      if (!APP_STATUSES.includes(status)) {
         return response_handler.invalid({
           message: "status must be active|blocked|inactive"
-        });
-      }
-
-      // Avoid self-lockout (optional but recommended)
-      if (actor.id === id && status !== "active") {
-        return response_handler.invalid({
-          message: "You cannot block/inactivate your own account."
         });
       }
 
@@ -192,15 +180,14 @@ class AdminUsersService {
           updated_at: new Date()
         },
         where:
-          "id = ${id} AND is_internal = true AND role IN ('super_admin','admin')",
+          "id = ${id} AND is_internal = false AND role IN ('user','agent','org_admin','org_member')",
         params: { id },
-        returning: "id, name, phone, role, status"
+        returning: "id, name, phone, role, status, org_id"
       });
 
       if (!r.ok)
         return response_handler.invalid({ message: "No record found!" });
 
-      // If blocking, revoke sessions
       if (status === "blocked" || status === "inactive") {
         try {
           await pg.none(
@@ -213,34 +200,10 @@ class AdminUsersService {
 
       return response_handler.success(r.data);
     } catch (err) {
-      logger.error("error in adminUsers.setStatus", err);
-      return response_handler.errorHandler("Internal_Server_Error");
-    }
-  };
-
-  static summary = async () => {
-    try {
-      const q = `
-        SELECT
-          (SELECT COUNT(*)::int FROM app_user WHERE is_internal = true) AS admin_count,
-          (SELECT COUNT(*)::int FROM app_user WHERE is_internal = false) AS app_user_count,
-          (SELECT COUNT(*)::int FROM app_user WHERE role = 'agent') AS agent_count,
-          (SELECT COUNT(*)::int FROM org) AS org_count,
-          (SELECT COUNT(*)::int FROM listing) AS listing_count,
-          (SELECT COUNT(*)::int FROM listing WHERE status = 'live') AS live_listing_count,
-          (SELECT COUNT(*)::int FROM inquiry) AS inquiry_count,
-          (SELECT COUNT(*)::int FROM ad_campaign) AS ad_campaign_count
-      `;
-
-      const r = await pg.one(q, {});
-      if (!r.ok) return response_handler.errorHandler("Internal_Server_Error");
-
-      return response_handler.success(r.data);
-    } catch (err) {
-      logger.error("error in dashboard.summary", err);
+      logger.error("error in appUsers.setStatus", err);
       return response_handler.errorHandler("Internal_Server_Error");
     }
   };
 }
 
-export default AdminUsersService;
+export default AppUsersService;
