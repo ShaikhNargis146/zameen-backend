@@ -5,4 +5,4 @@
       "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
       "maxAgeSeconds": 3600
     }
-  ]
+  ] 
