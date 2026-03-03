@@ -1,6 +1,6 @@
 import express from "express";
 import controller from "./userAuth.controller.js";
-import userAuthenticateToken from "../../middlewares/user_auth.js";
+import { userAuthenticateToken } from "../../middlewares/auth_scope.js";
 
 const router = express.Router();
 //app user login

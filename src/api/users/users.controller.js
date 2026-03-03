@@ -1,8 +1,9 @@
 import httpStatus from "http-status";
-import AppUsersService from "./appUsers.service.js";
+import UsersService from "./users.service.js";
 
-const listAppUsers = async (req, res, next) => {
+const listUsers = async (req, res, next) => {
   try {
+    const scope = req.query.scope || "app";
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : 50;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : 0;
 
@@ -11,7 +12,8 @@ const listAppUsers = async (req, res, next) => {
     const status = req.query.status || null;
     const org_id = req.query.org_id || null;
 
-    const response = await AppUsersService.list({
+    const response = await UsersService.list({
+      scope,
       limit,
       offset,
       search,
@@ -26,27 +28,42 @@ const listAppUsers = async (req, res, next) => {
   }
 };
 
-const createAppUser = async (req, res, next) => {
+const createUser = async (req, res, next) => {
   try {
     const actor = req.admin_user;
-    const response = await AppUsersService.create({ data: req.body, actor });
+    const scope = req.body?.scope || "app";
+    const response = await UsersService.create({
+      scope,
+      data: req.body,
+      actor
+    });
     return res.status(response.status || httpStatus.OK).json(response);
   } catch (e) {
     next(e);
   }
 };
 
-const patchAppUserStatus = async (req, res, next) => {
+const patchUserStatus = async (req, res, next) => {
   try {
     const actor = req.admin_user;
     const id = req.params.id;
+    const scope = req.body?.scope || "app";
     const status = req.body?.status;
 
-    const response = await AppUsersService.setStatus({ id, status, actor });
+    const response = await UsersService.setStatus({ scope, id, status, actor });
     return res.status(response.status || httpStatus.OK).json(response);
   } catch (e) {
     next(e);
   }
 };
 
-export default { listAppUsers, createAppUser, patchAppUserStatus };
+const summary = async (req, res, next) => {
+  try {
+    const response = await UsersService.summary();
+    return res.status(response.status || httpStatus.OK).json(response);
+  } catch (e) {
+    next(e);
+  }
+};
+
+export default { listUsers, createUser, patchUserStatus, summary };

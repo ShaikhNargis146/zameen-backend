@@ -32,10 +32,6 @@ DO $$ BEGIN
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'org_admin';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'org_member';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'super_admin';
-
 DO $$ BEGIN
   CREATE TYPE listing_status AS ENUM ('draft', 'pending', 'live', 'rejected', 'sold');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -150,62 +146,6 @@ CREATE TABLE IF NOT EXISTS app_user (
     (role NOT IN ('org_admin', 'org_member'))
   )
 );
-
-ALTER TABLE app_user
-  ADD COLUMN IF NOT EXISTS name text,
-  ADD COLUMN IF NOT EXISTS is_internal boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS status user_status DEFAULT 'active',
-  ADD COLUMN IF NOT EXISTS last_login_at timestamptz,
-  ADD COLUMN IF NOT EXISTS last_login_ip inet,
-  ADD COLUMN IF NOT EXISTS last_login_user_agent text,
-  ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES app_user(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES app_user(id) ON DELETE SET NULL;
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND table_name = 'app_user'
-      AND column_name = 'full_name'
-  ) THEN
-    EXECUTE 'UPDATE app_user SET name = COALESCE(name, full_name) WHERE name IS NULL';
-  END IF;
-
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND table_name = 'app_user'
-      AND column_name = 'is_active'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE app_user
-      SET status = CASE WHEN is_active = true THEN 'active'::user_status ELSE 'inactive'::user_status END
-      WHERE status IS NULL
-    $sql$;
-  END IF;
-END $$;
-
-UPDATE app_user
-SET name = COALESCE(name, 'User ' || RIGHT(phone, 4))
-WHERE name IS NULL;
-
-UPDATE app_user
-SET is_internal = false
-WHERE is_internal IS NULL;
-
-UPDATE app_user
-SET status = 'active'
-WHERE status IS NULL;
-
-ALTER TABLE app_user
-  ALTER COLUMN name SET NOT NULL,
-  ALTER COLUMN is_internal SET NOT NULL,
-  ALTER COLUMN is_internal SET DEFAULT false,
-  ALTER COLUMN status SET NOT NULL,
-  ALTER COLUMN status SET DEFAULT 'active';
 
 CREATE INDEX IF NOT EXISTS idx_app_user_org_id ON app_user(org_id);
 CREATE INDEX IF NOT EXISTS idx_app_user_role ON app_user(role);

@@ -1,6 +1,6 @@
 import express from "express";
 import controller from "./adminAuth.controller.js";
-import adminAuthenticateToken from "../../middlewares/admin_auth.js";
+import { adminAuthenticateToken } from "../../middlewares/auth_scope.js";
 
 const router = express.Router();
 // admin login

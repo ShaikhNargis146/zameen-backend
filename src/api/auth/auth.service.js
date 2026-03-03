@@ -49,7 +49,15 @@ const cfgForScope = scope => {
     rlPhone: Number(process.env[`${prefix}_RL_PHONE_10MIN`] || 50),
     rlIp: Number(process.env[`${prefix}_RL_IP_10MIN`] || 20),
     sessionDays: Number(process.env[`${prefix}_SESSION_TTL_DAYS`] || 14),
-    tokenPrefix: scope === "admin" ? "admin_access" : "user_access"
+    tokenPrefix: scope === "admin" ? "admin_access" : "user_access",
+    rollingSession:
+      String(
+        process.env[`${prefix}_SESSION_ROLLING_ENABLED`] ||
+          (scope === "user" ? "true" : "false")
+      ).toLowerCase() === "true",
+    rollingThresholdSec: Number(
+      process.env[`${prefix}_SESSION_ROLLING_THRESHOLD_SEC`] || 86400
+    )
   };
 };
 
@@ -316,8 +324,38 @@ class AuthService {
       if (!rule.roles.includes(row.role))
         return { status: 403, message: "FORBIDDEN" };
 
-      if (new Date(row.expires_at).getTime() < Date.now())
+      const expiresAtMs = new Date(row.expires_at).getTime();
+      if (expiresAtMs < Date.now())
         return { status: 401, message: "UNAUTHORIZED" };
+
+      let effectiveExpiresAt = row.expires_at;
+      const shouldRoll =
+        cfg.rollingSession &&
+        expiresAtMs - Date.now() <= cfg.rollingThresholdSec * 1000;
+
+      if (shouldRoll) {
+        const nextExpiresAt = nowPlusDays(cfg.sessionDays);
+        const refreshed = await pg.one(
+          `
+          UPDATE auth_session
+          SET expires_at = $2
+          WHERE id = $1
+            AND revoked_at IS NULL
+            AND expires_at > now()
+          RETURNING expires_at
+          `,
+          [row.session_id, nextExpiresAt]
+        );
+
+        if (refreshed.ok && refreshed.data?.expires_at) {
+          effectiveExpiresAt = refreshed.data.expires_at;
+        } else if (!refreshed.ok) {
+          logger.error(
+            `error in auth.me rolling session scope=${scope}`,
+            refreshed.error
+          );
+        }
+      }
 
       return response_handler.success({
         user: {
@@ -326,7 +364,7 @@ class AuthService {
           phone: row.phone,
           role: row.role
         },
-        session: { id: row.session_id, expires_at: row.expires_at }
+        session: { id: row.session_id, expires_at: effectiveExpiresAt }
       });
     } catch (err) {
       logger.error(`error in auth.me scope=${scope}`, err);
