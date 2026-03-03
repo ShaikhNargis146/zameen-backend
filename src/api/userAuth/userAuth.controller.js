@@ -41,6 +41,19 @@ const me = async (req, res, next) => {
   }
 };
 
+const updateProfile = async (req, res, next) => {
+  try {
+    const actor = req.user || null;
+    const response = await UserAuthService.updateProfile({
+      actor,
+      data: req.body || {}
+    });
+    return res.status(response.status || httpStatus.OK).json(response);
+  } catch (e) {
+    next(e);
+  }
+};
+
 const logout = async (req, res, next) => {
   try {
     const token = req.user_token || null;
@@ -51,4 +64,4 @@ const logout = async (req, res, next) => {
   }
 };
 
-export default { requestOtp, verifyOtp, me, logout };
+export default { requestOtp, verifyOtp, me, updateProfile, logout };

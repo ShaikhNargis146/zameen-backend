@@ -8,6 +8,9 @@ class UserAuthService {
 
   static me = args => AuthService.me({ scope: "user", ...args });
 
+  static updateProfile = args =>
+    AuthService.updateProfile({ scope: "user", ...args });
+
   static logout = args => AuthService.logout({ scope: "user", ...args });
 }
 

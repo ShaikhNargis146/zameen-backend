@@ -81,6 +81,7 @@ const getStaticOtp = () => {
 };
 
 const canSelfProvision = scope => scope === "user";
+const SELF_EDITABLE_ROLES = ["user", "agent"];
 
 class AuthService {
   static async _findUserByPhone({ phone }) {
@@ -172,6 +173,7 @@ class AuthService {
       }
 
       const existingUser = await this._findUserByPhone({ phone: p });
+      const isNewUser = scope === "user" && !existingUser;
       const shouldIssueOtp =
         this._isEligibleForScope({ user: existingUser, scope }) ||
         (!existingUser && canSelfProvision(scope));
@@ -184,7 +186,10 @@ class AuthService {
         await redis.set(k.cooldown, "1", "EX", cfg.cooldown);
       }
 
-      return response_handler.success({ cooldown_sec: cfg.cooldown });
+      return response_handler.success({
+        cooldown_sec: cfg.cooldown,
+        is_new_user: shouldIssueOtp ? isNewUser : false
+      });
     } catch (err) {
       logger.error(`error in auth.requestOtp scope=${scope}`, err);
       return response_handler.errorHandler("Internal_Server_Error");
@@ -209,6 +214,7 @@ class AuthService {
       if (!p) return response_handler.invalid({ message: "Invalid phone/otp" });
 
       const existingUser = await this._findUserByPhone({ phone: p });
+      const isNewUser = scope === "user" && !existingUser;
       if (
         existingUser &&
         !this._isEligibleForScope({ user: existingUser, scope })
@@ -278,6 +284,7 @@ class AuthService {
       return response_handler.success({
         token: accessToken,
         expires_at: expiresAt,
+        is_new_user: isNewUser,
         user: {
           id: user.id,
           name: user.name,
@@ -391,6 +398,78 @@ class AuthService {
       return response_handler.success({});
     } catch (err) {
       logger.error(`error in auth.logout scope=${scope}`, err);
+      return response_handler.errorHandler("Internal_Server_Error");
+    }
+  }
+
+  static async updateProfile({ scope, actor, data = {} }) {
+    try {
+      if (scope !== "user") {
+        return { status: 403, message: "FORBIDDEN" };
+      }
+
+      if (!actor?.id || actor?.is_internal) {
+        return { status: 401, message: "UNAUTHORIZED" };
+      }
+
+      const nextName = normalizeName(data?.name);
+      const nextEmail = data?.email?.trim() || null;
+      const nextRole = data?.role || null;
+
+      const currentUser = await this._findUserByPhone({ phone: actor.phone });
+      if (
+        !currentUser ||
+        !this._isEligibleForScope({ user: currentUser, scope })
+      ) {
+        return { status: 401, message: "UNAUTHORIZED" };
+      }
+
+      const set = {};
+      if (nextName) set.name = nextName;
+      if (Object.prototype.hasOwnProperty.call(data, "email")) {
+        set.email = nextEmail;
+      }
+
+      if (nextRole) {
+        const rolePairAllowed =
+          SELF_EDITABLE_ROLES.includes(currentUser.role) &&
+          SELF_EDITABLE_ROLES.includes(nextRole);
+        if (!rolePairAllowed) {
+          return response_handler.invalid({
+            message: "role cannot be changed to the requested value"
+          });
+        }
+        set.role = nextRole;
+      }
+
+      if (!Object.keys(set).length) {
+        return response_handler.invalid({
+          message: "No profile fields to update"
+        });
+      }
+
+      set.updated_by = currentUser.id;
+      set.updated_at = new Date();
+
+      const updated = await pg.updateWhere({
+        table: "app_user",
+        set,
+        where:
+          "id = ${id} AND is_internal = false AND role IN ('user','agent','org_admin','org_member')",
+        params: { id: currentUser.id },
+        returning: "id, name, phone, email, role, org_id, status, updated_at"
+      });
+
+      if (!updated.ok) {
+        if (String(updated.error?.code) === "23505") {
+          return { status: 409, message: "Email already exists" };
+        }
+        return response_handler.errorHandler("Internal_Server_Error");
+      }
+
+      return response_handler.success(updated.data);
+    } catch (err) {
+      logger.error(`error in auth.updateProfile scope=${scope}`, err);
       return response_handler.errorHandler("Internal_Server_Error");
     }
   }
