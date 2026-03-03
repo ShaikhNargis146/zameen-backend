@@ -11,25 +11,23 @@ const ListingController = {
     return res.status(200).json({ message: "Listing created", data: r.data });
   },
   getAllListings: async (req, res) => {
-    const { page = 1, limit = 10, status, land_type } = req.query;
+    const { page = 1, limit = 10, ...filters } = req.query;
     const r = await ListingService.getAllListings({
       page: parseInt(page),
       limit: parseInt(limit),
-      status,
-      land_type
+      filters
     });
     if (!r.ok)
       return res.status(400).json({ message: r.error?.message || "Failed" });
     return res.json({ message: "Listings fetched", data: r.data });
   },
   getAllListingsByOwner: async (req, res) => {
-    const { page = 1, limit = 10, status, land_type } = req.query;
+     const { page = 1, limit = 10, ...filters } = req.query;
     const r = await ListingService.getListingsByOwner({
       userId: req.user.id,
       page: parseInt(page),
       limit: parseInt(limit),
-      status,
-      land_type
+      filters
     });
     if (!r.ok)
       return res.status(400).json({ message: r.error?.message || "Failed" });
@@ -43,15 +41,18 @@ const ListingController = {
       return res.status(404).json({ message: r.error?.message || "Not found" });
     return res.json({ message: "Listing fetched", data: r.data });
   },
-  updateListing: async (req, res) => {
+  updateByAdmin: async (req, res) => {
     const { id } = req.params;
     const owner = req.user;
     console.log("Updating listing", { id, owner: owner.id, body: req.body });
     const updateData = req.body;
-
-    const r = await ListingService.updateListing({
+    if (owner && owner.role !== 'admin') {
+      return res.status(403).json({ 
+        message: "Only admin can update user's properties"
+      });
+    }
+    const r = await ListingService.updateListingByAdmin({
       id,
-      owner,
       updateData
     });
     if (!r.ok)
@@ -67,15 +68,19 @@ const ListingController = {
       return res.status(400).json({ message: r.error?.message || "Failed" });
     return res.json({ message: "Listing deleted" });
   },
-  updateByAdmin: async (req, res) => {
+  deleteByAdmin: async (req, res) => {
     const { id } = req.params;
-    const { status} = req.body;
     const owner = req.user;
+    if (owner && owner.role !== 'admin') {
+      return res.status(403).json({ 
+        message: "Only admin can update user's properties"
+      });
+    }
 
-    const r = await ListingService.updateStatus({ id, status, owner });
+    const r = await ListingService.updateListingByAdmin({ id, updateData: { is_active: false } });
     if (!r.ok)
       return res.status(400).json({ message: r.error?.message || "Failed" });
-    return res.json({ message: "Status updated", data: r.data });
+    return res.json({ message: "Listing deleted" });
   },
   createAndUpdateListing: async (req, res) => {
     const owner = req.user;

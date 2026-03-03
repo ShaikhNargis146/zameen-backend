@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { userAuthenticateToken } from "../../middlewares/auth_scope.js";
+import { userAuthenticateToken, adminAuthenticateToken} from "../../middlewares/auth_scope.js";
 import ListingController from "./listing.controller.js";
 
 const router = Router();
@@ -20,26 +20,29 @@ router.get(
   userAuthenticateToken,
   ListingController.getListingById
 );
-router.post("/listing", userAuthenticateToken, ListingController.createListing);
+router.post("/listing", 
+  userAuthenticateToken, 
+  ListingController.createListing);
+  
 router.post(
   "/listing/create-or-update",
   userAuthenticateToken,
   ListingController.createAndUpdateListing
 );
 router.put(
-  "/listing/:id",
-  userAuthenticateToken,
-  ListingController.updateListing
+  "/listing-by-admin/:id",
+  adminAuthenticateToken,
+  ListingController.updateByAdmin
 );
 router.delete(
   "/listing/:id",
   userAuthenticateToken,
   ListingController.deleteListing
 );
-router.patch(
-  "/listings/:id/status",
-  userAuthenticateToken,
-  ListingController.updateByAdmin
+router.delete(
+  "/listing-by-admin/:id",
+  adminAuthenticateToken,
+  ListingController.deleteByAdmin
 );
 
 export default router;

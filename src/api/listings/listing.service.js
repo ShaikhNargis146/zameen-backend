@@ -24,43 +24,44 @@ const ListingService = {
     }
   },
 
-  // Get all listings (with pagination and filters)
-  getAllListings: async ({ page = 1, limit = 10, status, land_type }) => {
+  // Get all listings (with pagination and all available filters including geolocation with radius)
+  getAllListings: async ({ page = 1, limit = 10, filters = {} } = {}) => {
     try {
       const offset = (page - 1) * limit;
-
       let query = `SELECT * FROM listing WHERE is_active = true`;
       const params = [];
-      let paramIndex = 1;
+      const { conditions, params: filterParams, nextParamIndex } = ListingService.buildFilterConditions(filters, 1, true);
 
-      if (status) {
-        query += ` AND status = $${paramIndex}`;
-        params.push(status);
-        paramIndex++;
+      params.push(...filterParams);
+      if (conditions.length) {
+        query += ` AND ${conditions.join(' AND ')}`;
       }
 
-      if (land_type) {
-        query += ` AND land_type = $${paramIndex}`;
-        params.push(land_type);
-        paramIndex++;
-      }
-
-      query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+      query += ` ORDER BY created_at DESC LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}`;
       params.push(limit, offset);
 
-      const rows = await db.any(query, params);
+      let countQuery = `SELECT COUNT(*) as total FROM listing WHERE is_active = true`;
+      const countParams = [];
 
-      const countQuery = `SELECT COUNT(*) as total FROM listing WHERE is_active = true${status ? ` AND status = '${status}'` : ""
-        }${land_type ? ` AND land_type = '${land_type}'` : ""}`;
-      const countResult = (await db.one(countQuery));
+      if (conditions.length) {
+        countQuery += ` AND ${conditions.join(' AND ')}`;
+        countParams.push(...filterParams);
+      }
+
+      const [rows, countResult] = await Promise.all([
+        db.any(query, params),
+        db.one(countQuery, countParams)
+      ]);
+
+      const total = parseInt(countResult?.data?.total || 0);
 
       return ok({
         listings: rows?.data || [],
         pagination: {
           page,
           limit,
-          total: parseInt(countResult?.data?.total || 0),
-          pages: Math.ceil(parseInt(countResult?.data?.total || 0) / limit)
+          total,
+          pages: Math.ceil(total / limit)
         }
       });
     } catch (e) {
@@ -79,27 +80,106 @@ const ListingService = {
     }
   },
 
-  // Get listings by owner
-  getListingsByOwner: async ({ userId, page = 1, limit = 10 }) => {
+  // Helper function to build filter conditions (with optional geolocation support)
+  buildFilterConditions: (filters, startParamIndex = 1, includeGeo = false) => {
+    const conditions = [];
+    const params = [];
+    let paramIndex = startParamIndex;
+    const handledKeys = new Set();
+
+    // Handle geolocation filter if enabled
+    if (includeGeo) {
+      const { latitude, longitude, radius = 10 } = filters; // Default radius: 10km
+      const isGeoLocation = latitude !== undefined && longitude !== undefined && latitude !== null && longitude !== null;
+
+      if (isGeoLocation) {
+        conditions.push(
+          `(6371 * acos(cos(radians($${paramIndex})) * cos(radians(latitude)) * cos(radians(longitude) - radians($${paramIndex + 1})) + sin(radians($${paramIndex})) * sin(radians(latitude)))) <= $${paramIndex + 2}`
+        );
+        params.push(latitude, longitude, radius);
+        paramIndex += 3;
+        handledKeys.add('latitude');
+        handledKeys.add('longitude');
+        handledKeys.add('radius');
+      }
+    } else {
+      handledKeys.add('radius');
+    }
+
+    // Process other filters
+    for (const [key, value] of Object.entries(filters)) {
+      if (value === null || value === undefined || handledKeys.has(key)) continue;
+      if (key.endsWith('Min') || key.endsWith('Max')) continue;
+
+      const minKey = `${key}Min`;
+      const maxKey = `${key}Max`;
+      const hasMin = minKey in filters && filters[minKey] !== null && filters[minKey] !== undefined;
+      const hasMax = maxKey in filters && filters[maxKey] !== null && filters[maxKey] !== undefined;
+
+      if (hasMin || hasMax) {
+        if (hasMin) {
+          conditions.push(`${key} >= $${paramIndex}`);
+          params.push(filters[minKey]);
+          paramIndex++;
+        }
+        if (hasMax) {
+          conditions.push(`${key} <= $${paramIndex}`);
+          params.push(filters[maxKey]);
+          paramIndex++;
+        }
+        handledKeys.add(minKey);
+        handledKeys.add(maxKey);
+      } else {
+        conditions.push(`${key} = $${paramIndex}`);
+        params.push(value);
+        paramIndex++;
+      }
+      handledKeys.add(key);
+    }
+
+    return { conditions, params, nextParamIndex: paramIndex };
+  },
+
+  // Get listings by owner with generic column filters (no radius-based geolocation)
+  getListingsByOwner: async ({ userId, page = 1, limit = 10, filters = {} } = {}) => {
     try {
+      if (!userId) return fail(new Error("User ID is required"));
+
       const offset = (page - 1) * limit;
+      let query = `SELECT * FROM listing WHERE owner_user_id=$1`;
+      const params = [userId];
 
-      const rows = await db.any(
-        `SELECT * FROM listing WHERE owner_user_id=$1 AND is_active = true ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-        [userId, limit, offset]
-      );
+      const { conditions, params: filterParams, nextParamIndex } = ListingService.buildFilterConditions(filters, 2, false);
+      params.push(...filterParams);
+      if (conditions.length) {
+        query += ` AND ${conditions.join(' AND ')}`;
+      }
 
-      const countResult = await db.one(
-        `SELECT COUNT(*) as total FROM listing WHERE owner_user_id=$1 AND is_active = true`,
-        [userId]
-      );
+      query += ` ORDER BY created_at DESC LIMIT $${nextParamIndex} OFFSET $${nextParamIndex + 1}`;
+      params.push(limit, offset);
+
+      let countQuery = `SELECT COUNT(*) as total FROM listing WHERE owner_user_id=$1`;
+      const countParams = [userId];
+
+      if (conditions.length) {
+        countQuery += ` AND ${conditions.join(' AND ')}`;
+        countParams.push(...filterParams);
+      }
+
+      const [rows, countResult] = await Promise.all([
+        db.any(query, params),
+        db.one(countQuery, countParams)
+      ]);
+
+      const total = parseInt(countResult?.data?.total || 0);
+
       return ok({
         listings: rows?.data || [],
         pagination: {
           page,
           limit,
-          total: parseInt(countResult?.data?.total || 0),
-          pages: Math.ceil(parseInt(countResult?.data?.total || 0) / limit)
+          total,
+          pages: Math.ceil(total / limit)
         }
       });
     } catch (e) {
@@ -110,8 +190,6 @@ const ListingService = {
   // Update listing
   updateListing: async ({ id, owner, updateData }) => {
     try {
-      
-      // Check if listing exists and belongs to owner
       const existing = await db.oneOrNone(
         `SELECT id, owner_user_id, status FROM listing WHERE id=$1`,
         [id]
@@ -139,43 +217,28 @@ const ListingService = {
   },
 
   // Update listing status
-  updateStatus: async ({ id, status, owner }) => {
+  updateListingByAdmin: async ({ id, updateData }) => {
     try {
       const existing = await db.oneOrNone(
-        `SELECT * FROM listing WHERE id=$1`,
+        `SELECT id, owner_user_id, status FROM listing WHERE id=$1`,
         [id]
       );
-
       if (!existing) return fail(new Error("Listing not found"));
-
-      if (existing.owner_user_id !== owner.id && owner.role !== "admin") {
-        return fail(new Error("Forbidden"));
-      }
-      const published_at =
-        status === "live" && !existing.published_at ? new Date() : existing.published_at;
-
-      const updated = await db.one(
-        `UPDATE listing SET status=$1, published_at=$2 WHERE id=$3 RETURNING *`,
-        [status, published_at, id]
-      );
-
-      // Create audit log
-      await db.none(
-        `INSERT INTO listing_audit (listing_id, actor_user_id, action, before_state, after_state)
-         VALUES ($1, $2, 'STATUS_CHANGE', $3, $4)`,
-        [
-          id,
-          owner.id,
-          JSON.stringify({ status: existing.status }),
-          JSON.stringify({ status })
-        ]
-      );
-
-      return ok(updated);
+      const response = await db.updateWhere({
+        table: 'listing',
+        set: updateData,
+        where: 'id = ${id}',
+        params: { id },
+        returning: '*'
+      });
+      if (response && response.ok)
+        return ok(response.data);
+      else
+        return fail(new Error('Incorrect Data !'));
     } catch (e) {
       return fail(e);
     }
-  }
+  },
 };
 
 export default ListingService;
