@@ -10,8 +10,8 @@ const allowedOrigins = new Set([
   "http://localhost:3000",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "http://35.184.18.131",
-  "http://35.184.18.131:8000",
+  "http://34.170.188.127:8080",
+  "34.170.188.127:8080",
   "http://localhost:8080",
   "localhost:8080"
 
