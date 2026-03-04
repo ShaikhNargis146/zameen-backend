@@ -11,7 +11,7 @@ import {
 const OTP_MODE =
   process.env.OTP_MODE ||
   (process.env.NODE_ENV === "production" ? "disabled" : "static");
-const DEFAULT_DEV_OTP = "123456";
+const DEFAULT_DEV_OTP = "1234";
 
 const normalizePhone = v => {
   const p = String(v || "")
