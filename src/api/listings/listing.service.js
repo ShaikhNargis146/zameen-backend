@@ -2,17 +2,103 @@ import db from "../../utils/postgres_store.js";
 const ok = data => ({ ok: true, data, error: null });
 const fail = error => ({ ok: false, data: null, error });
 
+const LISTING_JSONB_FIELDS = ['additional_info', 'visiting_info', 'attrs'];
+const detectJsonbFields = (data) => {
+  if (!data || typeof data !== 'object') return [];
+  return LISTING_JSONB_FIELDS.filter(field => field in data);
+};
+
+const generateListingTitle = (listingData) => {
+  try {
+    const {
+      plot_area,
+      area_unit = 'sq ft',
+      property_type = 'Land',
+      city,
+      area,
+      is_road_access,
+      is_water_connection,
+      is_drainage_system,
+      is_electric_connection,
+      is_gated_security = false
+    } = listingData;
+
+    // Build location string
+    const locationParts = [area, city].filter(Boolean);
+    const location = locationParts.length > 0 ? locationParts.join(', ') : 'Prime Location';
+
+    // Build size string
+    let sizeStr = '';
+    if (plot_area) {
+      // Convert to acres if area is very large
+      if (area_unit === 'sq ft' && plot_area >= 43560) {
+        sizeStr = `${(plot_area / 43560).toFixed(1)} Acres`;
+      } else if (area_unit === 'sq meter' && plot_area >= 4047) {
+        sizeStr = `${(plot_area / 4047).toFixed(1)} Acres`;
+      } else {
+        sizeStr = `${plot_area} ${area_unit}`;
+      }
+    }
+
+    // Build features string
+    const features = [];
+    if (is_road_access) features.push('Road Access');
+    if (is_water_connection) features.push('Water Connection');
+    if (is_electric_connection) features.push('Electricity');
+    if (is_drainage_system) features.push('Drainage');
+    if (is_gated_security) features.push('Gated Community');
+
+    const featuresStr = features.slice(0, 2).join(' + '); // Show top 2 features
+
+    // Construct final title
+    let title = '';
+    if (sizeStr && property_type && location) {
+      title = `${sizeStr} ${property_type} in ${location}`;
+    } else if (sizeStr && property_type) {
+      title = `${sizeStr} ${property_type}`;
+    } else if (property_type && location) {
+      title = `${property_type} in ${location}`;
+    } else {
+      title = property_type;
+    }
+
+    // Add features if available
+    if (featuresStr) {
+      title += ` - ${featuresStr}`;
+    }
+
+    // Ensure title is between 10-150 characters (DB constraint)
+    if (title.length < 10) {
+      title += ` for Sale`;
+    }
+    if (title.length > 150) {
+      title = title.substring(0, 147) + '...';
+    }
+
+    return title;
+  } catch (e) {
+    console.error('Error generating title:', e);
+    return listingData?.property_type || 'Land for Sale';
+  }
+};
+
 const ListingService = {
   // Create a new listing
   createListing: async ({ owner, listingData }) => {
     try {
       if (!owner?.id) return fail(new Error("Unauthorized"));
+      if (!listingData.title) {
+        listingData.title = generateListingTitle(listingData);
+      }
 
-      const columns = Object.keys(listingData).map((k) => k);
+      const columns = Object.keys(listingData);
+      const jsonbCols = detectJsonbFields(listingData);
+      
       const params = {
         table: 'listing',
         columns: columns,
         values: listingData,
+        jsonbCols: jsonbCols, // automatically detected JSONB fields
       };
       const response = await db.insertOne(params);
       if (response && response.data)
@@ -200,12 +286,15 @@ const ListingService = {
         return fail(new Error("Forbidden"));
       }
 
+      const jsonbCols = detectJsonbFields(updateData);
+      
       const response = await db.updateWhere({
         table: 'listing',
         set: updateData,
         where: 'id = ${id}',
         params: { id },
-        returning: '*'
+        returning: '*',
+        jsonbCols: jsonbCols, // automatically detected JSONB fields
       });
       if (response && response.ok)
         return ok(response.data);
@@ -224,12 +313,16 @@ const ListingService = {
         [id]
       );
       if (!existing) return fail(new Error("Listing not found"));
+      
+      const jsonbCols = detectJsonbFields(updateData);
+      
       const response = await db.updateWhere({
         table: 'listing',
         set: updateData,
         where: 'id = ${id}',
         params: { id },
-        returning: '*'
+        returning: '*',
+        jsonbCols: jsonbCols, // automatically detected JSONB fields
       });
       if (response && response.ok)
         return ok(response.data);

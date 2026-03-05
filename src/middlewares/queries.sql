@@ -199,44 +199,10 @@ CREATE INDEX IF NOT EXISTS idx_auth_session_expires_at ON auth_session(expires_a
 CREATE INDEX IF NOT EXISTS idx_auth_session_revoked_at ON auth_session(revoked_at);
 
 -- --------------------------
--- Locations (simple Phase-1)
--- You can later normalize further (state/district/taluka/village)
--- --------------------------
-CREATE TABLE IF NOT EXISTS location (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  state         text,
-  district      text,
-  city          text,
-  area          text,         -- locality / village / panchayat name
-  pincode       text,
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  updated_at    timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_location_pincode ON location(pincode);
-CREATE INDEX IF NOT EXISTS idx_location_district ON location(district);
-CREATE INDEX IF NOT EXISTS idx_location_city ON location(city);
-CREATE INDEX IF NOT EXISTS idx_location_state_district_city ON location(state, district, city);
-
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_location_updated_at'
-      AND tgrelid = 'location'::regclass
-  ) THEN
-    CREATE TRIGGER trg_location_updated_at
-    BEFORE UPDATE ON location
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-  END IF;
-END $$;
-
--- --------------------------
 -- Listings (LAND ONLY)
 -- --------------------------
 CREATE TABLE IF NOT EXISTS listing (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-
   owner_user_id   uuid NOT NULL REFERENCES app_user(id) ON DELETE RESTRICT,
   org_id          uuid REFERENCES org(id) ON DELETE SET NULL,
   status          listing_status NOT NULL DEFAULT 'draft',
@@ -244,16 +210,16 @@ CREATE TABLE IF NOT EXISTS listing (
   title           text NOT NULL,
   description     text,
   land_type       land_kind NOT NULL DEFAULT 'other',
-  currency_code   char(3) NOT NULL DEFAULT 'INR',
   -- Pricing
   price_total     numeric(14,2) NOT NULL, -- total asking price / budget
   price_per_unit  numeric(14,2),          -- optional
-  is_negotiable      boolean NOT NULL DEFAULT false,
-  is_under_loan      boolean NOT NULL DEFAULT false,
+  is_negotiable   boolean NOT NULL DEFAULT false,
+  is_under_loan   boolean NOT NULL DEFAULT false,
+  currency_code   char(3) NOT NULL DEFAULT 'INR',
   -- Land dimensions
-  plot_length       numeric(12,2),
+  plot_length      numeric(12,2),
   plot_width       numeric(12,2),
-  plot_area       numeric(14,2),
+  plot_area        numeric(14,2),
   area_unit       area_unit_kind NOT NULL,
   is_boundary_wall   boolean,
   is_road_approach   boolean,
@@ -262,9 +228,9 @@ CREATE TABLE IF NOT EXISTS listing (
   facing          facing_direction,
   -- Address + geo (store as plain fields to keep Phase-1 simple)
   address_line    text,
-  street text,
+  street          text,
   village         text,
-  taluka   text,
+  taluka          text,
   latitude        numeric(10,7),
   longitude       numeric(10,7),
   state           text,
@@ -273,23 +239,16 @@ CREATE TABLE IF NOT EXISTS listing (
   area            text,         -- locality / village / panchayat name
   pincode         text,
   landmark        text,         -- landmark 
-  -- Land attributes (keep as columns for common fields; jsonb for extra)
-  is_road_access     boolean,
-  is_water_available boolean,
-  is_electricity     boolean,
-
   -- Infrastructure
+  is_road_access     boolean,
   is_water_connection boolean,
   is_drainage_system boolean,
   is_electric_connection boolean,
   is_gated_security boolean,
   -- Documents
-  additional_info      jsonb NOT NULL DEFAULT '{}'::jsonb,
-
+  additional_info      jsonb NOT NULL DEFAULT '{}'::jsonb, --{"sevenTwelve": true,"encumbranceCertificate": true,"landRecord": true,"nonAgriculturalOrder": true,"saleDeed": true,"titleCertificate": true,"powerOfAttorney": true,"propertyTranscript": true,"addressProof": true,"leaseDeed": true,"mutationEntry": true}
   -- Schedule Visiting
-  schedule_type   schedule_type DEFAULT 'anytime',
-  schedule_time_from timestamptz,
-  schedule_time_to   timestamptz,
+  visiting_info   jsonb NOT NULL DEFAULT '{}'::jsonb,--{"scheduleType": "weekday","scheduleTimeFrom": "10:00","scheduleTimeTo": "18:00"}
   attrs           jsonb NOT NULL DEFAULT '{}'::jsonb,
   -- Admin flags
   is_verified     boolean NOT NULL DEFAULT false,
@@ -308,7 +267,7 @@ CREATE TABLE IF NOT EXISTS listing (
   CONSTRAINT chk_listing_title_len CHECK (char_length(title) BETWEEN 10 AND 150),
   CONSTRAINT chk_listing_price_total CHECK (price_total > 0),
   CONSTRAINT chk_listing_price_per_unit CHECK (price_per_unit IS NULL OR price_per_unit > 0),
-  CONSTRAINT chk_listing_area_value CHECK (area_value > 0),
+  CONSTRAINT chk_listing_plot_area CHECK (plot_area > 0),
   CONSTRAINT chk_listing_latitude CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
   CONSTRAINT chk_listing_longitude CHECK (longitude IS NULL OR (longitude >= -180 AND longitude <= 180)),
   CONSTRAINT chk_listing_sort_score CHECK (sort_score >= 0),
@@ -334,26 +293,6 @@ CREATE INDEX IF NOT EXISTS idx_listing_ownership ON listing(ownership);
 CREATE INDEX IF NOT EXISTS idx_listing_facing ON listing(facing);
 CREATE INDEX IF NOT EXISTS idx_listing_negotiable ON listing(negotiable);
 CREATE INDEX IF NOT EXISTS idx_listing_boundary_wall ON listing(boundary_wall);
-CREATE INDEX IF NOT EXISTS idx_listing_infrastructure ON listing(approach_road, water_connection, drainage_system, electric_connection, security);
-CREATE INDEX IF NOT EXISTS idx_listing_documents ON listing(seven_twelve, encumbrance_certificate, land_record, sale_deed, title_certificate);
-CREATE INDEX IF NOT EXISTS idx_listing_schedule_type ON listing(schedule_type);
-CREATE INDEX IF NOT EXISTS idx_listing_schedule_times ON listing(schedule_time_from, schedule_time_to);
-
--- JSONB basic index for attrs search later
-CREATE INDEX IF NOT EXISTS idx_listing_attrs_gin ON listing USING gin (attrs);
-
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_trigger
-    WHERE tgname = 'trg_listing_updated_at'
-      AND tgrelid = 'listing'::regclass
-  ) THEN
-    CREATE TRIGGER trg_listing_updated_at
-    BEFORE UPDATE ON listing
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-  END IF;
-END $$;
 
 -- --------------------------
 -- Listing Media (images/docs)
