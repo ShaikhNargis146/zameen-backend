@@ -41,7 +41,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE land_kind AS ENUM ('agri', 'na', 'commercial', 'industrial', 'residential_plot', 'other');
+  CREATE TYPE land_kind AS ENUM ('agri', 'commercial_residential', 'commercial', 'industrial', 'residential', 'other');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
