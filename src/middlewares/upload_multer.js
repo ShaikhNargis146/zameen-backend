@@ -7,6 +7,6 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB
 });
 
-export const uploadSinglePDF = (fieldName = "file") => upload.single(fieldName);
-export const uploadMultiPDF = (fieldName = "files", maxCount = 10) =>
+export const uploadSingle = (fieldName = "file") => upload.single(fieldName);
+export const uploadMulti = (fieldName = "files", maxCount = 10) =>
   upload.array(fieldName, maxCount);

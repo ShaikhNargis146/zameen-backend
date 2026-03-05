@@ -70,7 +70,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE media_kind AS ENUM ('image', 'document');
+  CREATE TYPE media_kind AS ENUM ('image', 'document', 'video');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -79,6 +79,18 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE TYPE ad_placement AS ENUM ('home_top', 'home_mid', 'search_top', 'search_inline', 'detail_sidebar', 'detail_bottom');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE ownership_type AS ENUM ('FREEHOLD', 'LEASEHOLD', 'COOPERATIVE', 'JOINT_OWNERSHIP');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE facing_direction AS ENUM ('NORTH', 'SOUTH', 'EAST', 'WEST', 'NORTHEAST', 'NORTHWEST', 'SOUTHEAST', 'SOUTHWEST');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE schedule_type AS ENUM ('weekday', 'weekend', 'anytime');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- --------------------------
@@ -227,54 +239,65 @@ CREATE TABLE IF NOT EXISTS listing (
 
   owner_user_id   uuid NOT NULL REFERENCES app_user(id) ON DELETE RESTRICT,
   org_id          uuid REFERENCES org(id) ON DELETE SET NULL,
-  location_id     uuid REFERENCES location(id) ON DELETE SET NULL,
-
   status          listing_status NOT NULL DEFAULT 'draft',
   intent          listing_intent NOT NULL DEFAULT 'sell',
-
   title           text NOT NULL,
   description     text,
-
   land_type       land_kind NOT NULL DEFAULT 'other',
   currency_code   char(3) NOT NULL DEFAULT 'INR',
-
   -- Pricing
   price_total     numeric(14,2) NOT NULL, -- total asking price / budget
   price_per_unit  numeric(14,2),          -- optional
-
-  -- Area
-  area_value      numeric(14,2) NOT NULL,
+  is_negotiable      boolean NOT NULL DEFAULT false,
+  is_under_loan      boolean NOT NULL DEFAULT false,
+  -- Land dimensions
+  plot_length       numeric(12,2),
+  plot_width       numeric(12,2),
+  plot_area       numeric(14,2),
   area_unit       area_unit_kind NOT NULL,
-
+  is_boundary_wall   boolean,
+  is_road_approach   boolean,
+  -- Land characteristics
+  ownership       ownership_type,
+  facing          facing_direction,
   -- Address + geo (store as plain fields to keep Phase-1 simple)
   address_line    text,
+  street text,
+  village         text,
+  taluka   text,
   latitude        numeric(10,7),
   longitude       numeric(10,7),
-  state         text,
-  district      text,
-  city          text,
-  area          text,         -- locality / village / panchayat name
-  pincode       text,
-  landmark       text,         -- landmark 
-
+  state           text,
+  district        text,
+  city            text,
+  area            text,         -- locality / village / panchayat name
+  pincode         text,
+  landmark        text,         -- landmark 
   -- Land attributes (keep as columns for common fields; jsonb for extra)
-  road_access     boolean,
-  water_available boolean,
-  electricity     boolean,
-  frontage_m      numeric(10,2),
-  depth_m         numeric(10,2),
+  is_road_access     boolean,
+  is_water_available boolean,
+  is_electricity     boolean,
 
+  -- Infrastructure
+  is_water_connection boolean,
+  is_drainage_system boolean,
+  is_electric_connection boolean,
+  is_gated_security boolean,
+  -- Documents
+  additional_info      jsonb NOT NULL DEFAULT '{}'::jsonb,
+
+  -- Schedule Visiting
+  schedule_type   schedule_type DEFAULT 'anytime',
+  schedule_time_from timestamptz,
+  schedule_time_to   timestamptz,
   attrs           jsonb NOT NULL DEFAULT '{}'::jsonb,
-
   -- Admin flags
   is_verified     boolean NOT NULL DEFAULT false,
   verified_at     timestamptz,
   verified_by     uuid REFERENCES app_user(id) ON DELETE SET NULL,
-
   is_hot_sale     boolean NOT NULL DEFAULT false,
   hot_sale_until  timestamptz,
   hot_sale_by     uuid REFERENCES app_user(id) ON DELETE SET NULL,
-
   -- Visibility / ranking helpers
   published_at    timestamptz,
   sort_score      integer NOT NULL DEFAULT 0,
@@ -297,7 +320,7 @@ CREATE TABLE IF NOT EXISTS listing (
 CREATE INDEX IF NOT EXISTS idx_listing_owner ON listing(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_listing_org ON listing(org_id);
 CREATE INDEX IF NOT EXISTS idx_listing_status ON listing(status);
-CREATE INDEX IF NOT EXISTS idx_listing_location ON listing(location_id);
+--CREATE INDEX IF NOT EXISTS idx_listing_location ON listing(location_id);
 CREATE INDEX IF NOT EXISTS idx_listing_intent_status ON listing(intent, status);
 CREATE INDEX IF NOT EXISTS idx_listing_land_type ON listing(land_type);
 CREATE INDEX IF NOT EXISTS idx_listing_state_district_city ON listing(state, district, city);
@@ -307,6 +330,14 @@ CREATE INDEX IF NOT EXISTS idx_listing_verified ON listing(is_verified);
 CREATE INDEX IF NOT EXISTS idx_listing_hot ON listing(is_hot_sale);
 CREATE INDEX IF NOT EXISTS idx_listing_published ON listing(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_listing_search_live ON listing(status, intent, land_type, district, city, price_total);
+CREATE INDEX IF NOT EXISTS idx_listing_ownership ON listing(ownership);
+CREATE INDEX IF NOT EXISTS idx_listing_facing ON listing(facing);
+CREATE INDEX IF NOT EXISTS idx_listing_negotiable ON listing(negotiable);
+CREATE INDEX IF NOT EXISTS idx_listing_boundary_wall ON listing(boundary_wall);
+CREATE INDEX IF NOT EXISTS idx_listing_infrastructure ON listing(approach_road, water_connection, drainage_system, electric_connection, security);
+CREATE INDEX IF NOT EXISTS idx_listing_documents ON listing(seven_twelve, encumbrance_certificate, land_record, sale_deed, title_certificate);
+CREATE INDEX IF NOT EXISTS idx_listing_schedule_type ON listing(schedule_type);
+CREATE INDEX IF NOT EXISTS idx_listing_schedule_times ON listing(schedule_time_from, schedule_time_to);
 
 -- JSONB basic index for attrs search later
 CREATE INDEX IF NOT EXISTS idx_listing_attrs_gin ON listing USING gin (attrs);
@@ -331,12 +362,11 @@ CREATE TABLE IF NOT EXISTS listing_media (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   listing_id    uuid NOT NULL REFERENCES listing(id) ON DELETE CASCADE,
 
-  kind          media_kind NOT NULL DEFAULT 'image',
+  media_type          media_kind   NOT NULL DEFAULT 'image',
   url           text NOT NULL,          -- store GCS/S3/public URL
   thumb_url     text,
   caption       text,
   sort_order    integer NOT NULL DEFAULT 0,
-
   meta          jsonb NOT NULL DEFAULT '{}'::jsonb,
 
   created_at    timestamptz NOT NULL DEFAULT now()
