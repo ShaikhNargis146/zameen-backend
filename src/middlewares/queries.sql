@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS listing (
   description     text,
   land_type       land_kind NOT NULL DEFAULT 'other',
   -- Pricing
-  price_total     numeric(14,2) NOT NULL, -- total asking price / budget
+  price_total     numeric(14,2) NOT NULL DEFAULT 0, -- total asking price / budget
   price_per_unit  numeric(14,2),          -- optional
   is_negotiable   boolean NOT NULL DEFAULT false,
   is_under_loan   boolean NOT NULL DEFAULT false,
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS listing (
   plot_length      numeric(12,2),
   plot_width       numeric(12,2),
   plot_area        numeric(14,2),
-  area_unit       area_unit_kind NOT NULL,
+  area_unit       area_unit_kind NOT NULL DEFAULT 'sqft',
   is_boundary_wall   boolean,
   is_road_approach   boolean,
   -- Land characteristics
@@ -265,8 +265,8 @@ CREATE TABLE IF NOT EXISTS listing (
   updated_at      timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT chk_listing_title_len CHECK (char_length(title) BETWEEN 10 AND 150),
-  CONSTRAINT chk_listing_price_total CHECK (price_total > 0),
-  CONSTRAINT chk_listing_price_per_unit CHECK (price_per_unit IS NULL OR price_per_unit > 0),
+  CONSTRAINT chk_listing_price_total CHECK (price_total >= 0),
+  CONSTRAINT chk_listing_price_per_unit CHECK (price_per_unit IS NULL OR price_per_unit >= 0),
   CONSTRAINT chk_listing_plot_area CHECK (plot_area > 0),
   CONSTRAINT chk_listing_latitude CHECK (latitude IS NULL OR (latitude >= -90 AND latitude <= 90)),
   CONSTRAINT chk_listing_longitude CHECK (longitude IS NULL OR (longitude >= -180 AND longitude <= 180)),

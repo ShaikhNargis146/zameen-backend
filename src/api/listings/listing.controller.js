@@ -86,6 +86,9 @@ const ListingController = {
     const owner = req.user;
     const listingData = req.body;
     const { id } = listingData;
+    console.log("Create or update listing", { id, owner: owner.id, body: req.body });
+    listingData.price_total = req.body.price_total || 1;
+    listingData.area_unit = req.body.area_unit || 'sqft';
 
     if (id) {
       // Update existing listing
