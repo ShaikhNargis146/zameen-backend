@@ -5,6 +5,7 @@ import adminAuthRoutes from "../../adminAuth/adminAuth.routes.js";
 import usersRoutes from "../../users/users.routes.js";
 import userAuthRoutes from "../../userAuth/userAuth.routes.js";
 import listingRoutes from "../../listings/listing.routes.js";
+import mediaRoutes from "../../media/media.routes.js";
 
 const router = express.Router();
 
@@ -24,5 +25,6 @@ router.use("/admin-auth", adminAuthRoutes);
 router.use("/users", usersRoutes);
 router.use("/user-auth", userAuthRoutes);
 router.use("/property", listingRoutes);
+router.use("/media", mediaRoutes);
 
 export default router;

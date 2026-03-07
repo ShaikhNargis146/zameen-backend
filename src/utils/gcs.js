@@ -86,7 +86,8 @@ export async function uploadBufferToGCS({
 export async function getSignedReadUrl({
   bucket,
   objectPath,
-  expiresInMinutes = 15
+  expiresInMinutes = 60,
+  mediaType
 }) {
   if (!bucket) throw new Error("bucket is required");
   if (!objectPath) throw new Error("objectPath is required");
@@ -98,7 +99,10 @@ export async function getSignedReadUrl({
     action: "read",
     expires: Date.now() + expiresInMinutes * 60 * 1000,
     // optional but nice:
-    responseType: "application/pdf"
+    responseType: mediaType || "application/octet-stream",
+    responseDisposition: `inline; filename="${cleanFileName(
+      path.basename(objectPath)
+    )}"`
   });
 
   return url;

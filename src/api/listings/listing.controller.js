@@ -1,4 +1,5 @@
 import ListingService from "./listing.service.js";
+import MediaService from "../media/media.service.js";
 
 const ListingController = {
   createListing: async (req, res) => {
@@ -22,24 +23,36 @@ const ListingController = {
     return res.json({ message: "Listings fetched", data: r.data });
   },
   getAllListingsByOwner: async (req, res) => {
-     const { page = 1, limit = 10, ...filters } = req.query;
-    const r = await ListingService.getListingsByOwner({
+    const { page = 1, limit = 10, ...filters } = req.query;
+    const result = await ListingService.getListingsByOwner({
       userId: req.user.id,
       page: parseInt(page),
       limit: parseInt(limit),
       filters
     });
-    if (!r.ok)
-      return res.status(400).json({ message: r.error?.message || "Failed" });
-    return res.json({ message: "Listings fetched", data: r.data });
+    if (!result.ok || !result.data || result.data?.listings.length === 0)
+      return res.status(400).json({ message: result.error?.message || "Failed" });
+    // Get media for all listings
+    const listingsWithMedia = await Promise.all(
+      result.data.listings.map(async (listing) => {
+        const media = await MediaService.getListingMedia({ listingId: listing.id });
+        return {
+          ...listing,
+          uploads: media.ok ? media.data : []
+        };
+      })
+    );
+
+    return res.json({ message: "Listings fetched", data: listingsWithMedia });
   },
   getListingById: async (req, res) => {
     const { id } = req.params;
 
     const r = await ListingService.getListingById(id);
-    if (!r.ok)
+    if (!r.ok || !r.data)
       return res.status(404).json({ message: r.error?.message || "Not found" });
-    return res.json({ message: "Listing fetched", data: r.data });
+    const media = await MediaService.getListingMedia({ listingId: r.data.id });
+    return res.json({ message: "Listing fetched", data: { ...r.data, uploads: media.ok ? media.data : [] } });
   },
   updateByAdmin: async (req, res) => {
     const { id } = req.params;
@@ -86,7 +99,6 @@ const ListingController = {
     const owner = req.user;
     const listingData = req.body;
     const { id } = listingData;
-    console.log("Create or update listing", { id, owner: owner.id, body: req.body });
     listingData.price_total = req.body.price_total || 1;
     listingData.area_unit = req.body.area_unit || 'sqft';
 
