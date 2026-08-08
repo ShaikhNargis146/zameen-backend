@@ -32,10 +32,12 @@ const cn = {
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
 
-  ssl: false
-  // ssl: {
-  //   rejectUnauthorized: false
-  // }
+  ssl:
+    process.env.DB_SSL === "true"
+      ? {
+          rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false"
+        }
+      : false
 };
 
 const db = pgp(cn);

@@ -10,6 +10,7 @@
 	"type": "module",
 	"scripts": {
 		"start": "node src/index.js",
+		"db:schema": "node scripts/apply-schema.js",
 		"lint": "eslint **/*.js --ignore-path .gitignore --ignore-pattern internals/scripts",
 		"test": "cross-env NODE_ENV=test nyc --reporter=html --reporter=text mocha --timeout 20000 --recursive src/api/tests",
 		"pack": "rm -rf pkg/*.tgz && npm pack && mkdir -p pkg && mv *.tgz pkg/",

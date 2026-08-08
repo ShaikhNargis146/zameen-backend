@@ -1,7 +1,6 @@
 import httpStatus from "http-status";
 import { ValidationError } from "express-validation";
 import APIError from "../utils/APIError.js";
-import env from "../constants/index.js";
 
 /**
  * Error handler. Send stacktrace only during development
@@ -33,15 +32,15 @@ const handler = (err, req, res, next) => {
       err?.status || err?.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
 
     const payload = {
-      ok: false,
-      status,
-      message: err?.message || "Internal Server Error",
-      error:
-        process.env.NODE_ENV === "production"
-          ? null
-          : err?.stack || String(err),
-      data: null
+      success: false,
+      error: {
+        code: err?.code || "INTERNAL_ERROR",
+        message: err?.message || "Internal Server Error"
+      }
     };
+
+    if (process.env.NODE_ENV !== "production")
+      payload.error.stack = err?.stack || String(err);
 
     return res.status(status).json(payload);
   } catch (e) {
@@ -49,7 +48,10 @@ const handler = (err, req, res, next) => {
     if (!res.headersSent) {
       return res
         .status(500)
-        .json({ ok: false, message: "Internal Server Error", data: null });
+        .json({
+          success: false,
+          error: { code: "INTERNAL_ERROR", message: "Internal Server Error" }
+        });
     }
   }
 };
@@ -71,6 +73,7 @@ const converter = (err, req, res, next) => {
   } else if (!(err instanceof APIError)) {
     convertedError = new APIError({
       message: err.message,
+      code: err.code,
       status: err.status || httpStatus.INTERNAL_SERVER_ERROR,
       stack: err.stack
     });
