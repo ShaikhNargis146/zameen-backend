@@ -38,20 +38,17 @@ const handler = (err, req, res, next) => {
         message: err?.message || "Internal Server Error"
       }
     };
-
-    if (process.env.NODE_ENV !== "production")
-      payload.error.stack = err?.stack || String(err);
+    const details = err?.details || err?.errors?.details;
+    if (details?.length) payload.error.details = details;
 
     return res.status(status).json(payload);
   } catch (e) {
     // last resort
     if (!res.headersSent) {
-      return res
-        .status(500)
-        .json({
-          success: false,
-          error: { code: "INTERNAL_ERROR", message: "Internal Server Error" }
-        });
+      return res.status(500).json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Internal Server Error" }
+      });
     }
   }
 };
@@ -66,7 +63,7 @@ const converter = (err, req, res, next) => {
   if (err instanceof ValidationError) {
     convertedError = new APIError({
       message: "Validation Error",
-      errors: err.errors,
+      errors: { details: err.errors },
       status: err.status || httpStatus.INTERNAL_SERVER_ERROR,
       stack: err.stack
     });
@@ -74,6 +71,7 @@ const converter = (err, req, res, next) => {
     convertedError = new APIError({
       message: err.message,
       code: err.code,
+      errors: { details: err.details },
       status: err.status || httpStatus.INTERNAL_SERVER_ERROR,
       stack: err.stack
     });

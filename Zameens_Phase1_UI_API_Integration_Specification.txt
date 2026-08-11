@@ -1,0 +1,7037 @@
+﻿Zameens | Phase 1 UI API Integration Specification
+ZAMEENS
+Phase 1 UI API Integration Specification
+Request Fields • Response Models • Validation • Enums • UI Mapping
+
+
+Backend Dev 1  •  Backend Dev 2  •  Web/UI Team  •  Admin UI
+Version 1.0  |  Phase 1  |  API Base: /api/v1
+
+
+Purpose: This is the frontend integration contract. Swagger/OpenAPI remains the executable source of truth. Any request/response change after UI integration must be versioned and communicated to the UI team.
+	________________
+
+
+1. Integration Rules & Conventions
+* All JSON field names use camelCase. Database column names may remain snake_case internally.
+* All IDs exposed to clients are UUID strings unless explicitly documented otherwise.
+* Dates/times are ISO-8601 strings in UTC, for example 2026-08-10T09:15:00Z. UI converts to local time.
+* Money is sent as integer minor units (paise). Example: ₹4.25 Cr = 4,250,000,000 paise.
+* Area can be entered in the selected unit, but normalizedAreaSqft is calculated by backend and is read-only.
+* Access token is sent in Authorization: Bearer <token> for protected APIs.
+* Accept-Language may be sent as en, hi, mr, gu, pa, te or ta. Canonical backend data remains language-neutral where possible.
+* UI must use master IDs/codes returned by master APIs; do not hard-code land types, area units, document types or amenities.
+* For file upload, UI uploads directly to cloud storage using signed URLs and then calls the corresponding complete endpoint.
+* For list endpoints, the default pagination contract is page + limit. Unless documented, page defaults to 1 and limit to 20.
+* Fields marked read-only must never be sent by UI in create/update requests.
+1.1 Standard headers
+Header
+	Required
+	Example
+	Notes
+	Content-Type
+	Yes for JSON
+	application/json
+	Not needed for signed cloud upload PUT.
+	Authorization
+	Protected APIs
+	Bearer eyJ...
+	Access JWT.
+	Accept-Language
+	Optional
+	en
+	Supported: en, hi, mr, gu, pa, te, ta.
+	X-Request-ID
+	Optional
+	uuid
+	UI may send; backend returns/propagates for debugging.
+	
+
+1.2 Standard success response
+{
+ "success": true,
+ "data": {},
+ "meta": {}
+}
+1.3 Standard error response
+{
+ "success": false,
+ "error": {
+   "code": "VALIDATION_ERROR",
+   "message": "Please correct the highlighted fields.",
+   "details": [
+     {"field": "priceAmountMinor", "message": "Must be greater than zero"}
+   ]
+ }
+}
+1.4 HTTP status usage
+Status
+	Use
+	200
+	Successful read/update/action.
+	201
+	Resource created.
+	204
+	Successful delete with no response body.
+	400
+	Malformed request/business validation.
+	401
+	Missing/expired authentication.
+	403
+	Authenticated but not permitted.
+	404
+	Resource not found or not visible to user.
+	409
+	Conflict/duplicate/invalid lifecycle transition.
+	422
+	Field validation failure where framework uses 422.
+	429
+	Rate limit / OTP throttling.
+	500
+	Unexpected server error.
+	
+
+2. Shared Enum Dictionary
+Enum
+	Allowed values
+	UserRole
+	BUYER, SELLER, BROKER, DEVELOPER, CHANNEL_PARTNER, CORPORATE, ADMIN
+	UserStatus
+	ACTIVE, BLOCKED, DELETED
+	TransactionType
+	SALE, LEASE
+	ListingReviewStatus
+	DRAFT, PENDING, APPROVED, REJECTED
+	ListingStatus
+	INACTIVE, PUBLISHED, PAUSED, EXPIRED, SOLD, WITHDRAWN
+	VerificationStatus
+	NOT_STARTED, PENDING, VERIFIED, REJECTED, PARTIAL
+	EnquiryType
+	CONTACT, CALLBACK, DETAILS, DOCUMENT_REQUEST, GENERAL
+	EnquiryStatus
+	NEW, CONTACTED, INTERESTED, SITE_VISIT, CLOSED, LOST
+	SiteVisitStatus
+	REQUESTED, CONFIRMED, RESCHEDULED, COMPLETED, CANCELLED
+	OrderStatus
+	CREATED, PAYMENT_PENDING, PAID, FAILED, CANCELLED, REFUNDED
+	PaymentStatus
+	CREATED, AUTHORIZED, CAPTURED, FAILED, REFUNDED
+	ServiceRequestStatus
+	REQUESTED, PAYMENT_PENDING, IN_PROGRESS, DOCUMENTS_REQUIRED, COMPLETED, CANCELLED
+	ContentType
+	NEWS, ARTICLE, EBOOK, LAND_OPPORTUNITY, PROPERTY_LAW, GUIDE
+	ContentStatus
+	DRAFT, PUBLISHED, ARCHIVED
+	InvestmentOpportunityStatus
+	DRAFT, PUBLISHED, CLOSED
+	AuctionStatus
+	UPCOMING, CLOSED, CANCELLED
+	NotificationChannel
+	IN_APP, EMAIL, SMS, WHATSAPP
+	AiContextType
+	GENERAL, SEARCH, PROPERTY
+	
+
+3. Shared Frontend Models
+3.1 PaginationMeta
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	Yes
+	>= 1
+	Current page.
+	limit
+	integer
+	Yes
+	1-100
+	Page size.
+	total
+	integer
+	Yes
+	>= 0
+	Total matching records.
+	totalPages
+	integer
+	Yes
+	>= 0
+	Total pages.
+	
+
+3.2 UserSummary
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	User ID.
+	displayName
+	string
+	Yes
+	0-200 chars
+	Display name.
+	phoneE164
+	string|null
+	No
+	E.164
+	Verified/registered phone when visibility permits.
+	email
+	string|null
+	No
+	Valid email
+	Email when visibility permits.
+	avatarUrl
+	url|null
+	No
+	Signed/public URL
+	Profile photo URL.
+	roles
+	string[]
+	Yes
+	UserRole[]
+	Assigned roles.
+	status
+	string
+	Yes
+	UserStatus
+	Account status.
+	preferredLanguage
+	string
+	Yes
+	en/hi/mr/gu/pa/te/ta
+	Preferred UI/content language.
+	
+
+3.3 LocationSummary
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Location ID.
+	name
+	string
+	Yes
+	1-255
+	Display name.
+	type
+	string
+	Yes
+	COUNTRY/STATE/DISTRICT/SUBDISTRICT/CITY/LOCALITY/VILLAGE
+	Hierarchy type.
+	parentId
+	uuid|null
+	No
+	Read-only
+	Parent location.
+	stateCode
+	string|null
+	No
+	e.g. MH
+	State code if available.
+	latitude
+	number|null
+	No
+	-90..90
+	Center latitude.
+	longitude
+	number|null
+	No
+	-180..180
+	Center longitude.
+	displayPath
+	string
+	Yes
+	Read-only
+	Example: Panvel, Raigad, Maharashtra.
+	
+
+3.4 ListingCard
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listingId
+	uuid
+	Yes
+	Read-only
+	Listing identifier.
+	listingCode
+	string
+	Yes
+	Read-only
+	Human/public code.
+	propertyId
+	uuid
+	Yes
+	Read-only
+	Physical property ID.
+	title
+	string
+	Yes
+	Read-only
+	Listing title.
+	propertyType
+	object
+	Yes
+	{id,code,name}
+	Land type.
+	transactionType
+	string
+	Yes
+	SALE/LEASE
+	Commercial intent.
+	priceAmountMinor
+	integer
+	Yes
+	>=0
+	Price in paise.
+	priceDisplay
+	string
+	Yes
+	Read-only
+	Backend/UI-friendly formatted price.
+	areaValue
+	number
+	Yes
+	Read-only
+	Display area value.
+	areaUnit
+	object
+	Yes
+	{id,code,name}
+	Display unit.
+	location
+	LocationSummary
+	Yes
+	Read-only
+	Primary location.
+	thumbnailUrl
+	url|null
+	No
+	Read-only
+	Cover image.
+	isPremium
+	boolean
+	Yes
+	Read-only
+	Active premium promotion.
+	verificationLabel
+	string|null
+	No
+	Read-only
+	Verification badge label.
+	publishedAt
+	datetime|null
+	No
+	ISO-8601
+	Listing publication time.
+	isFavorite
+	boolean
+	Yes
+	Read-only; auth-aware
+	Favorite state for current user.
+	
+
+3.5 Role
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Role ID.
+	code
+	string
+	Yes
+	UserRole
+	Stable role code.
+	name
+	string
+	Yes
+	Read-only
+	Display name.
+	
+
+3.6 UserProfile
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...userSummaryFields
+	same as UserSummary
+	Yes
+	Read-only
+	Includes all UserSummary fields.
+	firstName
+	string|null
+	No
+	
+
+	First name.
+	lastName
+	string|null
+	No
+	
+
+	Last name.
+	phoneVerifiedAt
+	datetime|null
+	No
+	
+
+	Phone verification time.
+	emailVerifiedAt
+	datetime|null
+	No
+	
+
+	Email verification time.
+	lastLoginAt
+	datetime|null
+	No
+	
+
+	Last successful login.
+	createdAt
+	datetime
+	Yes
+	
+
+	Account creation time.
+	
+
+3.7 Acknowledgement
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	message
+	string|null
+	No
+	
+
+	Human-readable acknowledgement.
+	status
+	string|null
+	No
+	
+
+	Optional machine state.
+	requestId
+	string|null
+	No
+	
+
+	Trace ID when returned.
+	
+
+3.8 RefreshRequest
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	refreshToken
+	string|null
+	Conditional
+	Required for non-cookie/mobile flow
+	Omit for web flow using secure HttpOnly refresh cookie.
+	
+
+3.9 AddSelfRole
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	roleCode
+	string
+	Yes
+	SELLER/BROKER/DEVELOPER/CHANNEL_PARTNER/CORPORATE as allowed
+	Role/capability user wants to enable. Admin role cannot be self-assigned.
+	
+
+3.10 Amenity
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Amenity ID.
+	code
+	string
+	Yes
+	
+
+	Stable code.
+	name
+	string
+	Yes
+	
+
+	Display label.
+	category
+	string|null
+	No
+	
+
+	Grouping such as UTILITIES/ACCESS.
+	sortOrder
+	integer
+	Yes
+	
+
+	UI ordering.
+	
+
+3.11 DocumentType
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Document type ID.
+	code
+	string
+	Yes
+	
+
+	Stable code.
+	name
+	string
+	Yes
+	
+
+	Display label.
+	stateCode
+	string|null
+	No
+	
+
+	State-specific document type when applicable.
+	sortOrder
+	integer
+	Yes
+	
+
+	UI ordering.
+	
+
+3.12 FileUploadInit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	fileName
+	string
+	Yes
+	<=255
+	Original file name.
+	mimeType
+	string
+	Yes
+	Allowed MIME
+	File MIME type.
+	fileSizeBytes
+	integer
+	Yes
+	Within configured max
+	File size in bytes.
+	
+
+________________
+
+
+4. Backend Dev 1 - UI Integration Contract
+Dev 1 owns database design/migrations, auth/users, locations, property/land/listing domain, search, verification, scanner and Phase 1 AI.
+4.1 Authentication & Current User
+Owner: Backend Dev 1   |   UI surfaces: Login, OTP, profile, session
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/auth/otp/request
+	Public
+	OtpRequest
+	OtpChallenge
+	POST
+	/auth/otp/verify
+	Public
+	OtpVerify
+	AuthSession
+	POST
+	/auth/refresh
+	Refresh session
+	RefreshRequest / cookie
+	AuthSession
+	POST
+	/auth/logout
+	Authenticated
+	none
+	Acknowledgement
+	POST
+	/auth/logout-all
+	Authenticated
+	none
+	Acknowledgement
+	GET
+	/users/me
+	Authenticated
+	none
+	UserProfile
+	PATCH
+	/users/me
+	Authenticated
+	UpdateUserProfile
+	UserProfile
+	GET
+	/users/me/roles
+	Authenticated
+	none
+	Role[]
+	POST
+	/users/me/roles
+	Authenticated
+	AddSelfRole
+	Role[]
+	
+
+OtpRequest
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	destination
+	string
+	Yes
+	E.164 phone or valid email
+	Phone/email to receive OTP.
+	channel
+	string
+	Yes
+	SMS or EMAIL
+	Delivery channel.
+	purpose
+	string
+	Yes
+	LOGIN, REGISTER, VERIFY_PHONE, VERIFY_EMAIL
+	Reason for OTP.
+	countryCode
+	string|null
+	No
+	e.g. +91
+	Optional helper when UI sends local phone number.
+	
+
+OtpChallenge
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	challengeId
+	uuid
+	Yes
+	Read-only
+	Use in verify call.
+	destinationMasked
+	string
+	Yes
+	Read-only
+	Masked phone/email.
+	expiresInSeconds
+	integer
+	Yes
+	Read-only
+	Countdown for UI.
+	resendAfterSeconds
+	integer
+	Yes
+	Read-only
+	Resend enable timer.
+	
+
+OtpVerify
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	challengeId
+	uuid
+	Yes
+	Existing challenge
+	OTP challenge.
+	otp
+	string
+	Yes
+	Usually 4-6 digits
+	User-entered OTP.
+	deviceId
+	string|null
+	No
+	<=255
+	Stable client-generated device ID.
+	deviceName
+	string|null
+	No
+	<=255
+	Example: Chrome on Mac.
+	
+
+AuthSession
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	accessToken
+	string
+	Yes
+	JWT
+	Use as bearer token.
+	accessTokenExpiresIn
+	integer
+	Yes
+	seconds
+	Access token TTL.
+	refreshToken
+	string|null
+	Conditional
+	Mobile clients; web may use HttpOnly cookie
+	Refresh token when API policy returns it.
+	refreshTokenExpiresIn
+	integer
+	Yes
+	seconds
+	Refresh TTL.
+	user
+	UserSummary
+	Yes
+	Read-only
+	Logged-in user.
+	
+
+UpdateUserProfile
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	firstName
+	string|null
+	No
+	<=100
+	First name.
+	lastName
+	string|null
+	No
+	<=100
+	Last name.
+	displayName
+	string|null
+	No
+	<=200
+	Display name.
+	email
+	string|null
+	No
+	Valid email
+	Changing verified email may require verification.
+	preferredLanguage
+	string|null
+	No
+	en/hi/mr/gu/pa/te/ta
+	Language preference.
+	
+
+4.2 User Administration
+Owner: Backend Dev 1   |   UI surfaces: Admin > Users
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/admin/users
+	ADMIN
+	UserListQuery
+	UserSummary[] + PaginationMeta
+	GET
+	/admin/users/{userId}
+	ADMIN
+	path userId
+	UserProfile
+	PATCH
+	/admin/users/{userId}/status
+	ADMIN
+	UpdateUserStatus
+	UserProfile
+	PATCH
+	/admin/users/{userId}/roles
+	ADMIN
+	UpdateUserRoles
+	UserProfile
+	
+
+UserListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	search
+	string|null
+	No
+	<=200
+	Name/phone/email search.
+	status
+	string|null
+	No
+	UserStatus
+	Filter status.
+	role
+	string|null
+	No
+	UserRole
+	Filter role.
+	
+
+UpdateUserStatus
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	status
+	string
+	Yes
+	ACTIVE/BLOCKED
+	New status.
+	reason
+	string|null
+	No
+	<=500
+	Admin reason/audit note.
+	
+
+UpdateUserRoles
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	roles
+	string[]
+	Yes
+	UserRole[]
+	Full desired role set.
+	reason
+	string|null
+	No
+	<=500
+	Audit note.
+	
+
+4.3 Property Masters
+Owner: Backend Dev 1   |   UI surfaces: All listing/search dropdowns
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/property-types
+	Public
+	none
+	MasterOption[]
+	GET
+	/land-use-types
+	Public
+	none
+	MasterOption[]
+	GET
+	/ownership-types
+	Public
+	none
+	MasterOption[]
+	GET
+	/area-units
+	Public
+	stateCode?
+	AreaUnit[]
+	GET
+	/amenities
+	Public
+	category?
+	Amenity[]
+	GET
+	/document-types
+	Authenticated
+	stateCode?
+	DocumentType[]
+	GET
+	/parcel-config/{stateCode}
+	Authenticated
+	path stateCode
+	ParcelConfig
+	
+
+MasterOption
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Master ID.
+	code
+	string
+	Yes
+	Read-only
+	Stable code.
+	name
+	string
+	Yes
+	Localized/display name
+	UI label.
+	sortOrder
+	integer
+	Yes
+	Read-only
+	Ordering.
+	
+
+AreaUnit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Unit ID.
+	code
+	string
+	Yes
+	SQFT/SQM/SQYD/ACRE/...
+	Stable unit code.
+	name
+	string
+	Yes
+	Read-only
+	Display label.
+	stateCode
+	string|null
+	No
+	Read-only
+	State-specific unit if applicable.
+	sqftMultiplier
+	number
+	Yes
+	Read-only
+	Conversion multiplier for display helpers.
+	
+
+ParcelConfig
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	stateCode
+	string
+	Yes
+	Read-only
+	Selected state.
+	supportedIdentifiers
+	object[]
+	Yes
+	Read-only
+	Each item: type, label, required, placeholder.
+	notes
+	string|null
+	No
+	Read-only
+	State-specific UI note.
+	
+
+4.4 Locations & Geo
+Owner: Backend Dev 1   |   UI surfaces: Home search, filters, listing location, maps
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/locations/search
+	Public
+	LocationSearchQuery
+	LocationSummary[]
+	GET
+	/locations/{locationId}
+	Public
+	path locationId
+	LocationSummary
+	GET
+	/locations/{locationId}/children
+	Public
+	type?
+	LocationSummary[]
+	GET
+	/locations/pincode/{pincode}
+	Public
+	path pincode
+	LocationSummary[]
+	GET
+	/locations/states
+	Public
+	none
+	LocationSummary[]
+	GET
+	/locations/states/{stateId}/districts
+	Public
+	path stateId
+	LocationSummary[]
+	GET
+	/locations/districts/{districtId}/cities
+	Public
+	path districtId
+	LocationSummary[]
+	GET
+	/locations/cities/{cityId}/localities
+	Public
+	path cityId
+	LocationSummary[]
+	GET
+	/geo/geocode
+	Authenticated
+	q
+	GeoResult[]
+	GET
+	/geo/reverse-geocode
+	Authenticated
+	lat,lng
+	GeoResult
+	
+
+LocationSearchQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	q
+	string
+	Yes
+	2-100 chars
+	Search text.
+	types
+	string[]|null
+	No
+	Location type[]
+	Limit types.
+	stateCode
+	string|null
+	No
+	e.g. MH
+	Optional state scope.
+	limit
+	integer
+	No
+	1-25; default 10
+	Suggestion count.
+	
+
+GeoResult
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	latitude
+	number
+	Yes
+	-90..90
+	Latitude.
+	longitude
+	number
+	Yes
+	-180..180
+	Longitude.
+	formattedAddress
+	string
+	Yes
+	Read-only
+	Resolved address.
+	locationId
+	uuid|null
+	No
+	Read-only
+	Matched internal location.
+	pincode
+	string|null
+	No
+	6 digits for India
+	Postal code if found.
+	
+
+4.5 Physical Property Core
+Owner: Backend Dev 1   |   UI surfaces: Add/Edit Property wizard
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/properties
+	SELLER/BROKER/DEVELOPER
+	CreateProperty
+	PropertyCore
+	GET
+	/properties/{propertyId}
+	Owner/Admin
+	path propertyId
+	PropertyCore
+	PATCH
+	/properties/{propertyId}
+	Owner/Admin
+	UpdateProperty
+	PropertyCore
+	DELETE
+	/properties/{propertyId}
+	Owner/Admin
+	path propertyId
+	204
+	GET
+	/properties/me
+	Authenticated seller
+	PropertyListQuery
+	PropertyCore[] + PaginationMeta
+	
+
+CreateProperty
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyTypeId
+	uuid
+	Yes
+	Valid master ID
+	Physical land type.
+	landUseTypeId
+	uuid|null
+	No
+	Valid master ID
+	Current/permitted land-use classification used in Phase 1.
+	ownershipTypeId
+	uuid|null
+	No
+	Valid master ID
+	Ownership type.
+	organizationId
+	uuid|null
+	No
+	Must belong to user
+	Optional owner/broker organization context.
+	
+
+PropertyCore
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Property ID.
+	publicCode
+	string
+	Yes
+	Read-only
+	Example ZMN-P-000123.
+	propertyType
+	MasterOption
+	Yes
+	Read-only
+	Property type.
+	landUseType
+	MasterOption|null
+	No
+	Read-only
+	Land use.
+	ownershipType
+	MasterOption|null
+	No
+	Read-only
+	Ownership.
+	source
+	string
+	Yes
+	USER/ADMIN/PARTNER
+	Origin.
+	status
+	string
+	Yes
+	ACTIVE/ARCHIVED
+	Physical property status.
+	completionPercent
+	integer
+	Yes
+	0-100
+	Wizard progress.
+	createdAt
+	datetime
+	Yes
+	Read-only
+	Created timestamp.
+	updatedAt
+	datetime
+	Yes
+	Read-only
+	Updated timestamp.
+	
+
+UpdateProperty
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyTypeId
+	uuid|null
+	No
+	Valid master ID
+	Update type.
+	landUseTypeId
+	uuid|null
+	No
+	Valid master ID
+	Update land use.
+	ownershipTypeId
+	uuid|null
+	No
+	Valid master ID
+	Update ownership.
+	
+
+PropertyListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	ACTIVE/ARCHIVED
+	Physical property status.
+	search
+	string|null
+	No
+	<=200
+	Code/location/listing title helper search.
+	
+
+4.6 Land Details
+Owner: Backend Dev 1   |   UI surfaces: Add Property > Land Details
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/properties/{propertyId}/land-details
+	Owner/Admin
+	path propertyId
+	LandDetails
+	PUT
+	/properties/{propertyId}/land-details
+	Owner/Admin
+	LandDetailsInput
+	LandDetails
+	
+
+LandDetailsInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	areaValue
+	number
+	Yes
+	>0
+	Area as entered.
+	areaUnitId
+	uuid
+	Yes
+	Valid area unit
+	Display/input unit.
+	lengthValue
+	number|null
+	No
+	>0
+	Length.
+	widthValue
+	number|null
+	No
+	>0
+	Width.
+	dimensionUnit
+	string|null
+	No
+	FT/M
+	Dimension unit.
+	frontageM
+	number|null
+	No
+	>=0
+	Normalized frontage in meters.
+	roadWidthM
+	number|null
+	No
+	>=0
+	Road width in meters.
+	roadType
+	string|null
+	No
+	PUCCA/KUTCHA/HIGHWAY/OTHER
+	Road type.
+	facing
+	string|null
+	No
+	N/NE/E/SE/S/SW/W/NW
+	Plot facing.
+	openSides
+	integer|null
+	No
+	0-4
+	Number of open sides.
+	isCornerPlot
+	boolean
+	No
+	default false
+	Corner property.
+	hasBoundaryWall
+	boolean|null
+	No
+	true/false
+	Boundary wall.
+	terrain
+	string|null
+	No
+	FLAT/SLOPED/UNEVEN/OTHER
+	Terrain.
+	roadAccessType
+	string|null
+	No
+	DIRECT/SHARED/NO_DIRECT/OTHER
+	Road access.
+	
+
+LandDetails
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...inputFields
+	same as input
+	Yes
+	Read-only where derived
+	Returns all LandDetailsInput fields.
+	normalizedAreaSqft
+	number
+	Yes
+	Read-only
+	Canonical area used for search/conversion.
+	pricePerSqftHint
+	number|null
+	No
+	Read-only if listing context known
+	Optional helper only when endpoint includes listing context.
+	
+
+4.7 Parcel Identifiers
+Owner: Backend Dev 1   |   UI surfaces: Add Property > Land Record Details
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/properties/{propertyId}/parcel-identifiers
+	Owner/Admin
+	path propertyId
+	ParcelIdentifier[]
+	PUT
+	/properties/{propertyId}/parcel-identifiers
+	Owner/Admin
+	ParcelIdentifiersInput
+	ParcelIdentifier[]
+	
+
+ParcelIdentifiersInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	identifiers
+	object[]
+	Yes
+	Unique type/value per property
+	Array of parcel identifiers.
+	
+
+ParcelIdentifier
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid|null
+	No
+	Read-only after save
+	Identifier row ID.
+	type
+	string
+	Yes
+	From parcel-config
+	SURVEY_NUMBER/GAT_NUMBER/KHASRA_NUMBER/CTS_NUMBER/KHATA_NUMBER/PLOT_NUMBER etc.
+	value
+	string
+	Yes
+	1-255
+	Identifier value.
+	label
+	string|null
+	No
+	Read-only
+	Localized label for UI.
+	
+
+4.8 Property Location
+Owner: Backend Dev 1   |   UI surfaces: Add Property > Location / Property Detail Map
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/properties/{propertyId}/location
+	Owner/Admin
+	path propertyId
+	PropertyLocation
+	PUT
+	/properties/{propertyId}/location
+	Owner/Admin
+	PropertyLocationInput
+	PropertyLocation
+	
+
+PropertyLocationInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	locationId
+	uuid
+	Yes
+	Valid internal location
+	Nearest canonical locality/village/city.
+	pincode
+	string|null
+	No
+	6 digits
+	PIN code.
+	addressLine
+	string|null
+	No
+	<=500
+	Optional address text.
+	landmark
+	string|null
+	No
+	<=255
+	Nearby landmark.
+	latitude
+	number
+	Yes
+	-90..90
+	Map latitude.
+	longitude
+	number
+	Yes
+	-180..180
+	Map longitude.
+	locationPrecision
+	string
+	No
+	EXACT/APPROXIMATE
+	Precision.
+	showExactLocation
+	boolean
+	No
+	default false
+	Whether public detail can expose exact point.
+	
+
+PropertyLocation
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...inputFields
+	same as input
+	Yes
+	Read-only where derived
+	Saved location.
+	location
+	LocationSummary
+	Yes
+	Read-only
+	Canonical location object.
+	formattedAddress
+	string|null
+	No
+	Read-only
+	Resolved display address.
+	
+
+4.9 Property Amenities
+Owner: Backend Dev 1   |   UI surfaces: Add Property > Utilities/Amenities
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/properties/{propertyId}/amenities
+	Owner/Admin
+	path propertyId
+	PropertyAmenity[]
+	PUT
+	/properties/{propertyId}/amenities
+	Owner/Admin
+	PropertyAmenitiesInput
+	PropertyAmenity[]
+	
+
+PropertyAmenitiesInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	amenities
+	object[]
+	Yes
+	amenityId unique
+	Full desired list; PUT replaces prior selections.
+	
+
+PropertyAmenity
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	amenityId
+	uuid
+	Yes
+	Valid amenity master
+	Amenity ID.
+	code
+	string|null
+	No
+	Read-only
+	Master code.
+	name
+	string|null
+	No
+	Read-only
+	Display name.
+	valueText
+	string|null
+	No
+	<=255
+	Optional detail such as "Borewell available".
+	
+
+4.10 Property Media
+Owner: Backend Dev 1   |   UI surfaces: Image/video upload and gallery
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/properties/{propertyId}/media/upload-url
+	Owner/Admin
+	UploadInit
+	UploadTicket
+	POST
+	/properties/{propertyId}/media/complete
+	Owner/Admin
+	MediaComplete
+	MediaItem
+	GET
+	/properties/{propertyId}/media
+	Owner/Admin
+	none
+	MediaItem[]
+	PATCH
+	/properties/{propertyId}/media/{mediaId}
+	Owner/Admin
+	UpdateMedia
+	MediaItem
+	DELETE
+	/properties/{propertyId}/media/{mediaId}
+	Owner/Admin
+	none
+	204
+	PUT
+	/properties/{propertyId}/media/order
+	Owner/Admin
+	MediaOrderInput
+	MediaItem[]
+	PUT
+	/properties/{propertyId}/media/{mediaId}/cover
+	Owner/Admin
+	none
+	MediaItem[]
+	
+
+UploadInit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	fileName
+	string
+	Yes
+	<=255
+	Original file name.
+	mimeType
+	string
+	Yes
+	Allowed media/document MIME
+	Content type.
+	fileSizeBytes
+	integer
+	Yes
+	Within configured max
+	File size.
+	mediaType
+	string|null
+	Conditional
+	IMAGE/VIDEO/DRONE_VIDEO/SITE_PLAN
+	Required for media upload, omitted for document upload.
+	
+
+UploadTicket
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	uploadUrl
+	url
+	Yes
+	Short-lived signed URL
+	UI PUTs file bytes here.
+	storageKey
+	string
+	Yes
+	Opaque
+	Send back to complete endpoint.
+	expiresAt
+	datetime
+	Yes
+	ISO-8601
+	Signed URL expiry.
+	requiredHeaders
+	object
+	Yes
+	Read-only
+	Headers UI must send to storage provider.
+	
+
+MediaComplete
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	storageKey
+	string
+	Yes
+	From UploadTicket
+	Uploaded object key.
+	mediaType
+	string
+	Yes
+	IMAGE/VIDEO/DRONE_VIDEO/SITE_PLAN
+	Type.
+	sortOrder
+	integer|null
+	No
+	>=0
+	Gallery order.
+	isCover
+	boolean
+	No
+	default false
+	Set cover.
+	caption
+	string|null
+	No
+	<=255
+	Optional caption.
+	
+
+MediaItem
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Media ID.
+	mediaType
+	string
+	Yes
+	enum
+	Type.
+	url
+	url
+	Yes
+	Read-only
+	Public/signed delivery URL.
+	thumbnailUrl
+	url|null
+	No
+	Read-only
+	Thumbnail.
+	mimeType
+	string|null
+	No
+	Read-only
+	MIME.
+	sortOrder
+	integer
+	Yes
+	Read-only
+	Ordering.
+	isCover
+	boolean
+	Yes
+	Read-only
+	Cover flag.
+	caption
+	string|null
+	No
+	Read-only
+	Caption.
+	
+
+UpdateMedia
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	caption
+	string|null
+	No
+	<=255
+	Caption.
+	sortOrder
+	integer|null
+	No
+	>=0
+	Order.
+	
+
+MediaOrderInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	mediaIds
+	uuid[]
+	Yes
+	Must belong to property
+	IDs in desired order.
+	
+
+4.11 Property Documents
+Owner: Backend Dev 1   |   UI surfaces: Private property documents / verification
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/properties/{propertyId}/documents/upload-url
+	Owner/Admin
+	DocumentUploadInit
+	UploadTicket
+	POST
+	/properties/{propertyId}/documents/complete
+	Owner/Admin
+	DocumentComplete
+	DocumentItem
+	GET
+	/properties/{propertyId}/documents
+	Owner/Admin
+	none
+	DocumentItem[]
+	GET
+	/properties/{propertyId}/documents/{documentId}
+	Authorized
+	none
+	DocumentItem + downloadUrl when allowed
+	DELETE
+	/properties/{propertyId}/documents/{documentId}
+	Owner/Admin
+	none
+	204
+	
+
+DocumentUploadInit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	fileName
+	string
+	Yes
+	<=255
+	Original name.
+	mimeType
+	string
+	Yes
+	PDF/JPG/PNG initially
+	File type.
+	fileSizeBytes
+	integer
+	Yes
+	Within configured max
+	Size.
+	
+
+DocumentComplete
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	storageKey
+	string
+	Yes
+	From UploadTicket
+	Object key.
+	documentTypeId
+	uuid
+	Yes
+	Valid document type
+	Document category.
+	fileName
+	string
+	Yes
+	<=255
+	Original name.
+	mimeType
+	string
+	Yes
+	Allowed MIME
+	Content type.
+	fileSizeBytes
+	integer
+	Yes
+	>0
+	Size.
+	visibility
+	string
+	No
+	PRIVATE/OWNER_ONLY/APPROVED_BUYERS
+	Default PRIVATE.
+	
+
+DocumentItem
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Document ID.
+	documentType
+	MasterOption
+	Yes
+	Read-only
+	Type.
+	fileName
+	string
+	Yes
+	Read-only
+	Name.
+	mimeType
+	string
+	Yes
+	Read-only
+	MIME.
+	fileSizeBytes
+	integer
+	Yes
+	Read-only
+	Size.
+	visibility
+	string
+	Yes
+	Read-only
+	Visibility.
+	verificationStatus
+	string
+	Yes
+	NOT_REVIEWED/PENDING/VERIFIED/REJECTED
+	Review state.
+	downloadUrl
+	url|null
+	No
+	Short-lived/read-authorized
+	Only returned when current user can download.
+	createdAt
+	datetime
+	Yes
+	Read-only
+	Upload time.
+	
+
+4.12 Listing Creation & Management
+Owner: Backend Dev 1   |   UI surfaces: Seller listing wizard, seller inventory
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/properties/{propertyId}/listings
+	SELLER/BROKER/DEVELOPER
+	CreateListing
+	Listing
+	GET
+	/listings/{listingId}
+	Owner/Admin
+	none
+	Listing
+	PATCH
+	/listings/{listingId}
+	Owner/Admin
+	UpdateListing
+	Listing
+	DELETE
+	/listings/{listingId}
+	Owner/Admin
+	none
+	204
+	GET
+	/seller/listings
+	Authenticated seller
+	SellerListingQuery
+	ListingCard[] + PaginationMeta
+	
+
+CreateListing
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	organizationId
+	uuid|null
+	No
+	User must be member
+	Seller organization when applicable.
+	transactionType
+	string
+	Yes
+	SALE/LEASE
+	Sale/lease.
+	title
+	string
+	Yes
+	10-255
+	Listing title.
+	description
+	string
+	Yes
+	20-5000
+	Listing description.
+	canonicalLanguage
+	string
+	No
+	default en
+	Language of seller-entered text.
+	priceAmountMinor
+	integer
+	Yes
+	>0
+	Asking price in paise.
+	currency
+	string
+	No
+	INR in Phase 1
+	Currency.
+	isNegotiable
+	boolean
+	No
+	default false
+	Negotiable flag.
+	
+
+UpdateListing
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	transactionType
+	string|null
+	No
+	SALE/LEASE
+	Update transaction type.
+	title
+	string|null
+	No
+	10-255
+	Title.
+	description
+	string|null
+	No
+	20-5000
+	Description.
+	priceAmountMinor
+	integer|null
+	No
+	>0
+	Price.
+	isNegotiable
+	boolean|null
+	No
+	true/false
+	Negotiable.
+	canonicalLanguage
+	string|null
+	No
+	supported language
+	Content language.
+	
+
+Listing
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	Read-only
+	Listing ID.
+	listingCode
+	string
+	Yes
+	Read-only
+	Public code.
+	propertyId
+	uuid
+	Yes
+	Read-only
+	Physical property.
+	seller
+	UserSummary
+	Yes
+	Read-only
+	Seller.
+	organization
+	object|null
+	No
+	Read-only
+	Organization summary.
+	transactionType
+	string
+	Yes
+	SALE/LEASE
+	Transaction.
+	title
+	string
+	Yes
+	
+
+	Title.
+	description
+	string
+	Yes
+	
+
+	Description.
+	priceAmountMinor
+	integer
+	Yes
+	paise
+	Asking price.
+	currency
+	string
+	Yes
+	INR
+	Currency.
+	isNegotiable
+	boolean
+	Yes
+	
+
+	Negotiable.
+	reviewStatus
+	string
+	Yes
+	ListingReviewStatus
+	Moderation.
+	status
+	string
+	Yes
+	ListingStatus
+	Marketplace lifecycle.
+	rejectionReason
+	string|null
+	No
+	
+
+	Reason.
+	submittedAt
+	datetime|null
+	No
+	
+
+	Submission time.
+	publishedAt
+	datetime|null
+	No
+	
+
+	Publication time.
+	expiresAt
+	datetime|null
+	No
+	
+
+	Expiry.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+SellerListingQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	ListingStatus
+	Lifecycle filter.
+	reviewStatus
+	string|null
+	No
+	ListingReviewStatus
+	Moderation filter.
+	search
+	string|null
+	No
+	<=200
+	Title/code/location search.
+	
+
+4.13 Listing Workflow & Admin Moderation
+Owner: Backend Dev 1   |   UI surfaces: Seller actions and Admin > Listings
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/listings/{listingId}/submit
+	Owner
+	none
+	Listing
+	POST
+	/listings/{listingId}/pause
+	Owner
+	none
+	Listing
+	POST
+	/listings/{listingId}/resume
+	Owner
+	none
+	Listing
+	POST
+	/listings/{listingId}/withdraw
+	Owner
+	ActionReason?
+	Listing
+	POST
+	/listings/{listingId}/mark-sold
+	Owner
+	ActionReason?
+	Listing
+	GET
+	/admin/listings
+	ADMIN
+	AdminListingQuery
+	ListingCard[] + PaginationMeta
+	GET
+	/admin/listings/{listingId}
+	ADMIN
+	none
+	ListingDetail
+	POST
+	/admin/listings/{listingId}/approve
+	ADMIN
+	AdminApproveListing
+	Listing
+	POST
+	/admin/listings/{listingId}/reject
+	ADMIN
+	ActionReason
+	Listing
+	POST
+	/admin/listings/{listingId}/suspend
+	ADMIN
+	ActionReason
+	Listing
+	
+
+ActionReason
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	reason
+	string
+	Yes
+	3-1000
+	Required reason/audit note.
+	
+
+AdminApproveListing
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	expiresAt
+	datetime|null
+	No
+	Future date
+	Optional explicit expiry; otherwise backend plan/default decides.
+	note
+	string|null
+	No
+	<=1000
+	Internal note.
+	
+
+AdminListingQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	reviewStatus
+	string|null
+	No
+	ListingReviewStatus
+	Moderation filter.
+	status
+	string|null
+	No
+	ListingStatus
+	Lifecycle filter.
+	propertyTypeId
+	uuid|null
+	No
+	Valid master
+	Land type.
+	locationId
+	uuid|null
+	No
+	Valid location
+	Location.
+	search
+	string|null
+	No
+	<=200
+	Title/code/seller search.
+	
+
+4.14 Public Listing Detail
+Owner: Backend Dev 1   |   UI surfaces: Property detail page
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/listings/{listingId}/detail
+	Public / auth-aware
+	path listingId
+	ListingDetail
+	
+
+ListingDetail
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listing
+	Listing
+	Yes
+	Read-only
+	Commercial listing data.
+	property
+	PropertyCore
+	Yes
+	Read-only
+	Physical property.
+	landDetails
+	LandDetails
+	Yes
+	Read-only
+	Land attributes.
+	location
+	PropertyLocation
+	Yes
+	Exact point may be obfuscated
+	Location.
+	amenities
+	PropertyAmenity[]
+	Yes
+	Read-only
+	Amenities.
+	media
+	MediaItem[]
+	Yes
+	Read-only
+	Gallery.
+	parcelSummary
+	ParcelIdentifier[]
+	Yes
+	Public-safe subset
+	Identifiers visible under policy.
+	seller
+	object
+	Yes
+	PublicSellerSummary
+	Seller display data.
+	verification
+	VerificationSummary
+	Yes
+	Read-only
+	Trust status.
+	landPassport
+	LandPassportSummary
+	Yes
+	Read-only
+	Compact passport.
+	scanner
+	ScannerSummary
+	Yes
+	Read-only
+	Lite score.
+	isFavorite
+	boolean
+	Yes
+	auth-aware
+	Favorite state.
+	similarPreview
+	ListingCard[]
+	No
+	Optional
+	May be omitted if UI calls similar endpoint.
+	
+
+4.15 Search, Map, Similar & Compare
+Owner: Backend Dev 1   |   UI surfaces: Home/search/map/detail compare
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/search/listings
+	Public / auth-aware
+	ListingSearchInput
+	ListingCard[] + PaginationMeta
+	GET
+	/search/suggestions
+	Public
+	q,limit
+	SearchSuggestion[]
+	POST
+	/search/map
+	Public / auth-aware
+	MapSearchInput
+	MapPin[]
+	GET
+	/listings/{listingId}/similar
+	Public / auth-aware
+	limit?
+	ListingCard[]
+	POST
+	/listings/compare
+	Public / auth-aware
+	CompareInput
+	CompareResult
+	
+
+ListingSearchInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	locationIds
+	uuid[]
+	No
+	Valid locations
+	Locations.
+	propertyTypeIds
+	uuid[]
+	No
+	Valid master IDs
+	Land types.
+	transactionTypes
+	string[]
+	No
+	SALE/LEASE
+	Transaction filter.
+	minPriceMinor
+	integer|null
+	No
+	>=0
+	Minimum price.
+	maxPriceMinor
+	integer|null
+	No
+	>= min
+	Maximum price.
+	minArea
+	number|null
+	No
+	>=0
+	Minimum area in selected input unit.
+	maxArea
+	number|null
+	No
+	>= minArea
+	Maximum area.
+	areaUnitId
+	uuid|null
+	Conditional
+	Required when min/maxArea sent
+	Input area unit.
+	verifiedOnly
+	boolean
+	No
+	default false
+	Verified listings only.
+	minRoadWidthM
+	number|null
+	No
+	>=0
+	Minimum road width.
+	facing
+	string[]
+	No
+	N/NE/E/SE/S/SW/W/NW
+	Facing filter.
+	cornerPlot
+	boolean|null
+	No
+	
+
+	Corner filter.
+	sellerType
+	string[]|null
+	No
+	OWNER/BROKER/DEVELOPER
+	Seller type.
+	sort
+	string
+	No
+	RELEVANCE/NEWEST/PRICE_ASC/PRICE_DESC/AREA_ASC/AREA_DESC
+	Sort.
+	page
+	integer
+	No
+	>=1
+	Page.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	
+
+SearchSuggestion
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	type
+	string
+	Yes
+	LOCATION/PROPERTY_TYPE/POPULAR_SEARCH
+	Suggestion type.
+	label
+	string
+	Yes
+	
+
+	Display label.
+	value
+	string
+	Yes
+	
+
+	ID/code/text sent into next search.
+	secondaryLabel
+	string|null
+	No
+	
+
+	Example district/state.
+	
+
+MapSearchInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	bounds.north
+	number
+	Yes
+	-90..90
+	Map north.
+	bounds.south
+	number
+	Yes
+	-90..90
+	South.
+	bounds.east
+	number
+	Yes
+	-180..180
+	East.
+	bounds.west
+	number
+	Yes
+	-180..180
+	West.
+	filters
+	ListingSearchInput subset
+	No
+	No page/sort required
+	Same marketplace filters.
+	maxPins
+	integer
+	No
+	1-1000
+	Backend may cap/cluster.
+	
+
+MapPin
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listingId
+	uuid
+	Yes
+	Read-only
+	Listing ID.
+	latitude
+	number
+	Yes
+	
+
+	Latitude.
+	longitude
+	number
+	Yes
+	
+
+	Longitude.
+	priceAmountMinor
+	integer
+	Yes
+	
+
+	Price.
+	priceDisplay
+	string
+	Yes
+	
+
+	Formatted price.
+	areaDisplay
+	string
+	Yes
+	
+
+	Formatted area.
+	propertyTypeName
+	string
+	Yes
+	
+
+	Land type.
+	thumbnailUrl
+	url|null
+	No
+	
+
+	Thumbnail.
+	isPremium
+	boolean
+	Yes
+	
+
+	Premium flag.
+	
+
+CompareInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listingIds
+	uuid[]
+	Yes
+	2-4 unique IDs
+	Listings to compare.
+	
+
+CompareResult
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listings
+	ListingCard[]
+	Yes
+	Read-only
+	Compared listings.
+	rows
+	object[]
+	Yes
+	Read-only
+	Each row: key,label,valuesByListingId.
+	aiSummaryAvailable
+	boolean
+	Yes
+	Read-only
+	UI can offer AI summary if enabled.
+	
+
+4.16 Verification, Land Passport & Scanner Lite
+Owner: Backend Dev 1   |   UI surfaces: Trust layer, seller and admin verification screens
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/properties/{propertyId}/verification/request
+	Owner
+	VerificationRequest
+	VerificationSummary
+	GET
+	/properties/{propertyId}/verification
+	Owner/Admin/Public-safe
+	none
+	VerificationSummary
+	GET
+	/properties/{propertyId}/land-passport
+	Public / auth-aware
+	none
+	LandPassport
+	GET
+	/properties/{propertyId}/scanner
+	Public / auth-aware
+	none
+	ScannerResult
+	GET
+	/admin/verifications
+	ADMIN
+	VerificationListQuery
+	VerificationSummary[] + PaginationMeta
+	GET
+	/admin/verifications/{verificationId}
+	ADMIN
+	none
+	VerificationDetail
+	PATCH
+	/admin/verifications/{verificationId}
+	ADMIN
+	UpdateVerification
+	VerificationDetail
+	
+
+VerificationRequest
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	checkTypes
+	string[]|null
+	No
+	LOCATION/LAND_DETAILS/PARCEL_IDENTITY/DOCUMENTS/SITE_VISIT
+	Null means request applicable default checks.
+	note
+	string|null
+	No
+	<=500
+	Seller note.
+	
+
+VerificationSummary
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyId
+	uuid
+	Yes
+	
+
+	Property.
+	overallStatus
+	string
+	Yes
+	VerificationStatus
+	Overall status.
+	checks
+	object[]
+	Yes
+	
+
+	Each: checkType,status,reviewedAt,publicNote.
+	lastUpdatedAt
+	datetime
+	Yes
+	
+
+	Latest update.
+	
+
+UpdateVerification
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	checkType
+	string
+	Yes
+	Verification check type
+	Check being reviewed.
+	status
+	string
+	Yes
+	PENDING/VERIFIED/REJECTED/PARTIAL
+	New status.
+	publicNote
+	string|null
+	No
+	<=500
+	Safe note visible to user.
+	internalNote
+	string|null
+	No
+	<=1000
+	Admin-only note.
+	
+
+LandPassport
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyId
+	uuid
+	Yes
+	
+
+	Property.
+	passportCode
+	string
+	Yes
+	
+
+	Display ID.
+	sellerVerification
+	string
+	Yes
+	
+
+	Seller status.
+	locationVerification
+	string
+	Yes
+	
+
+	Location status.
+	parcelInformationAvailable
+	boolean
+	Yes
+	
+
+	Parcel data present.
+	documentCount
+	integer
+	Yes
+	
+
+	Submitted docs.
+	verifiedDocumentCount
+	integer
+	Yes
+	
+
+	Verified docs.
+	propertyCompletionPercent
+	integer
+	Yes
+	0-100
+	Completeness.
+	overallVerificationStatus
+	string
+	Yes
+	VerificationStatus
+	Overall.
+	lastVerifiedAt
+	datetime|null
+	No
+	
+
+	Last verification.
+	
+
+ScannerResult
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyId
+	uuid
+	Yes
+	
+
+	Property.
+	readinessScore
+	integer
+	Yes
+	0-100
+	Rule-based score.
+	sections
+	object[]
+	Yes
+	
+
+	Each: key,label,score,maxScore,status.
+	missingItems
+	object[]
+	Yes
+	
+
+	Each: code,label,severity.
+	disclaimer
+	string
+	Yes
+	
+
+	Must be shown by UI near score.
+	generatedAt
+	datetime
+	Yes
+	
+
+	Generation timestamp.
+	
+
+VerificationListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	VerificationStatus
+	Overall status filter.
+	checkType
+	string|null
+	No
+	Verification check type
+	Specific check filter.
+	search
+	string|null
+	No
+	<=200
+	Property code/listing/seller search.
+	
+
+VerificationDetail
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Verification request/check record ID.
+	summary
+	VerificationSummary
+	Yes
+	
+
+	Current property verification summary.
+	property
+	PropertyCore
+	Yes
+	
+
+	Property.
+	documents
+	DocumentItem[]
+	Yes
+	
+
+	Documents relevant to review.
+	internalNotes
+	object[]
+	Yes
+	
+
+	Admin-only history/note objects.
+	requestedAt
+	datetime
+	Yes
+	
+
+	Request time.
+	requestedBy
+	UserSummary
+	Yes
+	
+
+	Requester.
+	
+
+4.17 AI
+Owner: Backend Dev 1   |   UI surfaces: AI search, property chat, listing writer
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/ai/search
+	Public / auth-aware
+	AiSearchInput
+	AiSearchResult
+	POST
+	/ai/conversations
+	Public/auth
+	CreateAiConversation
+	AiConversation
+	POST
+	/ai/conversations/{conversationId}/messages
+	Conversation owner
+	AiMessageInput
+	AiMessage
+	GET
+	/ai/conversations/{conversationId}
+	Conversation owner
+	none
+	AiConversationDetail
+	POST
+	/ai/listing/generate
+	Authenticated seller
+	AiListingGenerateInput
+	AiListingGenerateResult
+	
+
+AiSearchInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	query
+	string
+	Yes
+	3-1000
+	Natural-language search.
+	language
+	string|null
+	No
+	supported language
+	Input/output language.
+	page
+	integer
+	No
+	>=1
+	Results page.
+	limit
+	integer
+	No
+	1-50
+	Result count.
+	
+
+AiSearchResult
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	normalizedQuery
+	string
+	Yes
+	
+
+	Backend normalized prompt.
+	parsedFilters
+	object
+	Yes
+	ListingSearchInput-compatible fields
+	Filters extracted by AI.
+	clarificationNeeded
+	boolean
+	Yes
+	
+
+	Whether query is too ambiguous.
+	clarificationQuestion
+	string|null
+	No
+	
+
+	Optional question.
+	results
+	ListingCard[]
+	Yes
+	
+
+	Matched listings.
+	meta
+	PaginationMeta
+	Yes
+	
+
+	Pagination.
+	
+
+CreateAiConversation
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	contextType
+	string
+	Yes
+	GENERAL/SEARCH/PROPERTY
+	Conversation context.
+	listingId
+	uuid|null
+	Conditional
+	Required for PROPERTY context
+	Listing context.
+	initialQuery
+	string|null
+	No
+	<=1000
+	Optional initial prompt.
+	
+
+AiConversation
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Conversation ID.
+	contextType
+	string
+	Yes
+	AiContextType
+	Context.
+	listingId
+	uuid|null
+	No
+	
+
+	Listing.
+	title
+	string|null
+	No
+	
+
+	Generated title.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+AiConversationDetail
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	conversation
+	AiConversation
+	Yes
+	
+
+	Conversation metadata.
+	messages
+	AiMessage[]
+	Yes
+	
+
+	Messages ordered oldest to newest.
+	listing
+	ListingCard|null
+	No
+	
+
+	Compact property/listing context when applicable.
+	
+
+AiMessageInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	content
+	string
+	Yes
+	1-4000
+	User message.
+	language
+	string|null
+	No
+	supported
+	Response language.
+	
+
+AiMessage
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Message ID.
+	role
+	string
+	Yes
+	USER/ASSISTANT
+	Role.
+	content
+	string
+	Yes
+	
+
+	Message text.
+	sources
+	object[]
+	No
+	Safe source references only
+	Property/content references used.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+AiListingGenerateInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyId
+	uuid|null
+	No
+	Owned property
+	If set backend can read existing fields.
+	propertyTypeId
+	uuid|null
+	No
+	
+
+	Property type when no propertyId.
+	locationText
+	string|null
+	No
+	<=255
+	Location.
+	areaText
+	string|null
+	No
+	<=100
+	Area.
+	priceText
+	string|null
+	No
+	<=100
+	Price.
+	roadWidthText
+	string|null
+	No
+	<=100
+	Road.
+	highlights
+	string[]|null
+	No
+	max 10
+	Seller-provided points.
+	language
+	string
+	No
+	default en
+	Output language.
+	
+
+AiListingGenerateResult
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	title
+	string
+	Yes
+	
+
+	Suggested title.
+	description
+	string
+	Yes
+	
+
+	Suggested description.
+	highlights
+	string[]
+	Yes
+	
+
+	Suggested bullets.
+	disclaimer
+	string|null
+	No
+	
+
+	Optional AI-generated content note.
+	
+
+________________
+
+
+5. Backend Dev 2 - UI Integration Contract
+Dev 2 owns marketplace interaction workflows, organizations, favorites, buyer requirements, leads/visits, commerce/services, CMS/intelligence, partner/investment/auction/ads and notifications. Schema changes still go through Dev 1.
+5.1 Organizations
+Owner: Backend Dev 2   |   UI surfaces: Broker/developer/corporate account screens
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/organizations
+	Authenticated
+	CreateOrganization
+	Organization
+	GET
+	/organizations/me
+	Authenticated
+	none
+	Organization[]
+	GET
+	/organizations/{organizationId}
+	Member/Public-safe
+	none
+	Organization
+	PATCH
+	/organizations/{organizationId}
+	Org owner/admin
+	UpdateOrganization
+	Organization
+	GET
+	/organizations/{organizationId}/members
+	Org member
+	none
+	OrganizationMember[]
+	POST
+	/organizations/{organizationId}/members
+	Org owner/admin
+	AddOrganizationMember
+	OrganizationMember
+	DELETE
+	/organizations/{organizationId}/members/{userId}
+	Org owner/admin
+	none
+	204
+	
+
+CreateOrganization
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	name
+	string
+	Yes
+	2-255
+	Organization name.
+	type
+	string
+	Yes
+	BROKERAGE/DEVELOPER/CORPORATE/AGENCY
+	Organization type.
+	phone
+	string|null
+	No
+	E.164
+	Contact phone.
+	email
+	string|null
+	No
+	Valid email
+	Contact email.
+	gstNumber
+	string|null
+	No
+	<=30
+	GSTIN when applicable.
+	reraNumber
+	string|null
+	No
+	<=100
+	RERA number.
+	logoStorageKey
+	string|null
+	No
+	Upload flow
+	Logo object key if uploaded.
+	
+
+Organization
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Organization ID.
+	name
+	string
+	Yes
+	
+
+	Name.
+	type
+	string
+	Yes
+	
+
+	Type.
+	slug
+	string|null
+	No
+	
+
+	Public slug.
+	phone
+	string|null
+	No
+	
+
+	Phone.
+	email
+	string|null
+	No
+	
+
+	Email.
+	gstNumber
+	string|null
+	No
+	
+
+	GST.
+	reraNumber
+	string|null
+	No
+	
+
+	RERA.
+	logoUrl
+	url|null
+	No
+	
+
+	Logo.
+	status
+	string
+	Yes
+	PENDING/ACTIVE/SUSPENDED
+	Status.
+	
+
+UpdateOrganization
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	name
+	string|null
+	No
+	2-255
+	Name.
+	phone
+	string|null
+	No
+	E.164
+	Phone.
+	email
+	string|null
+	No
+	Valid email
+	Email.
+	gstNumber
+	string|null
+	No
+	<=30
+	GST.
+	reraNumber
+	string|null
+	No
+	<=100
+	RERA.
+	logoStorageKey
+	string|null
+	No
+	
+
+	Logo key.
+	
+
+AddOrganizationMember
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	userId
+	uuid
+	Yes
+	Existing user
+	User to add.
+	role
+	string
+	Yes
+	OWNER/ADMIN/MEMBER
+	Organization role.
+	
+
+OrganizationMember
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	user
+	UserSummary
+	Yes
+	
+
+	User.
+	role
+	string
+	Yes
+	OWNER/ADMIN/MEMBER
+	Org role.
+	status
+	string
+	Yes
+	ACTIVE/INVITED/REMOVED
+	Membership status.
+	joinedAt
+	datetime|null
+	No
+	
+
+	Joined time.
+	
+
+5.2 Favorites, Recently Viewed & Buyer Requirements
+Owner: Backend Dev 2   |   UI surfaces: Buyer account, property cards
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/favorites/{listingId}
+	Authenticated
+	none
+	FavoriteState
+	DELETE
+	/favorites/{listingId}
+	Authenticated
+	none
+	204
+	GET
+	/favorites
+	Authenticated
+	page,limit
+	ListingCard[] + PaginationMeta
+	POST
+	/recently-viewed/{listingId}
+	Public/auth-aware
+	none
+	204/ack
+	GET
+	/recently-viewed
+	Authenticated
+	page,limit
+	ListingCard[] + PaginationMeta
+	POST
+	/buyer-requirements
+	Authenticated
+	BuyerRequirementInput
+	BuyerRequirement
+	GET
+	/buyer-requirements
+	Authenticated
+	status?,page,limit
+	BuyerRequirement[]
+	GET
+	/buyer-requirements/{requirementId}
+	Owner
+	none
+	BuyerRequirement
+	PATCH
+	/buyer-requirements/{requirementId}
+	Owner
+	BuyerRequirementInput partial
+	BuyerRequirement
+	DELETE
+	/buyer-requirements/{requirementId}
+	Owner
+	none
+	204
+	
+
+FavoriteState
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listingId
+	uuid
+	Yes
+	
+
+	Listing.
+	isFavorite
+	boolean
+	Yes
+	
+
+	Current state.
+	
+
+BuyerRequirementInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	name
+	string|null
+	No
+	<=255
+	User-defined label.
+	locationId
+	uuid|null
+	No
+	
+
+	Preferred area.
+	propertyTypeId
+	uuid|null
+	No
+	
+
+	Land type.
+	minArea
+	number|null
+	No
+	>=0
+	Minimum display area.
+	maxArea
+	number|null
+	No
+	>=minArea
+	Maximum.
+	areaUnitId
+	uuid|null
+	Conditional
+	Required with area
+	Unit.
+	minBudgetMinor
+	integer|null
+	No
+	>=0
+	Min budget.
+	maxBudgetMinor
+	integer|null
+	No
+	>=min
+	Max budget.
+	purpose
+	string|null
+	No
+	INVESTMENT/RESIDENTIAL/INDUSTRIAL/COMMERCIAL/WAREHOUSE/AGRICULTURE/OTHER
+	Buyer intent.
+	roadWidthMinM
+	number|null
+	No
+	>=0
+	Road width preference.
+	verifiedOnly
+	boolean
+	No
+	default false
+	Verified preference.
+	status
+	string|null
+	No
+	ACTIVE/PAUSED/CLOSED
+	Requirement status.
+	
+
+BuyerRequirement
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Requirement ID.
+	...inputFields
+	same as input
+	Yes
+	
+
+	Saved fields.
+	normalizedMinAreaSqft
+	number|null
+	No
+	
+
+	Derived.
+	normalizedMaxAreaSqft
+	number|null
+	No
+	
+
+	Derived.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	updatedAt
+	datetime
+	Yes
+	
+
+	Updated.
+	
+
+5.3 Enquiries, Leads & Contact Reveal
+Owner: Backend Dev 2   |   UI surfaces: Property CTA, buyer enquiries, seller lead CRM
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/listings/{listingId}/enquiries
+	Authenticated buyer
+	CreateEnquiry
+	Enquiry
+	GET
+	/buyer/enquiries
+	Authenticated
+	EnquiryListQuery
+	Enquiry[] + PaginationMeta
+	GET
+	/buyer/enquiries/{enquiryId}
+	Owner
+	none
+	EnquiryDetail
+	GET
+	/seller/enquiries
+	Seller
+	SellerEnquiryQuery
+	Enquiry[] + PaginationMeta
+	GET
+	/seller/enquiries/{enquiryId}
+	Seller
+	none
+	EnquiryDetail
+	PATCH
+	/seller/enquiries/{enquiryId}/status
+	Seller
+	UpdateEnquiryStatus
+	Enquiry
+	POST
+	/seller/enquiries/{enquiryId}/notes
+	Seller
+	CreateEnquiryNote
+	EnquiryNote
+	POST
+	/listings/{listingId}/contact-reveal
+	Authenticated buyer
+	ContactRevealInput?
+	ContactRevealResult
+	
+
+CreateEnquiry
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	enquiryType
+	string
+	Yes
+	EnquiryType
+	Type.
+	message
+	string|null
+	No
+	<=1000
+	Buyer message.
+	preferredContactChannel
+	string|null
+	No
+	PHONE/WHATSAPP/EMAIL
+	Optional preference.
+	
+
+Enquiry
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Enquiry ID.
+	listing
+	ListingCard
+	Yes
+	
+
+	Listing.
+	buyer
+	UserSummary
+	Yes
+	
+
+	Buyer; seller view.
+	enquiryType
+	string
+	Yes
+	EnquiryType
+	Type.
+	message
+	string|null
+	No
+	
+
+	Message.
+	status
+	string
+	Yes
+	EnquiryStatus
+	Lead state.
+	assignedTo
+	UserSummary|null
+	No
+	
+
+	Assigned seller/team member.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	updatedAt
+	datetime
+	Yes
+	
+
+	Updated.
+	
+
+EnquiryListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	EnquiryStatus
+	Filter.
+	listingId
+	uuid|null
+	No
+	
+
+	Listing filter.
+	
+
+SellerEnquiryQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	EnquiryStatus
+	Lead state.
+	listingId
+	uuid|null
+	No
+	
+
+	Listing.
+	search
+	string|null
+	No
+	<=200
+	Buyer/listing search.
+	
+
+UpdateEnquiryStatus
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	status
+	string
+	Yes
+	EnquiryStatus
+	New status.
+	
+
+CreateEnquiryNote
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	note
+	string
+	Yes
+	1-2000
+	Seller/internal note.
+	
+
+ContactRevealResult
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	listingId
+	uuid
+	Yes
+	
+
+	Listing.
+	sellerName
+	string
+	Yes
+	
+
+	Display name.
+	phoneE164
+	string|null
+	No
+	
+
+	Phone.
+	email
+	string|null
+	No
+	
+
+	Email.
+	whatsappE164
+	string|null
+	No
+	
+
+	WhatsApp.
+	organizationName
+	string|null
+	No
+	
+
+	Company.
+	leadCreated
+	boolean
+	Yes
+	
+
+	Whether interaction generated/linked to enquiry.
+	
+
+ContactRevealInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	preferredChannel
+	string|null
+	No
+	PHONE/WHATSAPP/EMAIL
+	Optional CTA channel. Endpoint may also accept an empty object.
+	
+
+EnquiryNote
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Note ID.
+	note
+	string
+	Yes
+	
+
+	Internal/seller note.
+	createdBy
+	UserSummary
+	Yes
+	
+
+	Author.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+EnquiryDetail
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	enquiry
+	Enquiry
+	Yes
+	
+
+	Enquiry record.
+	notes
+	EnquiryNote[]
+	Yes
+	
+
+	Seller notes where current user is authorized.
+	siteVisits
+	SiteVisit[]
+	Yes
+	
+
+	Related visits when available.
+	
+
+5.4 Site Visits
+Owner: Backend Dev 2   |   UI surfaces: Buyer and seller site-visit screens
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/listings/{listingId}/site-visits
+	Authenticated buyer
+	CreateSiteVisit
+	SiteVisit
+	GET
+	/buyer/site-visits
+	Authenticated buyer
+	VisitListQuery
+	SiteVisit[] + PaginationMeta
+	GET
+	/seller/site-visits
+	Seller
+	VisitListQuery
+	SiteVisit[] + PaginationMeta
+	POST
+	/site-visits/{visitId}/confirm
+	Seller
+	ConfirmSiteVisit
+	SiteVisit
+	POST
+	/site-visits/{visitId}/reschedule
+	Buyer/Seller as allowed
+	RescheduleSiteVisit
+	SiteVisit
+	POST
+	/site-visits/{visitId}/cancel
+	Participant
+	ActionReason?
+	SiteVisit
+	POST
+	/site-visits/{visitId}/complete
+	Seller
+	CompleteSiteVisit
+	SiteVisit
+	
+
+CreateSiteVisit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	preferredDate
+	date
+	Yes
+	Today/future
+	Requested visit date.
+	preferredTimeSlot
+	string
+	Yes
+	MORNING/AFTERNOON/EVENING or configured slot
+	Requested slot.
+	visitorCount
+	integer
+	No
+	1-20
+	Number of visitors.
+	note
+	string|null
+	No
+	<=500
+	Buyer note.
+	
+
+SiteVisit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Visit ID.
+	listing
+	ListingCard
+	Yes
+	
+
+	Listing.
+	buyer
+	UserSummary
+	Yes
+	
+
+	Buyer.
+	preferredDate
+	date
+	Yes
+	
+
+	Requested date.
+	preferredTimeSlot
+	string
+	Yes
+	
+
+	Requested slot.
+	scheduledAt
+	datetime|null
+	No
+	
+
+	Confirmed date/time.
+	visitorCount
+	integer
+	Yes
+	
+
+	Count.
+	status
+	string
+	Yes
+	SiteVisitStatus
+	State.
+	buyerNote
+	string|null
+	No
+	
+
+	Buyer note.
+	sellerNote
+	string|null
+	No
+	
+
+	Seller note.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+ConfirmSiteVisit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	scheduledAt
+	datetime
+	Yes
+	Future
+	Confirmed date/time.
+	sellerNote
+	string|null
+	No
+	<=500
+	Optional note.
+	
+
+RescheduleSiteVisit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	scheduledAt
+	datetime
+	Yes
+	Future
+	New date/time.
+	note
+	string|null
+	No
+	<=500
+	Reason/note.
+	
+
+CompleteSiteVisit
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	sellerNote
+	string|null
+	No
+	<=1000
+	Completion note.
+	enquiryStatus
+	string|null
+	No
+	INTERESTED/CLOSED/LOST
+	Optional lead update.
+	
+
+VisitListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	SiteVisitStatus
+	Filter.
+	fromDate
+	date|null
+	No
+	
+
+	Date range.
+	toDate
+	date|null
+	No
+	
+
+	Date range.
+	
+
+5.5 Seller Dashboard
+Owner: Backend Dev 2   |   UI surfaces: Seller dashboard summary
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/seller/dashboard
+	Seller
+	DashboardQuery
+	SellerDashboard
+	
+
+DashboardQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	from
+	date|null
+	No
+	
+
+	Optional reporting range.
+	to
+	date|null
+	No
+	
+
+	Optional reporting range.
+	organizationId
+	uuid|null
+	No
+	Must belong to user
+	Organization context.
+	
+
+SellerDashboard
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	activeListings
+	integer
+	Yes
+	
+
+	Active listing count.
+	draftListings
+	integer
+	Yes
+	
+
+	Drafts.
+	totalViews
+	integer
+	Yes
+	
+
+	Listing views in range.
+	newEnquiries
+	integer
+	Yes
+	
+
+	New leads.
+	totalEnquiries
+	integer
+	Yes
+	
+
+	All enquiries.
+	siteVisits
+	integer
+	Yes
+	
+
+	Visits.
+	premiumListings
+	integer
+	Yes
+	
+
+	Premium listings.
+	recentEnquiries
+	Enquiry[]
+	Yes
+	
+
+	Small recent list.
+	topListings
+	object[]
+	Yes
+	
+
+	listingId,title,views,enquiries.
+	
+
+5.6 Plans, Orders & Payments
+Owner: Backend Dev 2   |   UI surfaces: Pricing, checkout, purchase history
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/plans
+	Public
+	audience?
+	Plan[]
+	POST
+	/orders
+	Authenticated
+	CreateOrder
+	Order
+	GET
+	/orders/{orderId}
+	Order owner/Admin
+	none
+	Order
+	GET
+	/orders/me
+	Authenticated
+	page,limit,status?
+	Order[] + PaginationMeta
+	POST
+	/payments/{orderId}/create
+	Order owner
+	CreatePayment
+	PaymentIntent
+	POST
+	/payments/verify
+	Order owner
+	VerifyPayment
+	Payment
+	POST
+	/payments/webhook
+	Provider
+	provider payload
+	No UI use
+	POST
+	/admin/plans
+	ADMIN
+	CreatePlan
+	Plan
+	PATCH
+	/admin/plans/{planId}
+	ADMIN
+	UpdatePlan
+	Plan
+	POST
+	/admin/plans/{planId}/activate
+	ADMIN
+	none
+	Plan
+	POST
+	/admin/plans/{planId}/deactivate
+	ADMIN
+	none
+	Plan
+	
+
+Plan
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Plan ID.
+	code
+	string
+	Yes
+	
+
+	Stable code.
+	name
+	string
+	Yes
+	
+
+	Display name.
+	planType
+	string
+	Yes
+	FREE/PREMIUM/BROKER
+	Type.
+	description
+	string|null
+	No
+	
+
+	Description.
+	amountMinor
+	integer
+	Yes
+	>=0
+	Price in paise.
+	currency
+	string
+	Yes
+	INR
+	Currency.
+	durationDays
+	integer|null
+	No
+	>0
+	Validity.
+	listingLimit
+	integer|null
+	No
+	>=0
+	Quota.
+	featuredDays
+	integer|null
+	No
+	>=0
+	Featured duration.
+	verificationIncluded
+	boolean
+	Yes
+	
+
+	Included.
+	features
+	object
+	Yes
+	
+
+	Frontend display flags/text.
+	isActive
+	boolean
+	Yes
+	
+
+	Purchasable.
+	
+
+CreateOrder
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	items
+	object[]
+	Yes
+	1-20
+	Each item has productId, quantity, targetType?, targetId?.
+	organizationId
+	uuid|null
+	No
+	Member org
+	Optional buyer org.
+	couponCode
+	string|null
+	No
+	<=50
+	Future-safe; backend may reject unsupported.
+	
+
+Order
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Order ID.
+	orderNumber
+	string
+	Yes
+	
+
+	Display number.
+	status
+	string
+	Yes
+	OrderStatus
+	State.
+	items
+	object[]
+	Yes
+	
+
+	Product snapshot + target.
+	subtotalMinor
+	integer
+	Yes
+	
+
+	Subtotal.
+	taxMinor
+	integer
+	Yes
+	
+
+	Tax.
+	totalMinor
+	integer
+	Yes
+	
+
+	Total.
+	currency
+	string
+	Yes
+	INR
+	Currency.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	paidAt
+	datetime|null
+	No
+	
+
+	Paid time.
+	
+
+CreatePayment
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	provider
+	string
+	No
+	RAZORPAY default
+	Payment provider.
+	returnUrl
+	url|null
+	No
+	Valid URL
+	Useful for future redirect providers.
+	
+
+PaymentIntent
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	paymentId
+	uuid
+	Yes
+	
+
+	Internal payment ID.
+	provider
+	string
+	Yes
+	
+
+	Provider.
+	providerOrderId
+	string
+	Yes
+	
+
+	Provider order.
+	amountMinor
+	integer
+	Yes
+	
+
+	Amount.
+	currency
+	string
+	Yes
+	
+
+	Currency.
+	providerPublicKey
+	string|null
+	No
+	
+
+	Key needed by client SDK.
+	checkoutPayload
+	object
+	Yes
+	
+
+	Provider-specific safe checkout payload.
+	
+
+VerifyPayment
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	paymentId
+	uuid
+	Yes
+	
+
+	Internal payment.
+	providerPaymentId
+	string
+	Yes
+	
+
+	Provider payment ID.
+	providerOrderId
+	string
+	Yes
+	
+
+	Provider order ID.
+	signature
+	string
+	Yes
+	
+
+	Provider signature.
+	
+
+Payment
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Payment.
+	orderId
+	uuid
+	Yes
+	
+
+	Order.
+	status
+	string
+	Yes
+	PaymentStatus
+	State.
+	amountMinor
+	integer
+	Yes
+	
+
+	Amount.
+	currency
+	string
+	Yes
+	
+
+	Currency.
+	paidAt
+	datetime|null
+	No
+	
+
+	Paid time.
+	
+
+CreatePlan
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	code
+	string
+	Yes
+	2-100, unique
+	Stable plan code.
+	name
+	string
+	Yes
+	2-255
+	Plan name.
+	planType
+	string
+	Yes
+	FREE/PREMIUM/BROKER
+	Plan type.
+	description
+	string|null
+	No
+	<=2000
+	Description.
+	amountMinor
+	integer
+	Yes
+	>=0
+	Price in paise.
+	currency
+	string
+	No
+	INR
+	Currency.
+	durationDays
+	integer|null
+	No
+	>0
+	Validity.
+	listingLimit
+	integer|null
+	No
+	>=0
+	Listing quota.
+	featuredDays
+	integer|null
+	No
+	>=0
+	Featured duration.
+	verificationIncluded
+	boolean
+	No
+	default false
+	Verification benefit.
+	features
+	object|null
+	No
+	
+
+	Display/business configuration.
+	isActive
+	boolean
+	No
+	default true
+	Availability.
+	
+
+UpdatePlan
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...fields
+	partial CreatePlan
+	No
+	
+
+	Partial plan update. Code changes should be restricted after use.
+	
+
+5.7 Legal, Valuation & Loan Service Requests
+Owner: Backend Dev 2   |   UI surfaces: Services catalogue, service request tracking, admin processing
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/services
+	Public
+	type?
+	ServiceItem[]
+	GET
+	/services/{serviceId}
+	Public
+	none
+	ServiceItem
+	POST
+	/service-requests
+	Authenticated
+	CreateServiceRequest
+	ServiceRequest
+	GET
+	/service-requests/me
+	Authenticated
+	status?,page,limit
+	ServiceRequest[] + PaginationMeta
+	GET
+	/service-requests/{requestId}
+	Owner/Admin
+	none
+	ServiceRequest
+	POST
+	/service-requests/{requestId}/files/upload-url
+	Owner
+	FileUploadInit
+	UploadTicket
+	POST
+	/service-requests/{requestId}/files/complete
+	Owner
+	ServiceFileComplete
+	ServiceFile
+	GET
+	/admin/service-requests
+	ADMIN
+	ServiceRequestListQuery
+	ServiceRequest[] + PaginationMeta
+	GET
+	/admin/service-requests/{requestId}
+	ADMIN
+	none
+	ServiceRequest
+	PATCH
+	/admin/service-requests/{requestId}/status
+	ADMIN
+	UpdateServiceRequestStatus
+	ServiceRequest
+	POST
+	/admin/service-requests/{requestId}/report
+	ADMIN
+	ServiceReportInput
+	ServiceRequest
+	
+
+ServiceItem
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Service ID.
+	code
+	string
+	Yes
+	
+
+	Stable code.
+	serviceType
+	string
+	Yes
+	LEGAL_REVIEW/TITLE_SEARCH/VALUATION/LOAN_ASSISTANCE/REGISTRATION
+	Type.
+	name
+	string
+	Yes
+	
+
+	Display name.
+	description
+	string|null
+	No
+	
+
+	Description.
+	amountMinor
+	integer
+	Yes
+	
+
+	Price; zero allowed.
+	requiresProperty
+	boolean
+	Yes
+	
+
+	Whether UI asks property.
+	requiresDocuments
+	boolean
+	Yes
+	
+
+	Whether file step shown.
+	isActive
+	boolean
+	Yes
+	
+
+	Availability.
+	
+
+CreateServiceRequest
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	serviceId
+	uuid
+	Yes
+	
+
+	Selected service.
+	propertyId
+	uuid|null
+	Conditional
+	Required when service requires property
+	Physical property.
+	listingId
+	uuid|null
+	No
+	
+
+	Listing context.
+	customerNotes
+	string|null
+	No
+	<=2000
+	User details.
+	contactPhone
+	string|null
+	No
+	E.164
+	Preferred contact.
+	contactEmail
+	string|null
+	No
+	Valid email
+	Preferred email.
+	
+
+ServiceRequest
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Request ID.
+	service
+	ServiceItem
+	Yes
+	
+
+	Selected service.
+	propertyId
+	uuid|null
+	No
+	
+
+	Property.
+	listingId
+	uuid|null
+	No
+	
+
+	Listing.
+	status
+	string
+	Yes
+	ServiceRequestStatus
+	Workflow.
+	orderId
+	uuid|null
+	No
+	
+
+	Payment order.
+	customerNotes
+	string|null
+	No
+	
+
+	Notes.
+	files
+	ServiceFile[]
+	Yes
+	
+
+	Uploaded files.
+	reportDownloadUrl
+	url|null
+	No
+	Only when completed/authorized
+	Final report.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	completedAt
+	datetime|null
+	No
+	
+
+	Completed.
+	
+
+ServiceFileComplete
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	storageKey
+	string
+	Yes
+	
+
+	Object key.
+	fileName
+	string
+	Yes
+	<=255
+	File name.
+	mimeType
+	string
+	Yes
+	
+
+	MIME.
+	fileSizeBytes
+	integer
+	Yes
+	>0
+	Size.
+	
+
+ServiceFile
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	File ID.
+	fileName
+	string
+	Yes
+	
+
+	Name.
+	mimeType
+	string
+	Yes
+	
+
+	MIME.
+	fileSizeBytes
+	integer
+	Yes
+	
+
+	Size.
+	downloadUrl
+	url|null
+	No
+	
+
+	Authorized URL.
+	
+
+UpdateServiceRequestStatus
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	status
+	string
+	Yes
+	ServiceRequestStatus
+	New state.
+	internalNote
+	string|null
+	No
+	<=2000
+	Admin note.
+	
+
+ServiceReportInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	storageKey
+	string
+	Yes
+	Uploaded report key
+	Final report file.
+	summary
+	string|null
+	No
+	<=3000
+	Optional customer summary.
+	
+
+ServiceRequestListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	ServiceRequestStatus
+	State.
+	serviceType
+	string|null
+	No
+	Service type
+	Type.
+	search
+	string|null
+	No
+	<=200
+	User/property/request search.
+	
+
+5.8 Content CMS & Market Trends
+Owner: Backend Dev 2   |   UI surfaces: News, land opportunities, e-books, guides, market trend screens
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/content
+	Public
+	ContentListQuery
+	ContentCard[] + PaginationMeta
+	GET
+	/content/{slug}
+	Public
+	language?
+	ContentDetail
+	POST
+	/admin/content
+	ADMIN
+	CreateContent
+	ContentDetail
+	PATCH
+	/admin/content/{contentId}
+	ADMIN
+	UpdateContent
+	ContentDetail
+	DELETE
+	/admin/content/{contentId}
+	ADMIN
+	none
+	204
+	POST
+	/admin/content/{contentId}/publish
+	ADMIN
+	none
+	ContentDetail
+	POST
+	/admin/content/{contentId}/archive
+	ADMIN
+	none
+	ContentDetail
+	GET
+	/market-trends
+	Public
+	MarketTrendQuery
+	MarketTrendSeries[]
+	POST
+	/admin/market-trends
+	ADMIN
+	CreateMarketTrendSeries
+	MarketTrendSeries
+	PATCH
+	/admin/market-trends/{seriesId}
+	ADMIN
+	UpdateMarketTrendSeries
+	MarketTrendSeries
+	DELETE
+	/admin/market-trends/{seriesId}
+	ADMIN
+	none
+	204
+	POST
+	/admin/market-trends/{seriesId}/points
+	ADMIN
+	MarketTrendPointInput
+	MarketTrendSeries
+	PATCH
+	/admin/market-trends/{seriesId}/points/{pointId}
+	ADMIN
+	MarketTrendPointInput
+	MarketTrendSeries
+	DELETE
+	/admin/market-trends/{seriesId}/points/{pointId}
+	ADMIN
+	none
+	204
+	
+
+ContentListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	type
+	string|null
+	No
+	ContentType
+	Content category.
+	language
+	string|null
+	No
+	supported language
+	Requested translation.
+	locationId
+	uuid|null
+	No
+	
+
+	Location filter.
+	page
+	integer
+	No
+	>=1
+	Page.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	search
+	string|null
+	No
+	<=200
+	Title/text search.
+	
+
+ContentCard
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Content ID.
+	type
+	string
+	Yes
+	ContentType
+	Type.
+	slug
+	string
+	Yes
+	
+
+	Localized slug.
+	title
+	string
+	Yes
+	
+
+	Localized title.
+	summary
+	string|null
+	No
+	
+
+	Summary.
+	coverUrl
+	url|null
+	No
+	
+
+	Cover.
+	location
+	LocationSummary|null
+	No
+	
+
+	Location.
+	sourceName
+	string|null
+	No
+	
+
+	Source.
+	sourceUrl
+	url|null
+	No
+	
+
+	Official/source link.
+	publishedAt
+	datetime|null
+	No
+	
+
+	Publication.
+	
+
+ContentDetail
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...cardFields
+	same as ContentCard
+	Yes
+	
+
+	Card fields.
+	body
+	string
+	Yes
+	HTML/structured text policy
+	Full content.
+	availableLanguages
+	string[]
+	Yes
+	
+
+	Available translations.
+	status
+	string
+	Conditional
+	Admin response only
+	DRAFT/PUBLISHED/ARCHIVED.
+	
+
+CreateContent
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	type
+	string
+	Yes
+	ContentType
+	Type.
+	locationId
+	uuid|null
+	No
+	
+
+	Location.
+	coverStorageKey
+	string|null
+	No
+	
+
+	Cover key.
+	sourceName
+	string|null
+	No
+	<=255
+	Source.
+	sourceUrl
+	url|null
+	No
+	
+
+	Official/source URL.
+	translations
+	object[]
+	Yes
+	At least one language
+	Each: language,slug,title,summary,body.
+	
+
+MarketTrendQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	locationId
+	uuid
+	Yes
+	
+
+	Area.
+	propertyTypeId
+	uuid|null
+	No
+	
+
+	Optional land type.
+	metric
+	string|null
+	No
+	ASKING_PRICE/GOVT_RATE/AVG_PRICE_PER_SQFT/AVG_PRICE_PER_ACRE
+	Metric.
+	fromYear
+	integer|null
+	No
+	reasonable year
+	Start.
+	toYear
+	integer|null
+	No
+	>=fromYear
+	End.
+	
+
+MarketTrendSeries
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Series ID.
+	location
+	LocationSummary
+	Yes
+	
+
+	Location.
+	propertyType
+	MasterOption|null
+	No
+	
+
+	Land type.
+	metric
+	string
+	Yes
+	
+
+	Metric.
+	unit
+	string
+	Yes
+	
+
+	Unit.
+	sourceName
+	string|null
+	No
+	
+
+	Source.
+	sourceUrl
+	url|null
+	No
+	
+
+	Source URL.
+	points
+	object[]
+	Yes
+	
+
+	Each: id,periodDate,value.
+	
+
+CreateMarketTrendSeries
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	locationId
+	uuid
+	Yes
+	
+
+	Location.
+	propertyTypeId
+	uuid|null
+	No
+	
+
+	Property type.
+	metric
+	string
+	Yes
+	Allowed metric
+	Metric.
+	unit
+	string
+	Yes
+	<=50
+	Display unit.
+	sourceName
+	string|null
+	No
+	<=255
+	Source.
+	sourceUrl
+	url|null
+	No
+	
+
+	Source link.
+	
+
+MarketTrendPointInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	periodDate
+	date
+	Yes
+	
+
+	Date/year anchor.
+	value
+	number
+	Yes
+	>=0 usually
+	Metric value.
+	
+
+UpdateContent
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...fields
+	partial CreateContent
+	No
+	
+
+	Partial update. Translation entries are upserted by language.
+	
+
+UpdateMarketTrendSeries
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	propertyTypeId
+	uuid|null
+	No
+	
+
+	Property type.
+	metric
+	string|null
+	No
+	Allowed metric
+	Metric.
+	unit
+	string|null
+	No
+	<=50
+	Display unit.
+	sourceName
+	string|null
+	No
+	<=255
+	Source.
+	sourceUrl
+	url|null
+	No
+	
+
+	Source link.
+	
+
+5.9 Channel Partners
+Owner: Backend Dev 2   |   UI surfaces: Partner application/profile/admin approval
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	POST
+	/channel-partners/apply
+	Authenticated
+	ChannelPartnerApply
+	ChannelPartnerProfile
+	GET
+	/channel-partners/me
+	CHANNEL_PARTNER/applicant
+	none
+	ChannelPartnerProfile
+	PATCH
+	/channel-partners/me
+	CHANNEL_PARTNER/applicant
+	UpdateChannelPartner
+	ChannelPartnerProfile
+	GET
+	/admin/channel-partners
+	ADMIN
+	PartnerListQuery
+	ChannelPartnerProfile[] + PaginationMeta
+	GET
+	/admin/channel-partners/{partnerId}
+	ADMIN
+	none
+	ChannelPartnerProfile
+	POST
+	/admin/channel-partners/{partnerId}/approve
+	ADMIN
+	AdminPartnerAction?
+	ChannelPartnerProfile
+	POST
+	/admin/channel-partners/{partnerId}/reject
+	ADMIN
+	ActionReason
+	ChannelPartnerProfile
+	POST
+	/admin/channel-partners/{partnerId}/suspend
+	ADMIN
+	ActionReason
+	ChannelPartnerProfile
+	
+
+ChannelPartnerApply
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	organizationId
+	uuid|null
+	No
+	
+
+	Organization if applicable.
+	reraNumber
+	string|null
+	No
+	<=100
+	RERA number.
+	experienceYears
+	integer|null
+	No
+	0-80
+	Experience.
+	locationIds
+	uuid[]
+	Yes
+	1+
+	Areas served.
+	about
+	string|null
+	No
+	<=2000
+	Profile summary.
+	
+
+ChannelPartnerProfile
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	user
+	UserSummary
+	Yes
+	
+
+	Partner user.
+	organization
+	Organization|null
+	No
+	
+
+	Organization.
+	reraNumber
+	string|null
+	No
+	
+
+	RERA.
+	experienceYears
+	integer|null
+	No
+	
+
+	Experience.
+	locations
+	LocationSummary[]
+	Yes
+	
+
+	Coverage.
+	status
+	string
+	Yes
+	PENDING/APPROVED/REJECTED/SUSPENDED
+	Approval state.
+	approvedAt
+	datetime|null
+	No
+	
+
+	Approval time.
+	
+
+UpdateChannelPartner
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	reraNumber
+	string|null
+	No
+	<=100
+	RERA.
+	experienceYears
+	integer|null
+	No
+	0-80
+	Experience.
+	locationIds
+	uuid[]|null
+	No
+	
+
+	Coverage.
+	about
+	string|null
+	No
+	<=2000
+	Profile.
+	
+
+PartnerListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Pagination.
+	limit
+	integer
+	No
+	1-100
+	Page size.
+	status
+	string|null
+	No
+	partner status
+	Filter.
+	locationId
+	uuid|null
+	No
+	
+
+	Coverage filter.
+	search
+	string|null
+	No
+	<=200
+	Name/org search.
+	
+
+AdminPartnerAction
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	note
+	string|null
+	No
+	<=1000
+	Optional admin approval note.
+	
+
+5.10 Investment Opportunities
+Owner: Backend Dev 2   |   UI surfaces: Public/corporate opportunities and lead capture
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/investment-opportunities
+	Public
+	OpportunityListQuery
+	InvestmentOpportunity[] + PaginationMeta
+	GET
+	/investment-opportunities/{opportunityId}
+	Public
+	none
+	InvestmentOpportunity
+	POST
+	/investment-opportunities/{opportunityId}/interest
+	Authenticated
+	InvestmentInterestInput
+	InvestmentInterest
+	POST
+	/admin/investment-opportunities
+	ADMIN
+	CreateInvestmentOpportunity
+	InvestmentOpportunity
+	PATCH
+	/admin/investment-opportunities/{id}
+	ADMIN
+	UpdateInvestmentOpportunity
+	InvestmentOpportunity
+	POST
+	/admin/investment-opportunities/{id}/publish
+	ADMIN
+	none
+	InvestmentOpportunity
+	POST
+	/admin/investment-opportunities/{id}/close
+	ADMIN
+	ActionReason?
+	InvestmentOpportunity
+	
+
+InvestmentOpportunity
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Opportunity.
+	title
+	string
+	Yes
+	
+
+	Title.
+	location
+	LocationSummary|null
+	No
+	
+
+	Location.
+	propertyId
+	uuid|null
+	No
+	
+
+	Linked property.
+	investmentType
+	string
+	Yes
+	
+
+	Corporate/own opportunity classification.
+	minimumInvestmentMinor
+	integer|null
+	No
+	Informational only
+	Minimum amount if applicable.
+	description
+	string
+	Yes
+	
+
+	Description.
+	status
+	string
+	Yes
+	DRAFT/PUBLISHED/CLOSED
+	Status.
+	publishedAt
+	datetime|null
+	No
+	
+
+	Published.
+	
+
+InvestmentInterestInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	message
+	string|null
+	No
+	<=2000
+	Investor message.
+	contactPhone
+	string|null
+	No
+	E.164
+	Contact phone.
+	contactEmail
+	string|null
+	No
+	email
+	Contact email.
+	organizationId
+	uuid|null
+	No
+	
+
+	Corporate org.
+	
+
+InvestmentInterest
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Lead ID.
+	opportunityId
+	uuid
+	Yes
+	
+
+	Opportunity.
+	status
+	string
+	Yes
+	NEW/CONTACTED/CLOSED
+	Lead status.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+CreateInvestmentOpportunity
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	title
+	string
+	Yes
+	5-500
+	Title.
+	locationId
+	uuid|null
+	No
+	
+
+	Location.
+	propertyId
+	uuid|null
+	No
+	
+
+	Linked property.
+	investmentType
+	string
+	Yes
+	<=50
+	Type.
+	minimumInvestmentMinor
+	integer|null
+	No
+	>=0
+	Informational amount.
+	description
+	string
+	Yes
+	20-10000
+	Description.
+	
+
+UpdateInvestmentOpportunity
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...fields
+	partial CreateInvestmentOpportunity
+	No
+	
+
+	Partial opportunity update.
+	
+
+OpportunityListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Page.
+	limit
+	integer
+	No
+	1-100
+	Size.
+	locationId
+	uuid|null
+	No
+	
+
+	Location.
+	investmentType
+	string|null
+	No
+	
+
+	Type.
+	status
+	string|null
+	No
+	PUBLISHED for public
+	Status; admin may use all.
+	
+
+5.11 Auction Directory
+Owner: Backend Dev 2   |   UI surfaces: Auction discovery and admin CMS
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/auctions
+	Public
+	AuctionListQuery
+	Auction[] + PaginationMeta
+	GET
+	/auctions/{auctionId}
+	Public
+	none
+	Auction
+	POST
+	/admin/auctions
+	ADMIN
+	CreateAuction
+	Auction
+	PATCH
+	/admin/auctions/{auctionId}
+	ADMIN
+	UpdateAuction
+	Auction
+	DELETE
+	/admin/auctions/{auctionId}
+	ADMIN
+	none
+	204
+	
+
+Auction
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Auction.
+	title
+	string
+	Yes
+	
+
+	Title.
+	institutionName
+	string
+	Yes
+	
+
+	Bank/institution.
+	location
+	LocationSummary|null
+	No
+	
+
+	Location.
+	reservePriceMinor
+	integer|null
+	No
+	
+
+	Reserve price.
+	emdAmountMinor
+	integer|null
+	No
+	
+
+	EMD.
+	currency
+	string
+	Yes
+	INR
+	Currency.
+	auctionAt
+	datetime
+	Yes
+	
+
+	Auction date/time.
+	officialUrl
+	url
+	Yes
+	
+
+	External official link.
+	description
+	string|null
+	No
+	
+
+	Description.
+	status
+	string
+	Yes
+	AuctionStatus
+	Status.
+	
+
+CreateAuction
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	title
+	string
+	Yes
+	5-500
+	Title.
+	institutionName
+	string
+	Yes
+	2-255
+	Institution.
+	locationId
+	uuid|null
+	No
+	
+
+	Location.
+	reservePriceMinor
+	integer|null
+	No
+	>=0
+	Reserve.
+	emdAmountMinor
+	integer|null
+	No
+	>=0
+	EMD.
+	auctionAt
+	datetime
+	Yes
+	
+
+	Date/time.
+	officialUrl
+	url
+	Yes
+	
+
+	Official link.
+	description
+	string|null
+	No
+	<=5000
+	Description.
+	status
+	string
+	No
+	UPCOMING/CLOSED/CANCELLED
+	Default UPCOMING.
+	
+
+UpdateAuction
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...fields
+	partial CreateAuction
+	No
+	
+
+	Partial update.
+	
+
+AuctionListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Page.
+	limit
+	integer
+	No
+	1-100
+	Size.
+	locationId
+	uuid|null
+	No
+	
+
+	Location.
+	status
+	string|null
+	No
+	AuctionStatus
+	Filter.
+	fromDate
+	date|null
+	No
+	
+
+	From.
+	toDate
+	date|null
+	No
+	
+
+	To.
+	
+
+5.12 Advertisements
+Owner: Backend Dev 2   |   UI surfaces: Homepage/search/property ad slots, admin management
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/ads
+	Public
+	placement
+	Ad[]
+	POST
+	/admin/ads
+	ADMIN
+	CreateAd
+	Ad
+	PATCH
+	/admin/ads/{adId}
+	ADMIN
+	UpdateAd
+	Ad
+	DELETE
+	/admin/ads/{adId}
+	ADMIN
+	none
+	204
+	
+
+Ad
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Ad ID.
+	name
+	string
+	Yes
+	
+
+	Admin name.
+	placement
+	string
+	Yes
+	HOME_TOP/SEARCH_TOP/PROPERTY_SIDEBAR/CONTENT
+	Slot.
+	imageUrl
+	url
+	Yes
+	
+
+	Creative.
+	targetUrl
+	url|null
+	No
+	
+
+	Click URL.
+	startsAt
+	datetime
+	Yes
+	
+
+	Start.
+	endsAt
+	datetime
+	Yes
+	
+
+	End.
+	status
+	string
+	Yes
+	ACTIVE/INACTIVE/SCHEDULED/EXPIRED
+	State.
+	
+
+CreateAd
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	name
+	string
+	Yes
+	2-255
+	Name.
+	placement
+	string
+	Yes
+	allowed placement
+	Slot.
+	imageStorageKey
+	string
+	Yes
+	
+
+	Uploaded image.
+	targetUrl
+	url|null
+	No
+	
+
+	Target.
+	startsAt
+	datetime
+	Yes
+	
+
+	Start.
+	endsAt
+	datetime
+	Yes
+	> startsAt
+	End.
+	status
+	string
+	No
+	
+
+	Initial status.
+	
+
+UpdateAd
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...fields
+	partial CreateAd
+	No
+	
+
+	Partial update.
+	
+
+5.13 Notifications
+Owner: Backend Dev 2   |   UI surfaces: Notification center and preferences
+Method
+	Endpoint
+	Auth / Role
+	Request model
+	Response / UI use
+	GET
+	/notifications
+	Authenticated
+	NotificationListQuery
+	Notification[] + PaginationMeta
+	PATCH
+	/notifications/{notificationId}/read
+	Owner
+	none
+	Notification
+	POST
+	/notifications/read-all
+	Authenticated
+	none
+	Acknowledgement
+	GET
+	/notification-preferences
+	Authenticated
+	none
+	NotificationPreferences
+	PUT
+	/notification-preferences
+	Authenticated
+	NotificationPreferencesInput
+	NotificationPreferences
+	
+
+Notification
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	id
+	uuid
+	Yes
+	
+
+	Notification.
+	type
+	string
+	Yes
+	
+
+	Business event type.
+	title
+	string
+	Yes
+	
+
+	Title.
+	body
+	string
+	Yes
+	
+
+	Message.
+	data
+	object|null
+	No
+	
+
+	Deep-link/resource IDs.
+	readAt
+	datetime|null
+	No
+	
+
+	Read timestamp.
+	createdAt
+	datetime
+	Yes
+	
+
+	Created.
+	
+
+NotificationListQuery
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	page
+	integer
+	No
+	>=1
+	Page.
+	limit
+	integer
+	No
+	1-100
+	Size.
+	unreadOnly
+	boolean
+	No
+	default false
+	Unread filter.
+	type
+	string|null
+	No
+	
+
+	Notification type.
+	
+
+NotificationPreferencesInput
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	emailEnabled
+	boolean
+	Yes
+	
+
+	Email.
+	smsEnabled
+	boolean
+	Yes
+	
+
+	SMS.
+	whatsappEnabled
+	boolean
+	Yes
+	
+
+	WhatsApp.
+	marketingEnabled
+	boolean
+	Yes
+	
+
+	Marketing; transactional messages may ignore.
+	
+
+NotificationPreferences
+Field
+	Type
+	Required
+	Validation / enum
+	Description
+	...inputFields
+	same as input
+	Yes
+	
+
+	Saved preferences.
+	updatedAt
+	datetime
+	Yes
+	
+
+	Updated.
+	
+
+________________
+
+
+6. Key End-to-End Payload Examples
+6.1 OTP login
+POST /api/v1/auth/otp/request
+{
+ "destination": "+919876543210",
+ "channel": "SMS",
+ "purpose": "LOGIN"
+}
+
+200
+{
+ "success": true,
+ "data": {
+   "challengeId": "2b20...",
+   "destinationMasked": "+91******3210",
+   "expiresInSeconds": 300,
+   "resendAfterSeconds": 30
+ }
+}
+6.2 Create property + land details
+POST /api/v1/properties
+{
+ "propertyTypeId": "...",
+ "landUseTypeId": "...",
+ "ownershipTypeId": "..."
+}
+
+PUT /api/v1/properties/{propertyId}/land-details
+{
+ "areaValue": 2.5,
+ "areaUnitId": "<ACRE-ID>",
+ "frontageM": 40,
+ "roadWidthM": 18,
+ "facing": "E",
+ "isCornerPlot": false
+}
+6.3 Create listing
+POST /api/v1/properties/{propertyId}/listings
+{
+ "transactionType": "SALE",
+ "title": "2.5 Acre Industrial Land near Panvel",
+ "description": "Industrial land with direct road access...",
+ "canonicalLanguage": "en",
+ "priceAmountMinor": 4250000000,
+ "currency": "INR",
+ "isNegotiable": true
+}
+6.4 Marketplace search
+POST /api/v1/search/listings
+{
+ "locationIds": ["<PANVEL-ID>"],
+ "propertyTypeIds": ["<INDUSTRIAL-LAND-ID>"],
+ "minArea": 2,
+ "maxArea": 5,
+ "areaUnitId": "<ACRE-ID>",
+ "maxPriceMinor": 8000000000,
+ "verifiedOnly": true,
+ "sort": "RELEVANCE",
+ "page": 1,
+ "limit": 20
+}
+6.5 Enquiry + site visit
+POST /api/v1/listings/{listingId}/enquiries
+{
+ "enquiryType": "CALLBACK",
+ "message": "Please call me to discuss the plot.",
+ "preferredContactChannel": "PHONE"
+}
+
+POST /api/v1/listings/{listingId}/site-visits
+{
+ "preferredDate": "2026-08-15",
+ "preferredTimeSlot": "AFTERNOON",
+ "visitorCount": 2,
+ "note": "Please confirm a day before."
+}
+6.6 AI smart search
+POST /api/v1/ai/search
+{
+ "query": "Show me 2 to 5 acre industrial land near Panvel under 8 crore",
+ "language": "en",
+ "page": 1,
+ "limit": 20
+}
+
+Response data includes:
+{
+ "parsedFilters": { ...same shape as ListingSearchInput... },
+ "clarificationNeeded": false,
+ "results": [ ...ListingCard ]
+}
+7. UI Screen → API Integration Matrix
+UI screen
+	Owner
+	API(s)
+	Primary models
+	Login / OTP
+	Dev 1
+	POST /auth/otp/request; POST /auth/otp/verify; GET /users/me
+	OtpRequest, OtpVerify, UserSummary
+	Home
+	Both
+	GET /search/suggestions; POST /ai/search; GET /content; GET /ads
+	SearchSuggestion, AiSearchResult, ContentCard, Ad
+	Search Results
+	Dev 1
+	POST /search/listings; POST /search/map
+	ListingSearchInput, ListingCard, MapPin
+	Property Detail
+	Both
+	GET /listings/{id}/detail; favorite/contact/enquiry/site visit APIs
+	ListingDetail + buyer action models
+	Compare
+	Dev 1
+	POST /listings/compare
+	CompareInput, CompareResult
+	Add Property Wizard
+	Dev 1
+	POST /properties + land/location/parcel/amenity/media/document endpoints
+	Property, LandDetails, Location, Media, Document models
+	Create/Edit Listing
+	Dev 1
+	POST /properties/{id}/listings; PATCH /listings/{id}; submit
+	CreateListing, Listing
+	Seller Listings
+	Dev 1
+	GET /seller/listings
+	ListingCard[]
+	Seller Dashboard
+	Dev 2
+	GET /seller/dashboard
+	SellerDashboard
+	Seller Leads
+	Dev 2
+	GET /seller/enquiries; status; notes
+	Enquiry
+	Buyer Favorites
+	Dev 2
+	GET/POST/DELETE /favorites
+	ListingCard[]
+	Buyer Requirements
+	Dev 2
+	/buyer-requirements CRUD
+	BuyerRequirement
+	Site Visits
+	Dev 2
+	buyer/seller site-visit endpoints
+	SiteVisit
+	Plans / Checkout
+	Dev 2
+	GET /plans; POST /orders; payment endpoints
+	Plan, Order, Payment
+	Legal / Valuation / Loan
+	Dev 2
+	GET /services; /service-requests
+	ServiceItem, ServiceRequest
+	AI Chat
+	Dev 1
+	/ai/conversations + messages
+	AiConversation, AiMessage
+	Market Trends
+	Dev 2
+	GET /market-trends
+	MarketTrendSeries
+	News / E-books / Opportunities
+	Dev 2
+	GET /content
+	ContentCard, ContentDetail
+	Investment Opportunities
+	Dev 2
+	GET /investment-opportunities; interest
+	InvestmentOpportunity
+	Auctions
+	Dev 2
+	GET /auctions
+	Auction
+	Channel Partner
+	Dev 2
+	/channel-partners/apply; /me
+	ChannelPartnerProfile
+	Notifications
+	Dev 2
+	/notifications; preferences
+	Notification
+	Admin Users
+	Dev 1
+	/admin/users
+	UserSummary
+	Admin Listings / Verification
+	Dev 1
+	/admin/listings; /admin/verifications
+	ListingDetail, VerificationDetail
+	Admin Commerce/Services
+	Dev 2
+	/admin/plans; /admin/service-requests
+	Plan, ServiceRequest
+	Admin CMS / Trends / Partner / Ads
+	Dev 2
+	relevant /admin endpoints
+	Content, Trend, Partner, Ad models
+	
+
+8. Frontend Integration Guidance
+8.1 Loading, empty and error states
+* Do not interpret an empty data array as an API error. Use meta.total = 0 for empty list state.
+* For 401, attempt the agreed refresh flow once, then redirect to login if refresh fails.
+* For 403, show permission-specific state; do not treat as not-found.
+* For 409 lifecycle errors (e.g. trying to edit a sold listing), refresh the resource and show backend error.message.
+* For validation errors, bind error.details[].field to the matching form field when possible.
+* Disable duplicate submit buttons while POST/PATCH/action API is in flight.
+* For payment, UI success is provisional until backend verification/webhook marks payment/order paid.
+8.2 Form implementation rules
+* Use IDs returned by master/location APIs. Send the ID, not only display labels.
+* Persist add-property progress after each wizard step using the relevant PUT/PATCH endpoint.
+* Do not calculate canonical area, verification score, premium state or listing lifecycle on frontend; render backend values.
+* Price inputs can be displayed in lakhs/crores but must be converted to integer paise before API submission.
+* Exact property coordinates may be intentionally hidden in public responses. UI must respect showExactLocation/public location precision.
+* Use uploadUrl only for direct storage upload. Never persist it; it expires. Persist media/document IDs returned by complete endpoint.
+9. API Completion Checklist for Backend → UI Handoff
+#
+	Handoff requirement
+	1
+	Endpoint implemented at frozen path/method.
+	2
+	Auth/role rules match this document.
+	3
+	Swagger contains request schema, response schema and examples.
+	4
+	All required/optional fields and enum values are documented.
+	5
+	Field validation returns structured field errors.
+	6
+	List endpoint includes pagination metadata.
+	7
+	Empty state verified.
+	8
+	Unauthorized + forbidden scenarios verified.
+	9
+	Sample test data exists in staging.
+	10
+	UI team has tested endpoint in Swagger/Postman and marked CONTRACT READY.
+	11
+	UI integration complete.
+	12
+	Any breaking change is approved before merge.
+	
+
+Ownership & change control: Dev 1 owns DB design/migrations and the Dev 1 API domains; Dev 2 owns the Dev 2 API domains. Dev 2 requests schema changes through Dev 1. The UI team integrates only against the documented API contract/Swagger, never internal service methods.
+Internal Implementation Contract  |  Version 1.0

@@ -50,6 +50,12 @@ export const latestChallenge = ({ destination, channel, purpose }) =>
     `SELECT id, user_id, otp_hash, expires_at, verified_at, attempt_count, max_attempts FROM auth.otp_challenges WHERE destination = $1 AND channel = $2 AND purpose = $3 ORDER BY created_at DESC LIMIT 1`,
     [destination, channel, purpose]
   );
+export const challengeById = id =>
+  run(
+    "oneOrNone",
+    `SELECT id, user_id, destination, channel, purpose, otp_hash, expires_at, verified_at, attempt_count, max_attempts FROM auth.otp_challenges WHERE id = $1`,
+    [id]
+  );
 export const recordFailedAttempt = id =>
   run(
     "oneOrNone",
@@ -81,14 +87,22 @@ export const addBuyerRole = userId =>
 export const findActiveUser = id =>
   run(
     "oneOrNone",
-    `SELECT id, display_name, phone_e164, email, preferred_language, status FROM auth.users WHERE id = $1 AND deleted_at IS NULL`,
+    `SELECT id, first_name, last_name, display_name, phone_e164, email, avatar_storage_key, preferred_language, status FROM auth.users WHERE id = $1 AND deleted_at IS NULL`,
     [id]
   );
 export const createRefreshSession = input =>
   run(
     "one",
-    `INSERT INTO auth.refresh_sessions (user_id, token_hash, ip_address, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id, expires_at`,
-    [input.userId, input.tokenHash, input.ip, input.userAgent, input.expiresAt]
+    `INSERT INTO auth.refresh_sessions (user_id, token_hash, device_id, device_name, ip_address, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, expires_at`,
+    [
+      input.userId,
+      input.tokenHash,
+      input.deviceId,
+      input.deviceName,
+      input.ip,
+      input.userAgent,
+      input.expiresAt
+    ]
   );
 export const updateLastLogin = id =>
   run("none", `UPDATE auth.users SET last_login_at = now() WHERE id = $1`, [

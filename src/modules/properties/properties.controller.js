@@ -1,0 +1,94 @@
+import { created, ok, paginationMeta } from "../../shared/http.js";
+import * as service from "./properties.service.js";
+import * as validation from "./properties.validation.js";
+
+export const create = async (req, res) =>
+  created(
+    res,
+    await service.create({
+      actorId: req.actor.id,
+      input: validation.createProperty(req.body || {})
+    })
+  );
+export const get = async (req, res) =>
+  ok(res, await service.get(req.property.id));
+export const remove = async (req, res) => {
+  await service.remove(req.property.id);
+  return res.status(204).send();
+};
+export const listMine = async (req, res) => {
+  const input = validation.propertyList(req.query);
+  const result = await service.listMine({ actorId: req.actor.id, input });
+  return ok(
+    res,
+    result.items,
+    paginationMeta({
+      page: input.page,
+      limit: input.limit,
+      total: result.total
+    })
+  );
+};
+export const update = async (req, res) =>
+  ok(
+    res,
+    await service.update({
+      propertyId: req.property.id,
+      changes: validation.updateProperty(req.body || {})
+    })
+  );
+export const landDetails = async (req, res) =>
+  ok(res, await service.getLandDetails(req.property.id));
+export const saveLandDetails = async (req, res) =>
+  ok(
+    res,
+    await service.saveLandDetails({
+      propertyId: req.property.id,
+      input: validation.landDetails(req.body || {})
+    })
+  );
+export const location = async (req, res) =>
+  ok(res, await service.getLocation(req.property.id));
+export const saveLocation = async (req, res) =>
+  ok(
+    res,
+    await service.saveLocation({
+      propertyId: req.property.id,
+      input: validation.propertyLocation(req.body || {})
+    })
+  );
+export const amenities = async (req, res) =>
+  ok(res, await service.getAmenities(req.property.id));
+export const saveAmenities = async (req, res) =>
+  ok(
+    res,
+    await service.saveAmenities({
+      propertyId: req.property.id,
+      amenities: validation.amenities(req.body || {})
+    })
+  );
+export const identifiers = async (req, res) =>
+  ok(res, await service.getIdentifiers(req.property.id));
+export const saveIdentifiers = async (req, res) =>
+  ok(
+    res,
+    await service.saveIdentifiers({
+      propertyId: req.property.id,
+      identifiers: validation.identifiers(req.body || {})
+    })
+  );
+export const requestVerification = async (req, res) =>
+  created(
+    res,
+    await service.requestVerification({
+      propertyId: req.property.id,
+      actorId: req.actor.id,
+      checkTypes: validation.verificationRequest(req.body || {})
+    })
+  );
+export const verification = async (req, res) =>
+  ok(res, await service.verificationSummary(req.property.id));
+export const scanner = async (req, res) =>
+  ok(res, await service.scanner(req.property.id));
+export const passport = async (req, res) =>
+  ok(res, await service.passport(req.property.id));

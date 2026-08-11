@@ -1,17 +1,22 @@
 import { HttpError } from "../../shared/http.js";
 
-const statuses = new Set(["ACTIVE", "BLOCKED", "DELETED"]);
+const statuses = new Set(["ACTIVE", "BLOCKED"]);
+const languages = new Set(["en", "hi", "mr", "gu", "pa", "te", "ta"]);
 
 export const profileChanges = body => {
   const changes = {};
-  if (Object.hasOwn(body, "name")) {
-    const name = String(body.name || "")
+  if (Object.hasOwn(body, "displayName")) {
+    const name = String(body.displayName || "")
       .trim()
       .replace(/\s+/g, " ");
     if (!name)
       throw new HttpError(400, "INVALID_NAME", "Name cannot be empty.");
     changes.display_name = name;
   }
+  if (Object.hasOwn(body, "firstName"))
+    changes.first_name = body.firstName ? String(body.firstName).trim() : null;
+  if (Object.hasOwn(body, "lastName"))
+    changes.last_name = body.lastName ? String(body.lastName).trim() : null;
   if (Object.hasOwn(body, "email"))
     changes.email = body.email
       ? String(body.email)
@@ -20,7 +25,7 @@ export const profileChanges = body => {
       : null;
   if (Object.hasOwn(body, "preferredLanguage")) {
     const language = String(body.preferredLanguage || "").trim();
-    if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(language))
+    if (!languages.has(language))
       throw new HttpError(
         400,
         "INVALID_LANGUAGE",
@@ -50,7 +55,7 @@ export const userStatus = body => {
     throw new HttpError(
       400,
       "INVALID_STATUS",
-      "status must be ACTIVE, BLOCKED, or DELETED."
+      "status must be ACTIVE or BLOCKED."
     );
   return status;
 };
@@ -73,9 +78,10 @@ export const adminListQuery = query => {
   if (status && !statuses.has(status))
     throw new HttpError(400, "INVALID_STATUS", "Invalid user status.");
   return {
-    limit: Math.min(Math.max(Number(query.limit || 50), 1), 100),
-    offset: Math.max(Number(query.offset || 0), 0),
+    page: Math.max(Number(query.page || 1), 1),
+    limit: Math.min(Math.max(Number(query.limit || 20), 1), 100),
     search: String(query.search || "").trim() || null,
-    status
+    status,
+    role: query.role ? String(query.role).toUpperCase() : null
   };
 };

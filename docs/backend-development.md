@@ -57,10 +57,9 @@ Rules:
 - Services throw `HttpError(status, code, message)` for expected business errors.
 - Do not expose SQL errors, tokens, OTPs, stacks, or secrets in responses.
 
-`auth`, `users`, and `catalog` follow this structure. `properties` and
-`listings` are transitional: they are mounted from `src/modules`, but their
-existing route files still contain workflow and database code. Refactor them
-into this five-layer pattern before adding substantial new behavior.
+`auth`, `users`, `catalog`, `properties`, and `listings` follow this structure.
+Every new Developer 1 module must use the same five-layer pattern from its
+first endpoint; do not add compatibility route files or bypass a repository.
 
 ## API contract
 

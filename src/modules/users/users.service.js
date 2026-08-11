@@ -18,7 +18,14 @@ export const addSelfRole = async (id, role) => {
   await repository.addRole(id, role);
   return rolesFor(id);
 };
-export const adminList = async input => repository.listUsers(input);
+export const adminList = async input => {
+  const offset = (input.page - 1) * input.limit;
+  const [items, count] = await Promise.all([
+    repository.listUsers({ ...input, offset }),
+    repository.countUsers(input)
+  ]);
+  return { items, total: count.total };
+};
 export const adminGet = async id => {
   const user = await profile(id);
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User was not found.");
