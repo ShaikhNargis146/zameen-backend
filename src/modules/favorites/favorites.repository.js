@@ -22,7 +22,7 @@ export const deleteFavorite = (userId, listingId) =>
 export const favoriteListingIds = (userId, filters, { limit, offset }) =>
   run(
     "any",
-    `SELECT source.listing_id AS "listingId"
+    `SELECT source.listing_id AS "listingId", count(*) OVER()::int AS total
      FROM marketplace.favorites source
      ${listingFilterJoins}
      WHERE source.user_id = $1
@@ -30,15 +30,4 @@ export const favoriteListingIds = (userId, filters, { limit, offset }) =>
      ORDER BY source.created_at DESC
      LIMIT $9 OFFSET $10`,
     [userId, ...listingFilterParams(filters), limit, offset]
-  );
-
-export const countFavorites = (userId, filters) =>
-  run(
-    "one",
-    `SELECT count(*)::int AS count
-     FROM marketplace.favorites source
-     ${listingFilterJoins}
-     WHERE source.user_id = $1
-     ${listingFilterWhere}`,
-    [userId, ...listingFilterParams(filters)]
   );

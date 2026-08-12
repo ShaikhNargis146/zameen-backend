@@ -1,5 +1,5 @@
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta } from "../../shared/pagination.js";
+import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import * as repository from "./organizations.repository.js";
 
 const notFound = () =>
@@ -38,11 +38,9 @@ export const create = ({ actorId, input }) =>
 
 export const listMine = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const [rows, { count }] = await Promise.all([
-    repository.listForUser(actorId, filters, { limit, offset }),
-    repository.countForUser(actorId, filters)
-  ]);
-  return { data: rows, meta: paginationMeta({ page, limit, total: count }) };
+  const counted = await repository.listForUser(actorId, filters, { limit, offset });
+  const { data, total } = splitCountedRows(counted);
+  return { data, meta: paginationMeta({ page, limit, total }) };
 };
 
 export const get = async ({ organizationId, actorId }) => {

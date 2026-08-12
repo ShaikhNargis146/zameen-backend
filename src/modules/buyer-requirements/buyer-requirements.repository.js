@@ -79,18 +79,10 @@ const listForUserParams = (
 export const listForUser = (userId, filters, { limit, offset }) =>
   run(
     "any",
-    `SELECT ${columns} FROM marketplace.buyer_requirements
+    `SELECT ${columns}, count(*) OVER()::int AS total FROM marketplace.buyer_requirements
      ${listForUserFilters}
      ORDER BY created_at DESC LIMIT $8 OFFSET $9`,
     [...listForUserParams(userId, filters), limit, offset]
-  );
-
-export const countForUser = (userId, filters) =>
-  run(
-    "one",
-    `SELECT count(*)::int AS count FROM marketplace.buyer_requirements
-     ${listForUserFilters}`,
-    listForUserParams(userId, filters)
   );
 
 export const update = (id, set) =>

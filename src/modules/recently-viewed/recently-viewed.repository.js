@@ -16,7 +16,7 @@ export const upsertView = (userId, listingId) =>
 export const recentListingIds = (userId, filters, { limit, offset }) =>
   run(
     "any",
-    `SELECT source.listing_id AS "listingId"
+    `SELECT source.listing_id AS "listingId", count(*) OVER()::int AS total
      FROM marketplace.recently_viewed source
      ${listingFilterJoins}
      WHERE source.user_id = $1
@@ -24,15 +24,4 @@ export const recentListingIds = (userId, filters, { limit, offset }) =>
      ORDER BY source.viewed_at DESC
      LIMIT $9 OFFSET $10`,
     [userId, ...listingFilterParams(filters), limit, offset]
-  );
-
-export const countRecentlyViewed = (userId, filters) =>
-  run(
-    "one",
-    `SELECT count(*)::int AS count
-     FROM marketplace.recently_viewed source
-     ${listingFilterJoins}
-     WHERE source.user_id = $1
-     ${listingFilterWhere}`,
-    [userId, ...listingFilterParams(filters)]
   );

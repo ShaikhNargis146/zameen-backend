@@ -77,23 +77,13 @@ export const listForUser = (userId, filters, { limit, offset }) =>
   run(
     "any",
     `SELECT o.id, o.name, o.type, o.slug, o.phone, o.email, o.gst_number AS "gstNumber", o.rera_number AS "reraNumber", o.logo_storage_key AS "logoUrl", o.status,
-            m.role, m.joined_at AS "joinedAt"
+            m.role, m.joined_at AS "joinedAt", count(*) OVER()::int AS total
      FROM account.organizations o
      JOIN account.organization_members m ON m.organization_id = o.id
      ${listForUserFilters}
      ORDER BY o.created_at DESC
      LIMIT $12 OFFSET $13`,
     [...listForUserParams(userId, filters), limit, offset]
-  );
-
-export const countForUser = (userId, filters) =>
-  run(
-    "one",
-    `SELECT count(*)::int AS count
-     FROM account.organizations o
-     JOIN account.organization_members m ON m.organization_id = o.id
-     ${listForUserFilters}`,
-    listForUserParams(userId, filters)
   );
 
 export const update = (id, changes) =>

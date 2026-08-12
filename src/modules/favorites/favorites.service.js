@@ -1,5 +1,5 @@
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta } from "../../shared/pagination.js";
+import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import * as repository from "./favorites.repository.js";
 
@@ -19,10 +19,8 @@ export const removeFavorite = async ({ actorId, listingId }) => {
 
 export const listFavorites = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const [rows, { count }] = await Promise.all([
-    repository.favoriteListingIds(actorId, filters, { limit, offset }),
-    repository.countFavorites(actorId, filters)
-  ]);
+  const counted = await repository.favoriteListingIds(actorId, filters, { limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
   const data = await listingCardsByIds(rows.map(row => row.listingId), actorId);
-  return { data, meta: paginationMeta({ page, limit, total: count }) };
+  return { data, meta: paginationMeta({ page, limit, total }) };
 };

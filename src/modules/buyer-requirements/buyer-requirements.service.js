@@ -1,5 +1,5 @@
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta } from "../../shared/pagination.js";
+import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import * as repository from "./buyer-requirements.repository.js";
 import { uuid } from "./buyer-requirements.validation.js";
 
@@ -110,13 +110,11 @@ export const get = requirement => toBuyerRequirement(requirement);
 
 export const list = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const [rows, { count }] = await Promise.all([
-    repository.listForUser(actorId, filters, { limit, offset }),
-    repository.countForUser(actorId, filters)
-  ]);
+  const counted = await repository.listForUser(actorId, filters, { limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
   return {
     data: rows.map(toBuyerRequirement),
-    meta: paginationMeta({ page, limit, total: count })
+    meta: paginationMeta({ page, limit, total })
   };
 };
 
