@@ -38,6 +38,11 @@ export const requireAdmin = async (req, res, next) => {
   req.actor = actor;
   return next();
 };
+export const optionalAuth = async (req, res, next) => {
+  const token = bearer(req);
+  req.actor = token ? await AuthService.authenticate(token) : null;
+  return next();
+};
 
 const router = Router();
 router.post("/otp/request", asyncRoute(controller.requestOtp));

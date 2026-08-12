@@ -1,0 +1,70 @@
+{
+  "info": {
+    "name": "Zameens — Developer 2 APIs",
+    "description": "UI-contract Developer 2 endpoints: Organizations, Favorites, Recently Viewed, Buyer Requirements. Set accessToken after OTP verification and replace UUID variables with real values.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "organizationId", "value": "" },
+    { "key": "memberUserId", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "listingId", "value": "" },
+    { "key": "requirementId", "value": "" },
+    { "key": "locationId", "value": "" },
+    { "key": "propertyTypeId", "value": "" },
+    { "key": "areaUnitId", "value": "" }
+  ],
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        { "name": "Request OTP", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}" }, "url": "{{baseUrl}}/auth/otp/request" } },
+        { "name": "Verify OTP", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"challengeId\": \"replace-with-challenge-id\",\n  \"otp\": \"1234\",\n  \"deviceId\": \"postman\",\n  \"deviceName\": \"Postman\"\n}" }, "url": "{{baseUrl}}/auth/otp/verify" } },
+        { "name": "Refresh session", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"replace-with-refresh-token\"\n}" }, "url": "{{baseUrl}}/auth/refresh" } },
+        { "name": "Logout", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout" } },
+        { "name": "Logout all sessions", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout-all" } }
+      ]
+    },
+    {
+      "name": "Organizations",
+      "item": [
+        { "name": "Create organization", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Test Brokerage\",\n  \"type\": \"BROKERAGE\",\n  \"phone\": \"+919876543210\",\n  \"email\": \"broker@example.com\",\n  \"gstNumber\": \"27AAAPL1234C1ZV\",\n  \"reraNumber\": \"P51700012345\",\n  \"logoStorageKey\": null\n}" }, "url": "{{baseUrl}}/organizations" } },
+        { "name": "My organizations", "request": { "method": "GET", "url": "{{baseUrl}}/organizations/me?page=1&limit=20&search=brok&type=BROKERAGE&status=ACTIVE&role=OWNER" } },
+        { "name": "Organization details", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/organizations/{{organizationId}}" } },
+        { "name": "Update organization", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Updated Brokerage Name\",\n  \"phone\": \"+919876543211\"\n}" }, "url": "{{baseUrl}}/organizations/{{organizationId}}" } },
+        { "name": "Change organization status (admin)", "request": { "method": "PATCH", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"SUSPENDED\"\n}" }, "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/status" } },
+        { "name": "List members", "request": { "method": "GET", "url": "{{baseUrl}}/organizations/{{organizationId}}/members" } },
+        { "name": "Add member", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{memberUserId}}\",\n  \"role\": \"MEMBER\"\n}" }, "url": "{{baseUrl}}/organizations/{{organizationId}}/members" } },
+        { "name": "Remove member", "request": { "method": "DELETE", "url": "{{baseUrl}}/organizations/{{organizationId}}/members/{{memberUserId}}" } }
+      ]
+    },
+    {
+      "name": "Favorites",
+      "item": [
+        { "name": "Add favorite", "request": { "method": "POST", "url": "{{baseUrl}}/favorites/{{listingId}}" } },
+        { "name": "Remove favorite", "request": { "method": "DELETE", "url": "{{baseUrl}}/favorites/{{listingId}}" } },
+        { "name": "List favorites", "request": { "method": "GET", "url": "{{baseUrl}}/favorites?page=1&limit=20&search=villa&transactionType=SALE&status=PUBLISHED&propertyTypeId={{propertyTypeId}}&locationId={{locationId}}&minPrice=5000000&maxPrice=100000000" } }
+      ]
+    },
+    {
+      "name": "Recently Viewed",
+      "item": [
+        { "name": "Record listing view", "request": { "method": "POST", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/recently-viewed/{{listingId}}" } },
+        { "name": "List recently viewed", "request": { "method": "GET", "url": "{{baseUrl}}/recently-viewed?page=1&limit=20&search=villa&transactionType=SALE&status=PUBLISHED&propertyTypeId={{propertyTypeId}}&locationId={{locationId}}&minPrice=5000000&maxPrice=100000000" } }
+      ]
+    },
+    {
+      "name": "Buyer Requirements",
+      "item": [
+        { "name": "Create buyer requirement", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"3 acre industrial plot near highway\",\n  \"locationId\": \"{{locationId}}\",\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"minArea\": 1,\n  \"maxArea\": 5,\n  \"areaUnitId\": \"{{areaUnitId}}\",\n  \"minBudgetMinor\": 5000000000,\n  \"maxBudgetMinor\": 20000000000,\n  \"purpose\": \"INDUSTRIAL\",\n  \"roadWidthMinM\": 12,\n  \"verifiedOnly\": true,\n  \"status\": \"ACTIVE\"\n}" }, "url": "{{baseUrl}}/buyer-requirements" } },
+        { "name": "List buyer requirements", "request": { "method": "GET", "url": "{{baseUrl}}/buyer-requirements?page=1&limit=20&search=highway&status=ACTIVE&purpose=INDUSTRIAL&locationId={{locationId}}&propertyTypeId={{propertyTypeId}}&verifiedOnly=true" } },
+        { "name": "Buyer requirement details", "request": { "method": "GET", "url": "{{baseUrl}}/buyer-requirements/{{requirementId}}" } },
+        { "name": "Update buyer requirement", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"PAUSED\",\n  \"maxBudgetMinor\": 25000000000\n}" }, "url": "{{baseUrl}}/buyer-requirements/{{requirementId}}" } },
+        { "name": "Delete buyer requirement", "request": { "method": "DELETE", "url": "{{baseUrl}}/buyer-requirements/{{requirementId}}" } }
+      ]
+    }
+  ]
+}

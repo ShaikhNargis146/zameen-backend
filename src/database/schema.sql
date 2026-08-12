@@ -191,7 +191,7 @@ CREATE TABLE account.organization_members (
   organization_id uuid NOT NULL REFERENCES account.organizations(id) ON DELETE RESTRICT,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   role varchar(30) NOT NULL CHECK (role IN ('OWNER','ADMIN','MEMBER')),
-  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
+  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INVITED','REMOVED')),
   joined_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, user_id)
 );
@@ -468,6 +468,13 @@ CREATE TABLE marketplace.favorites (
   created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
 );
 CREATE INDEX idx_marketplace_favorites_listing ON marketplace.favorites(listing_id, created_at DESC);
+
+CREATE TABLE marketplace.recently_viewed (
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
+  viewed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
+);
+CREATE INDEX idx_marketplace_recently_viewed_user ON marketplace.recently_viewed(user_id, viewed_at DESC);
 
 CREATE TABLE marketplace.listing_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
