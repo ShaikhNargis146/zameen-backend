@@ -19,6 +19,7 @@ app.use(morgan("combined", logs));
 // CORS configuration
 app.use(cors());
 
+// Files are direct-to-storage uploads; API requests should carry metadata only.
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 

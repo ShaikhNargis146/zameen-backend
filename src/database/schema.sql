@@ -82,10 +82,12 @@ CREATE TABLE auth.otp_challenges (
   verified_at timestamptz,
   attempt_count smallint NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
   max_attempts smallint NOT NULL DEFAULT 5 CHECK (max_attempts BETWEEN 1 AND 20),
+  ip_address inet,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_otp_expiry CHECK (expires_at > created_at)
 );
 CREATE INDEX idx_auth_otp_destination ON auth.otp_challenges(destination, purpose, created_at DESC);
+CREATE INDEX idx_auth_otp_ip_created ON auth.otp_challenges(ip_address, created_at DESC) WHERE ip_address IS NOT NULL;
 
 CREATE TABLE auth.refresh_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -378,6 +380,7 @@ CREATE TABLE land.property_media (
   media_type varchar(20) NOT NULL CHECK (media_type IN ('IMAGE','VIDEO','DRONE_VIDEO','SITE_PLAN')),
   storage_key text NOT NULL, thumbnail_storage_key text, mime_type varchar(100),
   sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0), is_cover boolean NOT NULL DEFAULT false,
+  caption varchar(255),
   uploaded_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz
 );

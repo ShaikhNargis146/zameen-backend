@@ -1,10 +1,4 @@
-import pg from "../../utils/postgres_store.js";
-
-const run = async (method, sql, params = []) => {
-  const result = await pg[method](sql, params);
-  if (!result.ok) throw result.error;
-  return result.data;
-};
+import { pg, run } from "../../shared/db.js";
 
 const propertySummarySql = `SELECT p.id, p.public_code AS "publicCode", jsonb_build_object('id', pt.id, 'code', pt.code, 'name', pt.name, 'sortOrder', pt.sort_order) AS "propertyType", CASE WHEN lut.id IS NULL THEN NULL ELSE jsonb_build_object('id', lut.id, 'code', lut.code, 'name', lut.name, 'sortOrder', lut.sort_order) END AS "landUseType", CASE WHEN ot.id IS NULL THEN NULL ELSE jsonb_build_object('id', ot.id, 'code', ot.code, 'name', ot.name, 'sortOrder', ot.sort_order) END AS "ownershipType", p.owner_organization_id AS "organizationId", p.source, p.status, COALESCE(scanner.readiness_score, 0)::int AS "completionPercent", p.created_at AS "createdAt", p.updated_at AS "updatedAt" FROM land.properties p JOIN land.property_types pt ON pt.id = p.property_type_id LEFT JOIN land.land_use_types lut ON lut.id = p.land_use_type_id LEFT JOIN land.ownership_types ot ON ot.id = p.ownership_type_id LEFT JOIN land.v_property_scanner scanner ON scanner.property_id = p.id`;
 
@@ -38,6 +32,12 @@ export const summary = propertyId =>
     "oneOrNone",
     `${propertySummarySql} WHERE p.id = $1 AND p.deleted_at IS NULL`,
     [propertyId]
+  );
+export const summaries = propertyIds =>
+  run(
+    "any",
+    `${propertySummarySql} WHERE p.id = ANY($1::uuid[]) AND p.deleted_at IS NULL ORDER BY array_position($1::uuid[], p.id)`,
+    [propertyIds]
   );
 export const ownedIds = ({ userId, status, search, limit, offset }) =>
   run(
@@ -203,4 +203,100 @@ export const passport = propertyId =>
     "oneOrNone",
     `SELECT property_id AS "propertyId", public_code AS "publicCode", completeness_percent AS "completenessPercent", verification_checks AS "verificationChecks", document_count AS "documentCount", last_updated AS "lastUpdated" FROM land.v_land_passports WHERE property_id = $1`,
     [propertyId]
+  );
+export const media = propertyId =>
+  run(
+    "any",
+    `SELECT id, media_type AS "mediaType", storage_key AS "storageKey", thumbnail_storage_key AS "thumbnailStorageKey", mime_type AS "mimeType", sort_order AS "sortOrder", is_cover AS "isCover", caption FROM land.property_media WHERE property_id = $1 AND deleted_at IS NULL ORDER BY sort_order, created_at`,
+    [propertyId]
+  );
+export const mediaForProperty = (propertyId, mediaId) =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM land.property_media WHERE id = $1 AND property_id = $2 AND deleted_at IS NULL`,
+    [mediaId, propertyId]
+  );
+export const createMedia = input =>
+  run(
+    "one",
+    `INSERT INTO land.property_media (property_id, media_type, storage_key, mime_type, sort_order, is_cover, caption, uploaded_by_user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [
+      input.propertyId,
+      input.mediaType,
+      input.storageKey,
+      input.mimeType,
+      input.sortOrder,
+      input.isCover,
+      input.caption,
+      input.userId
+    ]
+  );
+export const updateMedia = (mediaId, changes) =>
+  pg.updateWhere({
+    table: "land.property_media",
+    set: changes,
+    where: "id = ${id} AND deleted_at IS NULL",
+    params: { id: mediaId }
+  });
+export const deleteMedia = mediaId =>
+  run(
+    "none",
+    `UPDATE land.property_media SET deleted_at = now(), is_cover = false WHERE id = $1 AND deleted_at IS NULL`,
+    [mediaId]
+  );
+export const reorderMedia = async (propertyId, mediaIds) => {
+  const result = await pg.tx(async transaction => {
+    for (const [index, mediaId] of mediaIds.entries())
+      await transaction.none(
+        `UPDATE land.property_media SET sort_order = $3 WHERE id = $1 AND property_id = $2 AND deleted_at IS NULL`,
+        [mediaId, propertyId, index]
+      );
+  });
+  if (!result.ok) throw result.error;
+};
+export const setCover = async (propertyId, mediaId) => {
+  const result = await pg.tx(async transaction => {
+    await transaction.none(
+      `UPDATE land.property_media SET is_cover = false WHERE property_id = $1 AND deleted_at IS NULL`,
+      [propertyId]
+    );
+    await transaction.none(
+      `UPDATE land.property_media SET is_cover = true WHERE id = $1 AND property_id = $2 AND deleted_at IS NULL`,
+      [mediaId, propertyId]
+    );
+  });
+  if (!result.ok) throw result.error;
+};
+export const documents = propertyId =>
+  run(
+    "any",
+    `SELECT d.id, d.storage_key AS "storageKey", d.file_name AS "fileName", d.mime_type AS "mimeType", d.file_size_bytes AS "fileSizeBytes", d.visibility, d.verification_status AS "verificationStatus", d.created_at AS "createdAt", jsonb_build_object('id', dt.id, 'code', dt.code, 'name', dt.name, 'sortOrder', dt.sort_order) AS "documentType" FROM land.property_documents d JOIN land.document_types dt ON dt.id = d.document_type_id WHERE d.property_id = $1 AND d.deleted_at IS NULL ORDER BY d.created_at DESC`,
+    [propertyId]
+  );
+export const document = (propertyId, documentId) =>
+  run(
+    "oneOrNone",
+    `SELECT d.id, d.storage_key AS "storageKey", d.file_name AS "fileName", d.mime_type AS "mimeType", d.file_size_bytes AS "fileSizeBytes", d.visibility, d.verification_status AS "verificationStatus", d.created_at AS "createdAt", jsonb_build_object('id', dt.id, 'code', dt.code, 'name', dt.name, 'sortOrder', dt.sort_order) AS "documentType" FROM land.property_documents d JOIN land.document_types dt ON dt.id = d.document_type_id WHERE d.id = $1 AND d.property_id = $2 AND d.deleted_at IS NULL`,
+    [documentId, propertyId]
+  );
+export const createDocument = input =>
+  run(
+    "one",
+    `INSERT INTO land.property_documents (property_id, document_type_id, storage_key, file_name, mime_type, file_size_bytes, visibility, uploaded_by_user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [
+      input.propertyId,
+      input.documentTypeId,
+      input.storageKey,
+      input.fileName,
+      input.mimeType,
+      input.fileSizeBytes,
+      input.visibility,
+      input.userId
+    ]
+  );
+export const deleteDocument = documentId =>
+  run(
+    "none",
+    `UPDATE land.property_documents SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+    [documentId]
   );

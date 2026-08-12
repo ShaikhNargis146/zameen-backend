@@ -1,10 +1,4 @@
-import pg from "../../utils/postgres_store.js";
-
-const run = async (method, sql, params = []) => {
-  const result = await pg[method](sql, params);
-  if (!result.ok) throw result.error;
-  return result.data;
-};
+import { pg, run } from "../../shared/db.js";
 
 export const findUser = id =>
   run(

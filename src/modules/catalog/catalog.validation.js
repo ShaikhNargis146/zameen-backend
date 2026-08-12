@@ -15,17 +15,20 @@ export const stateCode = value =>
   String(value || "")
     .trim()
     .toUpperCase();
-export const locationSearch = query => ({
-  q: searchQuery(query),
-  types: query.types
+export const locationSearch = query => {
+  const types = query.types
     ? String(query.types)
         .split(",")
         .map(value => value.trim().toUpperCase())
         .filter(Boolean)
-    : null,
-  stateCode: query.stateCode ? stateCode(query.stateCode) : null,
-  limit: Math.min(Math.max(Number(query.limit || 10), 1), 25)
-});
+    : null;
+  return {
+    q: searchQuery(query),
+    types: types?.length ? types : null,
+    stateCode: query.stateCode ? stateCode(query.stateCode) : null,
+    limit: Math.min(Math.max(Number(query.limit || 10), 1), 25)
+  };
+};
 export const coordinates = query => {
   const latitude = Number(query.lat);
   const longitude = Number(query.lng);

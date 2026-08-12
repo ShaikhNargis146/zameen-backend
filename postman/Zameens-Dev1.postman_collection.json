@@ -1,0 +1,70 @@
+{
+  "info": {
+    "name": "Zameens — Developer 1 APIs",
+    "description": "UI-contract Developer 1 endpoints. Set accessToken after OTP verification and replace UUID variables with real values.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "propertyId", "value": "" },
+    { "key": "listingId", "value": "" },
+    { "key": "documentTypeId", "value": "" },
+    { "key": "mediaId", "value": "" },
+    { "key": "documentId", "value": "" },
+    { "key": "storageKey", "value": "" }
+  ],
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        { "name": "Request OTP", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}" }, "url": "{{baseUrl}}/auth/otp/request" } },
+        { "name": "Verify OTP", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"challengeId\": \"replace-with-challenge-id\",\n  \"otp\": \"1234\",\n  \"deviceId\": \"postman\",\n  \"deviceName\": \"Postman\"\n}" }, "url": "{{baseUrl}}/auth/otp/verify" } },
+        { "name": "Refresh session", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"replace-with-refresh-token\"\n}" }, "url": "{{baseUrl}}/auth/refresh" } },
+        { "name": "Logout", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout" } }
+      ]
+    },
+    {
+      "name": "Users and masters",
+      "item": [
+        { "name": "My profile", "request": { "method": "GET", "url": "{{baseUrl}}/users/me" } },
+        { "name": "Update profile", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"displayName\": \"Test Seller\",\n  \"preferredLanguage\": \"en\"\n}" }, "url": "{{baseUrl}}/users/me" } },
+        { "name": "Property types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/property-types" } },
+        { "name": "Area units", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/area-units" } },
+        { "name": "Location search", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/search?q=panvel" } }
+      ]
+    },
+    {
+      "name": "Properties",
+      "item": [
+        { "name": "Create property", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"propertyTypeId\": \"replace-with-property-type-id\"\n}" }, "url": "{{baseUrl}}/properties" } },
+        { "name": "My properties", "request": { "method": "GET", "url": "{{baseUrl}}/properties/me?page=1&limit=20" } },
+        { "name": "Property details", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}" } },
+        { "name": "Save land details", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"areaValue\": 1,\n  \"areaUnitId\": \"replace-with-area-unit-id\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/land-details" } },
+        { "name": "Save amenities", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amenities\": []\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/amenities" } },
+        { "name": "Request verification", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"checkTypes\": [\"LOCATION\", \"LAND_DETAILS\"]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/verification/request" } }
+      ]
+    },
+    {
+      "name": "Property media and documents",
+      "item": [
+        { "name": "Create media upload ticket", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url" } },
+        { "name": "Complete media upload", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\",\n  \"isCover\": true\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/complete" } },
+        { "name": "List media", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/media" } },
+        { "name": "Create document upload ticket", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/upload-url" } },
+        { "name": "Complete document upload", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"documentTypeId\": \"{{documentTypeId}}\",\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/complete" } },
+        { "name": "List documents", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents" } }
+      ]
+    },
+    {
+      "name": "Listings",
+      "item": [
+        { "name": "Create listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"transactionType\": \"SALE\",\n  \"title\": \"Land for sale\",\n  \"description\": \"Well located land parcel\",\n  \"priceAmountMinor\": 100000000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/listings" } },
+        { "name": "Submit listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/submit" } },
+        { "name": "Seller listings", "request": { "method": "GET", "url": "{{baseUrl}}/seller/listings?limit=20" } },
+        { "name": "Public listing detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/detail" } }
+      ]
+    }
+  ]
+}

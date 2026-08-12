@@ -1,22 +1,31 @@
 import { Router } from "express";
+import { requireOwnedResource } from "../../shared/authorization.js";
 import { asyncRoute } from "../../shared/http.js";
-import { requireAdmin, requireAuth } from "../auth/auth.routes.js";
+import {
+  requireAdmin,
+  requireAnyRole,
+  requireAuth
+} from "../auth/auth.routes.js";
 import * as controller from "./listings.controller.js";
 import { ownedListing } from "./listings.service.js";
 
 const router = Router();
-const requireOwnedListing = async (req, res, next) => {
-  try {
-    req.listing = await ownedListing(req.params.listingId, req.actor.id);
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-};
+const requirePropertyContributor = requireAnyRole(
+  "SELLER",
+  "BROKER",
+  "DEVELOPER",
+  "ADMIN"
+);
+const requireOwnedListing = requireOwnedResource({
+  param: "listingId",
+  target: "listing",
+  load: ownedListing
+});
 
 router.post(
   "/properties/:propertyId/listings",
   requireAuth,
+  requirePropertyContributor,
   asyncRoute(controller.create)
 );
 router.get(

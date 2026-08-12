@@ -31,15 +31,19 @@ const handler = (err, req, res, next) => {
     const status =
       err?.status || err?.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
 
+    const isServerError = status >= httpStatus.INTERNAL_SERVER_ERROR;
     const payload = {
       success: false,
       error: {
-        code: err?.code || "INTERNAL_ERROR",
-        message: err?.message || "Internal Server Error"
+        code: isServerError ? "INTERNAL_ERROR" : err?.code || "REQUEST_ERROR",
+        message:
+          isServerError && process.env.NODE_ENV === "production"
+            ? "Internal Server Error"
+            : err?.message || "Internal Server Error"
       }
     };
     const details = err?.details || err?.errors?.details;
-    if (details?.length) payload.error.details = details;
+    if (!isServerError && details?.length) payload.error.details = details;
 
     return res.status(status).json(payload);
   } catch (e) {
@@ -69,9 +73,12 @@ const converter = (err, req, res, next) => {
     });
   } else if (!(err instanceof APIError)) {
     convertedError = new APIError({
-      message: err.message,
-      code: err.code,
-      errors: { details: err.details },
+      message:
+        err.status && err.status < 500 ? err.message : "Internal Server Error",
+      code: err.code || "INTERNAL_ERROR",
+      errors: {
+        details: err.status && err.status < 500 ? err.details : undefined
+      },
       status: err.status || httpStatus.INTERNAL_SERVER_ERROR,
       stack: err.stack
     });

@@ -1,29 +1,22 @@
 import { Router } from "express";
-import { asyncRoute, fail } from "../../shared/http.js";
-import { requireAuth } from "../auth/auth.routes.js";
+import { requireOwnedResource } from "../../shared/authorization.js";
+import { asyncRoute } from "../../shared/http.js";
+import { requireAnyRole, requireAuth } from "../auth/auth.routes.js";
 import * as controller from "./properties.controller.js";
 import { ownedProperty } from "./properties.service.js";
 
 const router = Router();
-const requirePropertyContributor = (req, res, next) =>
-  req.actor.roles.some(role =>
-    ["SELLER", "BROKER", "DEVELOPER", "ADMIN"].includes(role)
-  )
-    ? next()
-    : fail(
-        res,
-        403,
-        "PROPERTY_CREATION_FORBIDDEN",
-        "Seller, broker, or developer access is required."
-      );
-const requireOwnedProperty = async (req, res, next) => {
-  try {
-    req.property = await ownedProperty(req.params.propertyId, req.actor.id);
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-};
+const requirePropertyContributor = requireAnyRole(
+  "SELLER",
+  "BROKER",
+  "DEVELOPER",
+  "ADMIN"
+);
+const requireOwnedProperty = requireOwnedResource({
+  param: "propertyId",
+  target: "property",
+  load: ownedProperty
+});
 
 router.post(
   "/properties",
@@ -126,6 +119,78 @@ router.get(
   requireAuth,
   requireOwnedProperty,
   asyncRoute(controller.passport)
+);
+router.post(
+  "/properties/:propertyId/media/upload-url",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.mediaUpload)
+);
+router.post(
+  "/properties/:propertyId/media/complete",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.completeMedia)
+);
+router.get(
+  "/properties/:propertyId/media",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.media)
+);
+router.patch(
+  "/properties/:propertyId/media/:mediaId",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.updateMedia)
+);
+router.delete(
+  "/properties/:propertyId/media/:mediaId",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.deleteMedia)
+);
+router.put(
+  "/properties/:propertyId/media/order",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.orderMedia)
+);
+router.put(
+  "/properties/:propertyId/media/:mediaId/cover",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.coverMedia)
+);
+router.post(
+  "/properties/:propertyId/documents/upload-url",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.documentUpload)
+);
+router.post(
+  "/properties/:propertyId/documents/complete",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.completeDocument)
+);
+router.get(
+  "/properties/:propertyId/documents",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.documents)
+);
+router.get(
+  "/properties/:propertyId/documents/:documentId",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.document)
+);
+router.delete(
+  "/properties/:propertyId/documents/:documentId",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.deleteDocument)
 );
 
 export default router;

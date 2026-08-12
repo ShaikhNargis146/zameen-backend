@@ -13,6 +13,7 @@ const otpMaxAttempts = Number(process.env.OTP_MAX_ATTEMPTS || 5);
 const otpResendAfterSeconds = Number(
   process.env.OTP_RESEND_AFTER_SECONDS || 30
 );
+const otpRateLimitPerIp = Number(process.env.OTP_RATE_LIMIT_PER_IP_10MIN || 20);
 const otpPurposes = new Set([
   "LOGIN",
   "REGISTER",
@@ -99,7 +100,25 @@ class AuthService {
         "OTP_PROVIDER_UNCONFIGURED",
         "OTP service is unavailable."
       );
-    if ((await repository.countRecentChallenges(destination)).count >= 5)
+    const [recentForDestination, recentForIp, latest] = await Promise.all([
+      repository.countRecentChallenges(destination),
+      input.ip ? repository.countRecentChallengesForIp(input.ip) : { count: 0 },
+      repository.latestChallengeForDestination(destination)
+    ]);
+    if (
+      latest &&
+      Date.now() - new Date(latest.created_at).getTime() <
+        otpResendAfterSeconds * 1000
+    )
+      return responseError(
+        429,
+        "OTP_RESEND_COOLDOWN",
+        "Please wait before requesting another OTP."
+      );
+    if (
+      recentForDestination.count >= 5 ||
+      recentForIp.count >= otpRateLimitPerIp
+    )
       return responseError(
         429,
         "OTP_RATE_LIMITED",
@@ -116,7 +135,8 @@ class AuthService {
       purpose,
       otpHash: hashWithPepper(`${destination}:${purpose}:${staticOtp}`),
       expiresAt: new Date(Date.now() + otpTtlSeconds * 1000),
-      maxAttempts: otpMaxAttempts
+      maxAttempts: otpMaxAttempts,
+      ip: input.ip || null
     });
     return {
       ok: true,
@@ -173,9 +193,19 @@ class AuthService {
           name: displayName({ destination })
         })
       )?.id;
-      if (!userId)
-        userId = (await repository.findUserByDestination(destination, channel))
-          .id;
+      if (!userId) {
+        const existing = await repository.findUserByDestination(
+          destination,
+          channel
+        );
+        if (!existing)
+          return responseError(
+            409,
+            "ACCOUNT_CREATION_RETRY",
+            "Account creation is in progress. Please retry verification."
+          );
+        userId = existing.id;
+      }
       await repository.addBuyerRole(userId);
     }
     return this.createSession({
@@ -262,16 +292,16 @@ class AuthService {
         userId: claims.sub
       });
       if (!session || session.status !== "ACTIVE") return null;
-      const roles = await rolesFor(session.id);
+      const roles = await rolesFor(session.userId);
       if (requireAdmin && !roles.includes("ADMIN")) return null;
       return {
-        id: session.id,
-        name: session.display_name,
-        phone: session.phone_e164,
+        id: session.userId,
+        name: session.displayName,
+        phone: session.phoneE164,
         email: session.email,
-        preferredLanguage: session.preferred_language,
+        preferredLanguage: session.preferredLanguage,
         roles,
-        sessionId: session.id
+        sessionId: session.sessionId
       };
     } catch {
       return null;

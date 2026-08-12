@@ -169,3 +169,96 @@ export const verificationRequest = body => {
     );
   return values;
 };
+const fileInput = (body, acceptedMediaTypes = null) => {
+  const fileName = String(body.fileName || "").trim();
+  const mimeType = String(body.mimeType || "")
+    .trim()
+    .toLowerCase();
+  const fileSizeBytes = Number(body.fileSizeBytes);
+  if (
+    !fileName ||
+    !mimeType ||
+    !Number.isInteger(fileSizeBytes) ||
+    fileSizeBytes <= 0 ||
+    fileSizeBytes > 50 * 1024 * 1024
+  )
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "fileName, mimeType, and fileSizeBytes are required."
+    );
+  const mediaType = body.mediaType
+    ? String(body.mediaType).toUpperCase()
+    : null;
+  if (acceptedMediaTypes && !acceptedMediaTypes.has(mediaType))
+    throw new HttpError(400, "VALIDATION_ERROR", "Invalid mediaType.");
+  return { fileName, mimeType, fileSizeBytes, mediaType };
+};
+const mediaTypes = new Set(["IMAGE", "VIDEO", "DRONE_VIDEO", "SITE_PLAN"]);
+export const mediaUpload = body => fileInput(body, mediaTypes);
+export const mediaComplete = body => {
+  const input = fileInput(body, mediaTypes);
+  if (!body.storageKey)
+    throw new HttpError(400, "VALIDATION_ERROR", "storageKey is required.");
+  return {
+    ...input,
+    storageKey: String(body.storageKey),
+    sortOrder:
+      Number.isInteger(body.sortOrder) && body.sortOrder >= 0
+        ? body.sortOrder
+        : 0,
+    isCover: Boolean(body.isCover),
+    caption: body.caption ? String(body.caption).slice(0, 255) : null
+  };
+};
+export const mediaUpdate = body => {
+  const changes = {};
+  if (has(body, "caption"))
+    changes.caption = body.caption ? String(body.caption).slice(0, 255) : null;
+  if (has(body, "sortOrder")) {
+    if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0)
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        "sortOrder must be a non-negative integer."
+      );
+    changes.sort_order = body.sortOrder;
+  }
+  if (!Object.keys(changes).length)
+    throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
+  return changes;
+};
+export const mediaOrder = body => {
+  if (
+    !Array.isArray(body.mediaIds) ||
+    !body.mediaIds.length ||
+    new Set(body.mediaIds).size !== body.mediaIds.length
+  )
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "mediaIds must be a unique non-empty array."
+    );
+  return body.mediaIds;
+};
+export const documentUpload = body => fileInput(body);
+export const documentComplete = body => {
+  const input = fileInput(body);
+  const visibility = String(body.visibility || "PRIVATE").toUpperCase();
+  if (
+    !body.storageKey ||
+    !body.documentTypeId ||
+    !["PRIVATE", "OWNER_ONLY", "APPROVED_BUYERS"].includes(visibility)
+  )
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "storageKey, documentTypeId, and visibility are required."
+    );
+  return {
+    ...input,
+    storageKey: String(body.storageKey),
+    documentTypeId: body.documentTypeId,
+    visibility
+  };
+};

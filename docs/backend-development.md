@@ -18,7 +18,8 @@ TypeScript, or another server framework without an approved migration plan.
    and a different `TOKEN_PEPPER`.
 2. Create a new PostgreSQL database with privileges for `pgcrypto`, `citext`,
    `postgis`, and `pg_trgm`.
-3. Run `npm run db:schema` once for that new database.
+3. For a new database, run `npm run db:schema` once. For an existing database,
+   run `npm run db:migrate`.
 4. Run `npm start`, then call `GET /api/v1/status`.
 
 `npm run db:schema` is a clean-install command. It refuses to run when
@@ -34,7 +35,7 @@ src/
   middlewares/  cross-cutting Express middleware only
   modules/      business features
   routes/v1/    versioned route composition only
-  shared/       shared HTTP helpers
+  shared/       shared HTTP, database, and authorization helpers
   utils/        low-level infrastructure helpers
 ```
 
@@ -52,7 +53,8 @@ Each feature belongs in `src/modules/<feature>/`:
 Rules:
 
 - Do not add endpoint logic to `src/routes/v1/index.js`; it only mounts modules.
-- Only a repository may import `src/utils/postgres_store.js`.
+- Only a repository may import `src/shared/db.js`; only that helper imports
+  `src/utils/postgres_store.js`.
 - Controllers use `asyncRoute` and the helpers in `src/shared/http.js`.
 - Services throw `HttpError(status, code, message)` for expected business errors.
 - Do not expose SQL errors, tokens, OTPs, stacks, or secrets in responses.
@@ -121,8 +123,17 @@ For every database change:
 3. Test it on a fresh database and staging before production.
 4. Update `src/database/schema.sql` so a new installation has the final state.
 
-The project currently has a clean-install runner only. Add a versioned migration
-runner before making database changes to shared environments.
+`npm run db:migrate` applies every unapplied, forward-only SQL file in
+`migrations/` and records it in `ops.schema_migrations`. Never edit or delete a
+migration that has been applied to a shared environment.
+
+## Media and document uploads
+
+Uploads are direct to object storage, not base64 payloads sent through Express.
+The API intentionally keeps JSON and urlencoded bodies at 1 MB because they
+contain metadata only. The client flow is: request `upload-url`, upload the
+file to the returned signed URL, then call `complete` with the returned storage
+key and metadata. Do not raise the global body limit to accommodate files.
 
 ## Testing and verification
 

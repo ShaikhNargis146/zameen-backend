@@ -14,6 +14,16 @@ export const requireAuth = async (req, res, next) => {
   req.actor = actor;
   return next();
 };
+export const requireAnyRole = (...allowedRoles) => (req, res, next) => {
+  if (req.actor?.roles?.some(role => allowedRoles.includes(role)))
+    return next();
+  return fail(
+    res,
+    403,
+    "ROLE_REQUIRED",
+    "You do not have permission to perform this action."
+  );
+};
 export const requireAdmin = async (req, res, next) => {
   const actor = await AuthService.authenticate(bearer(req), {
     requireAdmin: true

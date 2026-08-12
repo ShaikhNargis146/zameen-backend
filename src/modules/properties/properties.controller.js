@@ -92,3 +92,88 @@ export const scanner = async (req, res) =>
   ok(res, await service.scanner(req.property.id));
 export const passport = async (req, res) =>
   ok(res, await service.passport(req.property.id));
+export const mediaUpload = async (req, res) =>
+  ok(
+    res,
+    await service.createMediaUpload({
+      propertyId: req.property.id,
+      input: validation.mediaUpload(req.body || {})
+    })
+  );
+export const completeMedia = async (req, res) =>
+  created(
+    res,
+    await service.completeMedia({
+      propertyId: req.property.id,
+      actorId: req.actor.id,
+      input: validation.mediaComplete(req.body || {})
+    })
+  );
+export const media = async (req, res) =>
+  ok(res, await service.listMedia(req.property.id));
+export const updateMedia = async (req, res) =>
+  ok(
+    res,
+    await service.updateMedia({
+      propertyId: req.property.id,
+      mediaId: req.params.mediaId,
+      changes: validation.mediaUpdate(req.body || {})
+    })
+  );
+export const deleteMedia = async (req, res) => {
+  await service.deleteMedia({
+    propertyId: req.property.id,
+    mediaId: req.params.mediaId
+  });
+  return res.status(204).send();
+};
+export const orderMedia = async (req, res) =>
+  ok(
+    res,
+    await service.reorderMedia({
+      propertyId: req.property.id,
+      mediaIds: validation.mediaOrder(req.body || {})
+    })
+  );
+export const coverMedia = async (req, res) =>
+  ok(
+    res,
+    await service.setMediaCover({
+      propertyId: req.property.id,
+      mediaId: req.params.mediaId
+    })
+  );
+export const documentUpload = async (req, res) =>
+  ok(
+    res,
+    await service.createDocumentUpload({
+      propertyId: req.property.id,
+      input: validation.documentUpload(req.body || {})
+    })
+  );
+export const completeDocument = async (req, res) =>
+  created(
+    res,
+    await service.completeDocument({
+      propertyId: req.property.id,
+      actorId: req.actor.id,
+      input: validation.documentComplete(req.body || {})
+    })
+  );
+export const documents = async (req, res) =>
+  ok(res, await service.listDocuments(req.property.id));
+export const document = async (req, res) =>
+  ok(
+    res,
+    await service.getDocument({
+      propertyId: req.property.id,
+      documentId: req.params.documentId
+    })
+  );
+export const deleteDocument = async (req, res) => {
+  await service.deleteDocument({
+    propertyId: req.property.id,
+    documentId: req.params.documentId
+  });
+  return res.status(204).send();
+};

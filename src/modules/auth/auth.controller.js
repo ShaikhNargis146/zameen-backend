@@ -9,7 +9,10 @@ const respond = (res, result, success) =>
 export const requestOtp = async (req, res) =>
   respond(
     res,
-    await AuthService.requestOtp(validation.otpRequest(req.body || {})),
+    await AuthService.requestOtp({
+      ...validation.otpRequest(req.body || {}),
+      ip: req.ip
+    }),
     ok
   );
 export const verifyOtp = async (req, res) =>
