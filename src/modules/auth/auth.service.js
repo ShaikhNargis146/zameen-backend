@@ -10,6 +10,10 @@ const accessTtlSeconds = Number(process.env.ACCESS_TOKEN_TTL_SECONDS || 900);
 const refreshTtlDays = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
 const otpTtlSeconds = Number(process.env.OTP_TTL_SECONDS || 300);
 const otpMaxAttempts = Number(process.env.OTP_MAX_ATTEMPTS || 5);
+const otpResendAfterSeconds = Number(
+  process.env.OTP_RESEND_AFTER_SECONDS || 30
+);
+const otpRateLimitPerIp = Number(process.env.OTP_RATE_LIMIT_PER_IP_10MIN || 20);
 const otpPurposes = new Set([
   "LOGIN",
   "REGISTER",
@@ -59,6 +63,24 @@ const displayName = ({ name, destination }) =>
   String(name || "")
     .trim()
     .replace(/\s+/g, " ") || `User ${destination.slice(-4)}`;
+const maskDestination = ({ destination, channel }) => {
+  if (channel === "SMS")
+    return `${destination.slice(0, 3)}******${destination.slice(-4)}`;
+  const [name, domain] = destination.split("@");
+  return `${name.slice(0, 2)}***@${domain || ""}`;
+};
+const userSummary = (user, roles) => ({
+  id: user.id,
+  firstName: user.first_name || null,
+  lastName: user.last_name || null,
+  displayName: user.display_name,
+  phoneE164: user.phone_e164,
+  email: user.email,
+  avatarUrl: user.avatar_storage_key || null,
+  roles,
+  status: user.status,
+  preferredLanguage: user.preferred_language
+});
 
 class AuthService {
   static async requestOtp(input) {
@@ -78,7 +100,25 @@ class AuthService {
         "OTP_PROVIDER_UNCONFIGURED",
         "OTP service is unavailable."
       );
-    if ((await repository.countRecentChallenges(destination)).count >= 5)
+    const [recentForDestination, recentForIp, latest] = await Promise.all([
+      repository.countRecentChallenges(destination),
+      input.ip ? repository.countRecentChallengesForIp(input.ip) : { count: 0 },
+      repository.latestChallengeForDestination(destination)
+    ]);
+    if (
+      latest &&
+      Date.now() - new Date(latest.created_at).getTime() <
+        otpResendAfterSeconds * 1000
+    )
+      return responseError(
+        429,
+        "OTP_RESEND_COOLDOWN",
+        "Please wait before requesting another OTP."
+      );
+    if (
+      recentForDestination.count >= 5 ||
+      recentForIp.count >= otpRateLimitPerIp
+    )
       return responseError(
         429,
         "OTP_RATE_LIMITED",
@@ -95,23 +135,31 @@ class AuthService {
       purpose,
       otpHash: hashWithPepper(`${destination}:${purpose}:${staticOtp}`),
       expiresAt: new Date(Date.now() + otpTtlSeconds * 1000),
-      maxAttempts: otpMaxAttempts
+      maxAttempts: otpMaxAttempts,
+      ip: input.ip || null
     });
-    return { ok: true, data: { expiresAt: challenge.expires_at } };
+    return {
+      ok: true,
+      data: {
+        challengeId: challenge.id,
+        destinationMasked: maskDestination({ destination, channel }),
+        expiresInSeconds: otpTtlSeconds,
+        resendAfterSeconds: otpResendAfterSeconds
+      }
+    };
   }
 
   static async verifyOtp(input) {
-    const purpose = String(input.purpose || "LOGIN").toUpperCase();
-    if (!otpPurposes.has(purpose))
-      return responseError(400, "INVALID_OTP_PURPOSE", "Invalid OTP purpose.");
-    const { destination, channel } = destinationFor(input);
-    if (!destination || !channel || !input.otp)
-      return responseError(400, "INVALID_OTP", "Invalid OTP request.");
-    const challenge = await repository.latestChallenge({
-      destination,
-      channel,
-      purpose
-    });
+    if (!input.challengeId || !input.otp)
+      return responseError(
+        400,
+        "INVALID_OTP",
+        "challengeId and otp are required."
+      );
+    const challenge = await repository.challengeById(input.challengeId);
+    if (!challenge)
+      return responseError(410, "OTP_EXPIRED", "OTP has expired.");
+    const { destination, channel, purpose } = challenge;
     if (
       !challenge ||
       challenge.verified_at ||
@@ -142,22 +190,40 @@ class AuthService {
         await repository.createUser({
           destination,
           channel,
-          name: displayName({ name: input.name, destination })
+          name: displayName({ destination })
         })
       )?.id;
-      if (!userId)
-        userId = (await repository.findUserByDestination(destination, channel))
-          .id;
+      if (!userId) {
+        const existing = await repository.findUserByDestination(
+          destination,
+          channel
+        );
+        if (!existing)
+          return responseError(
+            409,
+            "ACCOUNT_CREATION_RETRY",
+            "Account creation is in progress. Please retry verification."
+          );
+        userId = existing.id;
+      }
       await repository.addBuyerRole(userId);
     }
     return this.createSession({
       userId,
       ip: input.ip,
-      userAgent: input.userAgent
+      userAgent: input.userAgent,
+      deviceId: input.deviceId,
+      deviceName: input.deviceName
     });
   }
 
-  static async createSession({ userId, ip = null, userAgent = null }) {
+  static async createSession({
+    userId,
+    ip = null,
+    userAgent = null,
+    deviceId = null,
+    deviceName = null
+  }) {
     const user = await repository.findActiveUser(userId);
     if (!user || user.status !== "ACTIVE")
       return responseError(
@@ -171,6 +237,8 @@ class AuthService {
       tokenHash: hashWithPepper(`refresh:${refreshToken}`),
       ip,
       userAgent,
+      deviceId,
+      deviceName,
       expiresAt: new Date(Date.now() + refreshTtlDays * 86400000)
     });
     const roles = await rolesFor(userId);
@@ -180,20 +248,14 @@ class AuthService {
       data: {
         accessToken: signAccessToken({ userId, sessionId: session.id, roles }),
         refreshToken,
-        expiresAt: session.expires_at,
-        user: {
-          id: user.id,
-          name: user.display_name,
-          phone: user.phone_e164,
-          email: user.email,
-          roles,
-          preferredLanguage: user.preferred_language
-        }
+        accessTokenExpiresIn: accessTtlSeconds,
+        refreshTokenExpiresIn: refreshTtlDays * 86400,
+        user: userSummary(user, roles)
       }
     };
   }
 
-  static async refresh({ refreshToken, ip, userAgent }) {
+  static async refresh({ refreshToken, ip, userAgent, deviceId, deviceName }) {
     if (!refreshToken)
       return responseError(
         401,
@@ -210,7 +272,13 @@ class AuthService {
         "Invalid refresh token."
       );
     await repository.revokeSession(session.id);
-    return this.createSession({ userId: session.user_id, ip, userAgent });
+    return this.createSession({
+      userId: session.user_id,
+      ip,
+      userAgent,
+      deviceId,
+      deviceName
+    });
   }
 
   static async authenticate(accessToken, { requireAdmin = false } = {}) {
@@ -224,16 +292,16 @@ class AuthService {
         userId: claims.sub
       });
       if (!session || session.status !== "ACTIVE") return null;
-      const roles = await rolesFor(session.id);
+      const roles = await rolesFor(session.userId);
       if (requireAdmin && !roles.includes("ADMIN")) return null;
       return {
-        id: session.id,
-        name: session.display_name,
-        phone: session.phone_e164,
+        id: session.userId,
+        name: session.displayName,
+        phone: session.phoneE164,
         email: session.email,
-        preferredLanguage: session.preferred_language,
+        preferredLanguage: session.preferredLanguage,
         roles,
-        sessionId: session.id
+        sessionId: session.sessionId
       };
     } catch {
       return null;

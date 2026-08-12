@@ -1,4 +1,4 @@
-import { ok } from "../../shared/http.js";
+import { ok, paginationMeta } from "../../shared/http.js";
 import * as service from "./users.service.js";
 import * as validation from "./users.validation.js";
 
@@ -17,20 +17,24 @@ export const updateMe = async (req, res) =>
     )
   );
 export const myRoles = async (req, res) =>
-  ok(res, { roles: (await service.profile(req.actor.id)).roles });
+  ok(res, (await service.profile(req.actor.id)).roles);
 export const addMyRole = async (req, res) =>
-  ok(res, {
-    roles: await service.addSelfRole(
-      req.actor.id,
-      validation.selfRole(req.body || {})
-    )
-  });
+  ok(
+    res,
+    await service.addSelfRole(req.actor.id, validation.selfRole(req.body || {}))
+  );
 export const list = async (req, res) => {
   const query = validation.adminListQuery(req.query);
-  return ok(res, await service.adminList(query), {
-    limit: query.limit,
-    offset: query.offset
-  });
+  const result = await service.adminList(query);
+  return ok(
+    res,
+    result.items,
+    paginationMeta({
+      page: query.page,
+      limit: query.limit,
+      total: result.total
+    })
+  );
 };
 export const get = async (req, res) =>
   ok(res, await service.adminGet(req.params.userId));

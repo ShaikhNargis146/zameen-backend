@@ -1,10 +1,4 @@
-import pg from "../../utils/postgres_store.js";
-
-const run = async (method, sql, params = []) => {
-  const result = await pg[method](sql, params);
-  if (!result.ok) throw result.error;
-  return result.data;
-};
+import { run } from "../../shared/db.js";
 
 const destinationColumn = channel =>
   channel === "SMS" ? "phone_e164" : "email";
@@ -22,6 +16,18 @@ export const countRecentChallenges = destination =>
     `SELECT count(*)::int AS count FROM auth.otp_challenges WHERE destination = $1 AND created_at > now() - interval '10 minutes'`,
     [destination]
   );
+export const countRecentChallengesForIp = ip =>
+  run(
+    "one",
+    `SELECT count(*)::int AS count FROM auth.otp_challenges WHERE ip_address = $1 AND created_at > now() - interval '10 minutes'`,
+    [ip]
+  );
+export const latestChallengeForDestination = destination =>
+  run(
+    "oneOrNone",
+    `SELECT created_at FROM auth.otp_challenges WHERE destination = $1 ORDER BY created_at DESC LIMIT 1`,
+    [destination]
+  );
 export const findUserByDestination = (destination, channel) =>
   run(
     "oneOrNone",
@@ -33,7 +39,7 @@ export const findUserByDestination = (destination, channel) =>
 export const createChallenge = input =>
   run(
     "one",
-    `INSERT INTO auth.otp_challenges (user_id, destination, channel, purpose, otp_hash, expires_at, max_attempts) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, expires_at`,
+    `INSERT INTO auth.otp_challenges (user_id, destination, channel, purpose, otp_hash, expires_at, max_attempts, ip_address) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, expires_at`,
     [
       input.userId,
       input.destination,
@@ -41,7 +47,8 @@ export const createChallenge = input =>
       input.purpose,
       input.otpHash,
       input.expiresAt,
-      input.maxAttempts
+      input.maxAttempts,
+      input.ip
     ]
   );
 export const latestChallenge = ({ destination, channel, purpose }) =>
@@ -49,6 +56,12 @@ export const latestChallenge = ({ destination, channel, purpose }) =>
     "oneOrNone",
     `SELECT id, user_id, otp_hash, expires_at, verified_at, attempt_count, max_attempts FROM auth.otp_challenges WHERE destination = $1 AND channel = $2 AND purpose = $3 ORDER BY created_at DESC LIMIT 1`,
     [destination, channel, purpose]
+  );
+export const challengeById = id =>
+  run(
+    "oneOrNone",
+    `SELECT id, user_id, destination, channel, purpose, otp_hash, expires_at, verified_at, attempt_count, max_attempts FROM auth.otp_challenges WHERE id = $1`,
+    [id]
   );
 export const recordFailedAttempt = id =>
   run(
@@ -81,14 +94,22 @@ export const addBuyerRole = userId =>
 export const findActiveUser = id =>
   run(
     "oneOrNone",
-    `SELECT id, display_name, phone_e164, email, preferred_language, status FROM auth.users WHERE id = $1 AND deleted_at IS NULL`,
+    `SELECT id, first_name, last_name, display_name, phone_e164, email, avatar_storage_key, preferred_language, status FROM auth.users WHERE id = $1 AND deleted_at IS NULL`,
     [id]
   );
 export const createRefreshSession = input =>
   run(
     "one",
-    `INSERT INTO auth.refresh_sessions (user_id, token_hash, ip_address, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id, expires_at`,
-    [input.userId, input.tokenHash, input.ip, input.userAgent, input.expiresAt]
+    `INSERT INTO auth.refresh_sessions (user_id, token_hash, device_id, device_name, ip_address, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, expires_at`,
+    [
+      input.userId,
+      input.tokenHash,
+      input.deviceId,
+      input.deviceName,
+      input.ip,
+      input.userAgent,
+      input.expiresAt
+    ]
   );
 export const updateLastLogin = id =>
   run("none", `UPDATE auth.users SET last_login_at = now() WHERE id = $1`, [
@@ -115,6 +136,6 @@ export const revokeUserSessions = id =>
 export const authenticatedSession = ({ sessionId, userId }) =>
   run(
     "oneOrNone",
-    `SELECT s.id, u.id, u.display_name, u.phone_e164, u.email, u.preferred_language, u.status FROM auth.refresh_sessions s JOIN auth.users u ON u.id = s.user_id WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`,
+    `SELECT s.id AS "sessionId", u.id AS "userId", u.display_name AS "displayName", u.phone_e164 AS "phoneE164", u.email, u.preferred_language AS "preferredLanguage", u.status FROM auth.refresh_sessions s JOIN auth.users u ON u.id = s.user_id WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`,
     [sessionId, userId]
   );

@@ -1,22 +1,22 @@
-import pg from "../../utils/postgres_store.js";
-
-const run = async (method, sql, params = []) => {
-  const result = await pg[method](sql, params);
-  if (!result.ok) throw result.error;
-  return result.data;
-};
+import { pg, run } from "../../shared/db.js";
 
 export const findUser = id =>
   run(
     "oneOrNone",
-    `SELECT u.id, u.display_name AS "displayName", u.phone_e164 AS "phone", u.email, u.preferred_language AS "preferredLanguage", u.status, u.created_at AS "createdAt", u.last_login_at AS "lastLoginAt", u.deleted_at AS "deletedAt" FROM auth.users u WHERE u.id = $1`,
+    `SELECT u.id, u.first_name AS "firstName", u.last_name AS "lastName", u.display_name AS "displayName", u.phone_e164 AS "phoneE164", u.email, u.avatar_storage_key AS "avatarUrl", u.preferred_language AS "preferredLanguage", u.status, u.created_at AS "createdAt", u.last_login_at AS "lastLoginAt", u.deleted_at AS "deletedAt" FROM auth.users u WHERE u.id = $1`,
     [id]
   );
-export const listUsers = ({ status, search, limit, offset }) =>
+export const listUsers = ({ status, role, search, limit, offset }) =>
   run(
     "any",
-    `SELECT u.id, u.display_name AS "displayName", u.phone_e164 AS "phone", u.email, u.status, u.created_at AS "createdAt", u.last_login_at AS "lastLoginAt", COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles FROM auth.users u LEFT JOIN auth.user_roles ur ON ur.user_id = u.id LEFT JOIN auth.roles r ON r.id = ur.role_id WHERE ($1::varchar IS NULL OR u.status = $1) AND ($2::varchar IS NULL OR u.display_name ILIKE $2 OR u.phone_e164 ILIKE $2 OR u.email::text ILIKE $2) GROUP BY u.id ORDER BY u.created_at DESC LIMIT $3 OFFSET $4`,
-    [status, search ? `%${search}%` : null, limit, offset]
+    `SELECT u.id, u.first_name AS "firstName", u.last_name AS "lastName", u.display_name AS "displayName", u.phone_e164 AS "phoneE164", u.email, u.avatar_storage_key AS "avatarUrl", u.preferred_language AS "preferredLanguage", u.status, u.created_at AS "createdAt", u.last_login_at AS "lastLoginAt", COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles FROM auth.users u LEFT JOIN auth.user_roles ur ON ur.user_id = u.id LEFT JOIN auth.roles r ON r.id = ur.role_id WHERE ($1::varchar IS NULL OR u.status = $1) AND ($2::varchar IS NULL OR u.display_name ILIKE $2 OR u.phone_e164 ILIKE $2 OR u.email::text ILIKE $2) GROUP BY u.id HAVING ($3::varchar IS NULL OR $3 = ANY(array_agg(r.code))) ORDER BY max(u.created_at) DESC LIMIT $4 OFFSET $5`,
+    [status, search ? `%${search}%` : null, role, limit, offset]
+  );
+export const countUsers = ({ status, role, search }) =>
+  run(
+    "one",
+    `SELECT count(*)::int AS total FROM auth.users u WHERE ($1::varchar IS NULL OR u.status = $1) AND ($2::varchar IS NULL OR u.display_name ILIKE $2 OR u.phone_e164 ILIKE $2 OR u.email::text ILIKE $2) AND ($3::varchar IS NULL OR EXISTS (SELECT 1 FROM auth.user_roles ur JOIN auth.roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND r.code = $3))`,
+    [status, search ? `%${search}%` : null, role]
   );
 export const updateProfile = (id, changes) =>
   pg.updateWhere({
