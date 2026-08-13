@@ -43,12 +43,33 @@ export const update = body => {
 };
 export const sellerList = query => {
   const status = query.status ? String(query.status).toUpperCase() : null;
+  const reviewStatus = query.reviewStatus
+    ? String(query.reviewStatus).toUpperCase()
+    : null;
   if (status && !listingStatuses.has(status))
     throw new HttpError(400, "VALIDATION_ERROR", "Invalid listing status.");
+  if (
+    reviewStatus &&
+    !["DRAFT", "PENDING", "APPROVED", "REJECTED"].includes(reviewStatus)
+  )
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "Invalid listing review status."
+    );
+  const page = Math.min(Math.max(Number(query.page || 1), 1), 10000);
+  const limit = Math.min(Math.max(Number(query.limit || 20), 1), 100);
   return {
     status,
-    limit: Math.min(Math.max(Number(query.limit || 20), 1), 100),
-    offset: Math.max(Number(query.offset || 0), 0)
+    reviewStatus,
+    search: query.search
+      ? String(query.search)
+          .trim()
+          .slice(0, 200)
+      : null,
+    page,
+    limit,
+    offset: (page - 1) * limit
   };
 };
 export const reviewStatus = query =>

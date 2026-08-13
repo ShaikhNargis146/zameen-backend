@@ -19,6 +19,15 @@ export const ownedProperty = async (propertyId, actorId) => {
     throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
   return property;
 };
+export const viewableProperty = async (propertyId, actorId = null) => {
+  const owned = actorId
+    ? await repository.findOwned(propertyId, actorId)
+    : null;
+  const property = owned || (await repository.findPublic(propertyId));
+  if (!property)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  return property;
+};
 export const create = async ({ actorId, input }) => {
   if (
     input.organizationId &&
@@ -154,14 +163,63 @@ export const verificationSummary = async propertyId => {
     )
   };
 };
-export const scanner = async propertyId =>
-  (await repository.scanner(propertyId)) || {
+export const scanner = async propertyId => {
+  const result = (await repository.scanner(propertyId)) || {
     propertyId,
     readinessScore: 0,
     missingItems: []
   };
-export const passport = async propertyId =>
-  (await repository.passport(propertyId)) || { propertyId };
+  const labelFor = item =>
+    String(item).replace(/\b\w/g, character => character.toUpperCase());
+  return {
+    ...result,
+    sections: (result.missingItems || []).map(item => ({
+      key: item.toLowerCase().replace(/\s+/g, "_"),
+      label: labelFor(item),
+      score: 0,
+      maxScore: 0,
+      status: "MISSING"
+    })),
+    missingItems: (result.missingItems || []).map(item => ({
+      code: item.toUpperCase().replace(/\s+/g, "_"),
+      label: item,
+      severity: "MEDIUM"
+    })),
+    disclaimer:
+      "Scanner Lite is a rule-based completeness score. It is not a legal, title, survey, or investment opinion.",
+    generatedAt: new Date().toISOString()
+  };
+};
+export const passport = async propertyId => {
+  const result = await repository.passport(propertyId);
+  if (!result) return { propertyId };
+  const scannerResult = await repository.scanner(propertyId);
+  const checks = result.verificationChecks || {};
+  const values = Object.values(checks);
+  const overallVerificationStatus = values.includes("REJECTED")
+    ? "REJECTED"
+    : values.includes("PARTIAL")
+    ? "PARTIAL"
+    : values.length && values.every(value => value === "VERIFIED")
+    ? "VERIFIED"
+    : values.includes("PENDING")
+    ? "PENDING"
+    : "NOT_STARTED";
+  return {
+    propertyId: result.propertyId,
+    passportCode: result.publicCode,
+    sellerVerification: "NOT_STARTED",
+    locationVerification: checks.LOCATION || "NOT_STARTED",
+    parcelInformationAvailable: !(scannerResult?.missingItems || []).includes(
+      "Parcel identifier"
+    ),
+    documentCount: Number(result.documentCount),
+    verifiedDocumentCount: result.verifiedDocumentCount,
+    propertyCompletionPercent: result.completenessPercent,
+    overallVerificationStatus,
+    lastVerifiedAt: result.lastVerifiedAt
+  };
+};
 const mediaResponse = async item => ({
   ...item,
   url: await signedReadUrl(item.storageKey),

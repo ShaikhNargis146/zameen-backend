@@ -1,4 +1,4 @@
-import { created, ok } from "../../shared/http.js";
+import { created, ok, paginationMeta } from "../../shared/http.js";
 import * as service from "./listings.service.js";
 import * as validation from "./listings.validation.js";
 
@@ -35,18 +35,23 @@ export const withdraw = async (req, res) =>
   ok(res, await service.transition(req.listing, "withdraw"));
 export const markSold = async (req, res) =>
   ok(res, await service.transition(req.listing, "sold"));
-export const sellerListings = async (req, res) =>
+export const sellerListings = async (req, res) => {
+  const input = validation.sellerList(req.query);
+  const result = await service.sellerListings({
+    userId: req.actor.id,
+    ...input
+  });
+  return ok(res, result.items, paginationMeta(result));
+};
+export const detail = async (req, res) =>
   ok(
     res,
-    await service.sellerListings({
-      userId: req.actor.id,
-      ...validation.sellerList(req.query)
-    })
+    await service.publicDetail(req.params.listingId, req.actor?.id || null)
   );
-export const detail = async (req, res) =>
-  ok(res, await service.publicDetail(req.params.listingId));
 export const adminListings = async (req, res) =>
   ok(res, await service.adminListings(validation.reviewStatus(req.query)));
+export const adminListing = async (req, res) =>
+  ok(res, await service.adminListing(req.params.listingId));
 export const approve = async (req, res) =>
   ok(res, await service.approve(req.params.listingId));
 export const reject = async (req, res) =>

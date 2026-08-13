@@ -109,8 +109,17 @@ export const transition = async (listing, action) => {
   });
   return repository.summary(listing.id);
 };
-export const sellerListings = repository.sellerListings;
-export const publicDetail = async id => {
+export const sellerListings = async input => {
+  const rows = await repository.sellerListings(input);
+  const total = rows[0]?.total || 0;
+  return {
+    items: rows.map(({ total: ignored, ...row }) => row),
+    total,
+    page: input.page,
+    limit: input.limit
+  };
+};
+export const publicDetail = async (id, actorId = null) => {
   const listing = await repository.publishedDetail(id);
   if (!listing)
     throw new HttpError(
@@ -118,19 +127,29 @@ export const publicDetail = async id => {
       "LISTING_NOT_FOUND",
       "Published listing was not found."
     );
-  const [media, amenities, promotions] = await Promise.all([
+  const [media, amenities, promotions, favorite] = await Promise.all([
     repository.media(listing.propertyId),
     repository.amenities(listing.propertyId),
-    repository.promotions(id)
+    repository.promotions(id),
+    actorId
+      ? repository.isFavorite(id, actorId)
+      : Promise.resolve({ isFavorite: false })
   ]);
   return {
     listing,
     media,
     amenities,
-    promotions: promotions.map(item => item.promotionType)
+    promotions: promotions.map(item => item.promotionType),
+    isFavorite: favorite.isFavorite
   };
 };
 export const adminListings = repository.adminListings;
+export const adminListing = async id => {
+  const listing = await repository.adminListing(id);
+  if (!listing)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
+  return listing;
+};
 export const approve = async id => {
   const result = await repository.approve(id);
   if (!result)

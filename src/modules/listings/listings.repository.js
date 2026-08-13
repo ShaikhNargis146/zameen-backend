@@ -68,11 +68,18 @@ export const transition = ({
     }${setSoldAt ? ", sold_at = now()" : ""} WHERE id = $1`,
     [id, status]
   );
-export const sellerListings = ({ userId, status, limit, offset }) =>
+export const sellerListings = ({
+  userId,
+  status,
+  reviewStatus,
+  search,
+  limit,
+  offset
+}) =>
   run(
     "any",
-    `SELECT id, listing_code AS "listingCode", title, status, review_status AS "reviewStatus", price_amount_minor AS "priceAmountMinor", currency, created_at AS "createdAt", updated_at AS "updatedAt" FROM marketplace.listings l WHERE l.deleted_at IS NULL AND (l.seller_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = l.seller_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR l.status = $2) ORDER BY l.updated_at DESC LIMIT $3 OFFSET $4`,
-    [userId, status, limit, offset]
+    `SELECT id, listing_code AS "listingCode", title, status, review_status AS "reviewStatus", price_amount_minor AS "priceAmountMinor", currency, created_at AS "createdAt", updated_at AS "updatedAt", count(*) OVER()::int AS total FROM marketplace.listings l WHERE l.deleted_at IS NULL AND (l.seller_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = l.seller_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR l.status = $2) AND ($3::varchar IS NULL OR l.review_status = $3) AND ($4::varchar IS NULL OR l.title ILIKE $4 OR l.listing_code ILIKE $4) ORDER BY l.updated_at DESC LIMIT $5 OFFSET $6`,
+    [userId, status, reviewStatus, search ? `%${search}%` : null, limit, offset]
   );
 export const publishedDetail = id =>
   run(
@@ -98,12 +105,19 @@ export const promotions = id =>
     `SELECT promotion_type AS "promotionType" FROM marketplace.listing_promotions WHERE listing_id = $1 AND status = 'ACTIVE' AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())`,
     [id]
   );
+export const isFavorite = (listingId, userId) =>
+  run(
+    "one",
+    `SELECT EXISTS (SELECT 1 FROM marketplace.favorites WHERE listing_id = $1 AND user_id = $2) AS "isFavorite"`,
+    [listingId, userId]
+  );
 export const adminListings = reviewStatus =>
   run(
     "any",
     `SELECT id, listing_code AS "listingCode", title, review_status AS "reviewStatus", status, submitted_at AS "submittedAt", created_at AS "createdAt" FROM marketplace.listings WHERE deleted_at IS NULL AND ($1::varchar IS NULL OR review_status = $1) ORDER BY submitted_at NULLS LAST, created_at DESC LIMIT 100`,
     [reviewStatus]
   );
+export const adminListing = id => summary(id);
 export const approve = id =>
   run(
     "oneOrNone",

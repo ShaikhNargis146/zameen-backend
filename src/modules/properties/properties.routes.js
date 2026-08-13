@@ -1,9 +1,13 @@
 import { Router } from "express";
 import { requireOwnedResource } from "../../shared/authorization.js";
 import { asyncRoute } from "../../shared/http.js";
-import { requireAnyRole, requireAuth } from "../auth/auth.routes.js";
+import {
+  optionalAuth,
+  requireAnyRole,
+  requireAuth
+} from "../auth/auth.routes.js";
 import * as controller from "./properties.controller.js";
-import { ownedProperty } from "./properties.service.js";
+import { ownedProperty, viewableProperty } from "./properties.service.js";
 
 const router = Router();
 const requirePropertyContributor = requireAnyRole(
@@ -16,6 +20,11 @@ const requireOwnedProperty = requireOwnedResource({
   param: "propertyId",
   target: "property",
   load: ownedProperty
+});
+const requireViewableProperty = requireOwnedResource({
+  param: "propertyId",
+  target: "property",
+  load: viewableProperty
 });
 
 router.post(
@@ -104,20 +113,20 @@ router.post(
 );
 router.get(
   "/properties/:propertyId/verification",
-  requireAuth,
-  requireOwnedProperty,
+  optionalAuth,
+  requireViewableProperty,
   asyncRoute(controller.verification)
 );
 router.get(
   "/properties/:propertyId/scanner",
-  requireAuth,
-  requireOwnedProperty,
+  optionalAuth,
+  requireViewableProperty,
   asyncRoute(controller.scanner)
 );
 router.get(
   "/properties/:propertyId/land-passport",
-  requireAuth,
-  requireOwnedProperty,
+  optionalAuth,
+  requireViewableProperty,
   asyncRoute(controller.passport)
 );
 router.post(

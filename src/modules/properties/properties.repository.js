@@ -8,6 +8,13 @@ export const findOwned = (propertyId, userId) =>
     `SELECT p.* FROM land.properties p WHERE p.id = $1 AND p.deleted_at IS NULL AND (p.created_by_user_id = $2 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $2 AND om.status = 'ACTIVE'))`,
     [propertyId, userId]
   );
+export const findPublic = propertyId =>
+  run(
+    "oneOrNone",
+    `SELECT p.* FROM land.properties p WHERE p.id = $1 AND p.deleted_at IS NULL
+     AND EXISTS (SELECT 1 FROM marketplace.listings l WHERE l.property_id = p.id AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED')`,
+    [propertyId]
+  );
 export const activeOrganizationMembership = (organizationId, userId) =>
   run(
     "oneOrNone",
@@ -201,7 +208,10 @@ export const scanner = propertyId =>
 export const passport = propertyId =>
   run(
     "oneOrNone",
-    `SELECT property_id AS "propertyId", public_code AS "publicCode", completeness_percent AS "completenessPercent", verification_checks AS "verificationChecks", document_count AS "documentCount", last_updated AS "lastUpdated" FROM land.v_land_passports WHERE property_id = $1`,
+    `SELECT passport.property_id AS "propertyId", passport.public_code AS "publicCode", passport.completeness_percent AS "completenessPercent", passport.verification_checks AS "verificationChecks", passport.document_count AS "documentCount", passport.last_updated AS "lastUpdated",
+       (SELECT count(*) FROM land.property_documents document WHERE document.property_id = passport.property_id AND document.deleted_at IS NULL AND document.verification_status = 'VERIFIED')::int AS "verifiedDocumentCount",
+       (SELECT max(reviewed_at) FROM land.property_verification_checks check_item WHERE check_item.property_id = passport.property_id AND check_item.status = 'VERIFIED') AS "lastVerifiedAt"
+     FROM land.v_land_passports passport WHERE passport.property_id = $1`,
     [propertyId]
   );
 export const media = propertyId =>

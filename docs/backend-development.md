@@ -59,9 +59,17 @@ Rules:
 - Services throw `HttpError(status, code, message)` for expected business errors.
 - Do not expose SQL errors, tokens, OTPs, stacks, or secrets in responses.
 
-`auth`, `users`, `catalog`, `properties`, and `listings` follow this structure.
+`auth`, `users`, `catalog`, `properties`, `listings`, `discovery`,
+`verification`, and `ai` follow this structure.
 Every new Developer 1 module must use the same five-layer pattern from its
 first endpoint; do not add compatibility route files or bypass a repository.
+
+Discovery owns listing search, map pins, similarity and comparison. The `ai`
+module owns the thin Phase 1 layer: rule-based natural-language filter
+extraction, grounded conversation records, and listing-copy drafts. An
+anonymous AI conversation returns a `guestAccessToken`; clients must send it
+as `X-AI-Conversation-Token` on later message/detail requests. Do not put that
+token in a URL or log it.
 
 ## API contract
 
