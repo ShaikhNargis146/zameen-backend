@@ -8,7 +8,7 @@ import {
   optionalAuth
 } from "../auth/auth.routes.js";
 import * as controller from "./listings.controller.js";
-import { ownedListing } from "./listings.service.js";
+import { listingForAdmin, ownedListing } from "./listings.service.js";
 
 const router = Router();
 const requirePropertyContributor = requireAnyRole(
@@ -20,7 +20,8 @@ const requirePropertyContributor = requireAnyRole(
 const requireOwnedListing = requireOwnedResource({
   param: "listingId",
   target: "listing",
-  load: ownedListing
+  load: ownedListing,
+  loadForAdmin: listingForAdmin
 });
 
 router.post(

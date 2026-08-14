@@ -7,7 +7,11 @@ import {
   requireAuth
 } from "../auth/auth.routes.js";
 import * as controller from "./properties.controller.js";
-import { ownedProperty, viewableProperty } from "./properties.service.js";
+import {
+  ownedProperty,
+  propertyForAdmin,
+  viewableProperty
+} from "./properties.service.js";
 
 const router = Router();
 const requirePropertyContributor = requireAnyRole(
@@ -19,12 +23,14 @@ const requirePropertyContributor = requireAnyRole(
 const requireOwnedProperty = requireOwnedResource({
   param: "propertyId",
   target: "property",
-  load: ownedProperty
+  load: ownedProperty,
+  loadForAdmin: propertyForAdmin
 });
 const requireViewableProperty = requireOwnedResource({
   param: "propertyId",
   target: "property",
-  load: viewableProperty
+  load: viewableProperty,
+  loadForAdmin: propertyForAdmin
 });
 
 router.post(

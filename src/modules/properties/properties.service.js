@@ -19,6 +19,12 @@ export const ownedProperty = async (propertyId, actorId) => {
     throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
   return property;
 };
+export const propertyForAdmin = async propertyId => {
+  const property = await repository.summary(propertyId);
+  if (!property)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  return property;
+};
 export const viewableProperty = async (propertyId, actorId = null) => {
   const owned = actorId
     ? await repository.findOwned(propertyId, actorId)
@@ -129,12 +135,14 @@ export const saveIdentifiers = async ({ propertyId, identifiers }) => {
 export const requestVerification = async ({
   propertyId,
   actorId,
-  checkTypes
+  checkTypes,
+  note = null
 }) => {
   await repository.requestVerification({
     propertyId,
     userId: actorId,
-    checkTypes
+    checkTypes,
+    note
   });
   return verificationSummary(propertyId);
 };

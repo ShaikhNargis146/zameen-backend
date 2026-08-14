@@ -182,13 +182,14 @@ export const replaceIdentifiers = async (propertyId, identifiers) => {
 export const requestVerification = async ({
   propertyId,
   userId,
-  checkTypes
+  checkTypes,
+  note
 }) => {
   const result = await pg.tx(async transaction => {
     for (const checkType of checkTypes)
       await transaction.none(
-        `INSERT INTO land.property_verification_checks (property_id, check_type, status, requested_by_user_id, requested_at) VALUES ($1,$2,'PENDING',$3,now()) ON CONFLICT (property_id, check_type) DO UPDATE SET status = CASE WHEN property_verification_checks.status = 'VERIFIED' THEN 'VERIFIED' ELSE 'PENDING' END, requested_by_user_id = EXCLUDED.requested_by_user_id, requested_at = EXCLUDED.requested_at`,
-        [propertyId, checkType, userId]
+        `INSERT INTO land.property_verification_checks (property_id, check_type, status, requested_by_user_id, requested_at, notes) VALUES ($1,$2,'PENDING',$3,now(),$4) ON CONFLICT (property_id, check_type) DO UPDATE SET status = CASE WHEN property_verification_checks.status = 'VERIFIED' THEN 'VERIFIED' ELSE 'PENDING' END, requested_by_user_id = EXCLUDED.requested_by_user_id, requested_at = EXCLUDED.requested_at, notes = COALESCE(EXCLUDED.notes, property_verification_checks.notes)`,
+        [propertyId, checkType, userId, note]
       );
   });
   if (!result.ok) throw result.error;
