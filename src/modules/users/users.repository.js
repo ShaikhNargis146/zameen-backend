@@ -43,6 +43,16 @@ export const addRole = (userId, code) =>
     `INSERT INTO auth.user_roles (user_id, role_id) SELECT $1, id FROM auth.roles WHERE code = $2 ON CONFLICT DO NOTHING`,
     [userId, code]
   );
+export const roleDetailsForUser = userId =>
+  run(
+    "any",
+    `SELECT role.id, role.code, role.name
+     FROM auth.user_roles user_role
+     JOIN auth.roles role ON role.id = user_role.role_id
+     WHERE user_role.user_id = $1
+     ORDER BY role.code`,
+    [userId]
+  );
 export const findRoles = codes =>
   run(
     "any",

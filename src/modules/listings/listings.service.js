@@ -1,7 +1,13 @@
 import { randomUUID } from "crypto";
 import { HttpError } from "../../shared/http.js";
+import { listingCardsByIds } from "../../shared/listingCard.js";
 import { signedReadUrl } from "../../utils/storage.js";
-import { ownedProperty } from "../properties/properties.service.js";
+import {
+  ownedProperty,
+  passport as propertyPassport,
+  scanner as propertyScanner,
+  verificationSummary
+} from "../properties/properties.service.js";
 import * as repository from "./listings.repository.js";
 
 const listingCode = () =>
@@ -133,8 +139,20 @@ export const transition = async ({
 export const sellerListings = async input => {
   const rows = await repository.sellerListings(input);
   const total = rows[0]?.total || 0;
+  const cards = await listingCardsByIds(
+    rows.map(row => row.id),
+    input.userId,
+    true
+  );
+  const cardsById = new Map(cards.map(card => [card.listingId, card]));
   return {
-    items: rows.map(({ total: ignored, ...row }) => row),
+    items: rows.map(({ total: ignored, ...row }) => ({
+      ...cardsById.get(row.id),
+      reviewStatus: row.reviewStatus,
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    })),
     total,
     page: input.page,
     limit: input.limit
@@ -154,8 +172,9 @@ export const publicDetail = async (id, actorId = null) => {
     promotions,
     favorite,
     parcelSummary,
-    checks,
-    passport
+    verification,
+    landPassport,
+    scanner
   ] = await Promise.all([
     repository.media(listing.propertyId),
     repository.amenities(listing.propertyId),
@@ -164,19 +183,10 @@ export const publicDetail = async (id, actorId = null) => {
       ? repository.isFavorite(id, actorId)
       : Promise.resolve({ isFavorite: false }),
     repository.parcelSummary(listing.propertyId),
-    repository.verification(listing.propertyId),
-    repository.passport(listing.propertyId)
+    verificationSummary(listing.propertyId),
+    propertyPassport(listing.propertyId),
+    propertyScanner(listing.propertyId)
   ]);
-  const statuses = checks.map(check => check.status);
-  const overallStatus = statuses.includes("REJECTED")
-    ? "REJECTED"
-    : statuses.includes("PARTIAL")
-    ? "PARTIAL"
-    : statuses.length && statuses.every(status => status === "VERIFIED")
-    ? "VERIFIED"
-    : statuses.includes("PENDING")
-    ? "PENDING"
-    : "NOT_STARTED";
   return {
     listing: {
       id: listing.listingId,
@@ -196,6 +206,7 @@ export const publicDetail = async (id, actorId = null) => {
     property: {
       id: listing.propertyId,
       publicCode: listing.propertyCode,
+      source: listing.propertySource,
       status: listing.propertyStatus,
       propertyType: {
         id: listing.propertyTypeId,
@@ -208,16 +219,35 @@ export const publicDetail = async (id, actorId = null) => {
             code: listing.landUseTypeCode,
             name: listing.landUseType
           }
-        : null
+        : null,
+      ownershipType: listing.ownershipTypeId
+        ? {
+            id: listing.ownershipTypeId,
+            code: listing.ownershipTypeCode,
+            name: listing.ownershipType
+          }
+        : null,
+      completionPercent: scanner.readinessScore
     },
     landDetails: {
       areaValue: listing.areaValue,
-      areaUnitCode: listing.areaUnit,
+      areaUnitId: listing.areaUnitId,
+      areaUnitCode: listing.areaUnitCode,
       normalizedAreaSqft: listing.areaSqft,
+      lengthValue: listing.lengthValue,
+      widthValue: listing.widthValue,
+      dimensionUnitId: listing.dimensionUnitId,
+      dimensionUnitCode: listing.dimensionUnitCode,
       frontageM: listing.frontageM,
       roadWidthM: listing.roadWidthM,
+      roadTypeId: listing.roadTypeId,
+      roadTypeCode: listing.roadTypeCode,
       facing: listing.facing,
-      isCornerPlot: listing.isCornerPlot
+      openSides: listing.openSides,
+      isCornerPlot: listing.isCornerPlot,
+      hasBoundaryWall: listing.hasBoundaryWall,
+      terrain: listing.terrain,
+      roadAccessType: listing.roadAccessType
     },
     location: listing.locationId
       ? {
@@ -226,10 +256,13 @@ export const publicDetail = async (id, actorId = null) => {
             id: listing.locationId,
             name: listing.locationName,
             type: listing.locationType,
+            parentId: listing.locationParentId,
             stateCode: listing.locationStateCode
           },
           pincode: listing.pincode,
+          addressLine: listing.addressLine,
           landmark: listing.landmark,
+          formattedAddress: listing.formattedAddress,
           latitude: listing.latitude,
           longitude: listing.longitude,
           locationPrecision: listing.locationPrecision,
@@ -256,30 +289,9 @@ export const publicDetail = async (id, actorId = null) => {
           }
         : null
     },
-    verification: {
-      propertyId: listing.propertyId,
-      overallStatus,
-      checks,
-      lastUpdatedAt:
-        checks
-          .map(check => check.updatedAt)
-          .filter(Boolean)
-          .sort()
-          .at(-1) || null
-    },
-    landPassport: passport,
-    scanner: {
-      propertyId: listing.propertyId,
-      readinessScore: listing.scannerScore || 0,
-      missingItems: (listing.scannerMissingItems || []).map(item => ({
-        code: item.toUpperCase().replace(/\s+/g, "_"),
-        label: item,
-        severity: "MEDIUM"
-      })),
-      disclaimer:
-        "Scanner Lite is a rule-based completeness score. It is not a legal, title, survey, or investment opinion.",
-      generatedAt: new Date().toISOString()
-    },
+    verification,
+    landPassport,
+    scanner,
     promotions: promotions.map(item => item.promotionType),
     isFavorite: favorite.isFavorite
   };
@@ -289,8 +301,20 @@ export const adminListings = async input => {
     ...input,
     offset: (input.page - 1) * input.limit
   });
+  const cards = await listingCardsByIds(
+    rows.map(row => row.id),
+    null,
+    true
+  );
+  const cardsById = new Map(cards.map(card => [card.listingId, card]));
   return {
-    items: rows.map(({ total: ignored, ...row }) => row),
+    items: rows.map(({ total: ignored, ...row }) => ({
+      ...cardsById.get(row.id),
+      reviewStatus: row.reviewStatus,
+      status: row.status,
+      submittedAt: row.submittedAt,
+      createdAt: row.createdAt
+    })),
     total: rows[0]?.total || 0,
     page: input.page,
     limit: input.limit

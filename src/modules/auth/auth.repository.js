@@ -85,11 +85,13 @@ export const createUser = ({ destination, channel, name }) =>
       name
     ]
   );
-export const addBuyerRole = userId =>
+export const addDefaultRoles = userId =>
   run(
     "none",
-    `INSERT INTO auth.user_roles (user_id, role_id) SELECT $1, id FROM auth.roles WHERE code = 'BUYER' ON CONFLICT DO NOTHING`,
-    [userId]
+    `INSERT INTO auth.user_roles (user_id, role_id)
+     SELECT $1, id FROM auth.roles WHERE code = ANY($2::varchar[])
+     ON CONFLICT DO NOTHING`,
+    [userId, ["BUYER", "SELLER"]]
   );
 export const findActiveUser = id =>
   run(

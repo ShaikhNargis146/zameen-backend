@@ -13,6 +13,14 @@ const listingStatuses = new Set([
 const transactionTypes = new Set(["SALE", "LEASE"]);
 const languages = new Set(["en", "hi", "mr", "gu", "pa", "te", "ta"]);
 const reviewStatuses = new Set(["DRAFT", "PENDING", "APPROVED", "REJECTED"]);
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const optionalUuid = (value, field) => {
+  if (!value) return null;
+  const id = String(value).trim();
+  if (!uuidPattern.test(id))
+    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  return id;
+};
 const text = (value, field, min, max, required = false) => {
   const result = String(value || "").trim();
   if (!result && !required) return null;
@@ -196,6 +204,8 @@ export const adminList = query => ({
         return value;
       })()
     : null,
+  propertyTypeId: optionalUuid(query.propertyTypeId, "propertyTypeId"),
+  locationId: optionalUuid(query.locationId, "locationId"),
   search: query.search
     ? String(query.search)
         .trim()

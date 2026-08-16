@@ -2,6 +2,18 @@ import { HttpError } from "../../shared/http.js";
 
 const statuses = new Set(["ACTIVE", "BLOCKED"]);
 const languages = new Set(["en", "hi", "mr", "gu", "pa", "te", "ta"]);
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const nullableText = (value, field, max) => {
+  if (value === null || value === undefined || value === "") return null;
+  const text = String(value).trim();
+  if (text.length > max)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      `${field} must be at most ${max} characters.`
+    );
+  return text;
+};
 
 export const profileChanges = body => {
   const changes = {};
@@ -11,18 +23,24 @@ export const profileChanges = body => {
       .replace(/\s+/g, " ");
     if (!name)
       throw new HttpError(400, "INVALID_NAME", "Name cannot be empty.");
+    if (name.length > 200)
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        "displayName must be at most 200 characters."
+      );
     changes.display_name = name;
   }
   if (Object.hasOwn(body, "firstName"))
-    changes.first_name = body.firstName ? String(body.firstName).trim() : null;
+    changes.first_name = nullableText(body.firstName, "firstName", 100);
   if (Object.hasOwn(body, "lastName"))
-    changes.last_name = body.lastName ? String(body.lastName).trim() : null;
-  if (Object.hasOwn(body, "email"))
-    changes.email = body.email
-      ? String(body.email)
-          .trim()
-          .toLowerCase()
-      : null;
+    changes.last_name = nullableText(body.lastName, "lastName", 100);
+  if (Object.hasOwn(body, "email")) {
+    const email = nullableText(body.email, "email", 255);
+    if (email && !emailPattern.test(email))
+      throw new HttpError(400, "INVALID_EMAIL", "email must be valid.");
+    changes.email = email?.toLowerCase() || null;
+  }
   if (Object.hasOwn(body, "preferredLanguage")) {
     const language = String(body.preferredLanguage || "").trim();
     if (!languages.has(language))
@@ -39,12 +57,23 @@ export const profileChanges = body => {
 };
 
 export const selfRole = body => {
-  const role = String(body.role || "").toUpperCase();
-  if (!["BUYER", "SELLER"].includes(role))
+  // `roleCode` is the integration-contract name. Keep `role` temporarily for
+  // clients built against the earlier implementation.
+  const role = String(body.roleCode || body.role || "").toUpperCase();
+  if (
+    ![
+      "BUYER",
+      "SELLER",
+      "BROKER",
+      "DEVELOPER",
+      "CHANNEL_PARTNER",
+      "CORPORATE"
+    ].includes(role)
+  )
     throw new HttpError(
       400,
       "ROLE_NOT_SELF_ASSIGNABLE",
-      "Only BUYER and SELLER may be self-assigned."
+      "Only buyer, seller, broker, developer, channel partner, and corporate roles may be self-assigned."
     );
   return role;
 };
@@ -57,7 +86,7 @@ export const userStatus = body => {
       "INVALID_STATUS",
       "status must be ACTIVE or BLOCKED."
     );
-  return status;
+  return { status, reason: nullableText(body.reason, "reason", 500) };
 };
 
 export const roles = body => {
@@ -70,7 +99,10 @@ export const roles = body => {
       "ROLES_REQUIRED",
       "roles must be a non-empty array."
     );
-  return result;
+  return {
+    roleCodes: result,
+    reason: nullableText(body.reason, "reason", 500)
+  };
 };
 
 export const adminListQuery = query => {
@@ -80,7 +112,7 @@ export const adminListQuery = query => {
   return {
     page: Math.max(Number(query.page || 1), 1),
     limit: Math.min(Math.max(Number(query.limit || 20), 1), 100),
-    search: String(query.search || "").trim() || null,
+    search: nullableText(query.search, "search", 200),
     status,
     role: query.role ? String(query.role).toUpperCase() : null
   };

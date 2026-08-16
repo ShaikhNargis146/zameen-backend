@@ -93,12 +93,16 @@ unless an API-contract change is explicitly approved.
 | Catalog | `/` | property masters, location hierarchy, PIN lookup |
 | Properties | `/properties` | drafts, land details, location, amenities, identifiers, verification, Scanner Lite, Land Passport |
 | Listings | `/properties/:propertyId/listings`, `/listings`, `/seller/listings`, `/admin/listings` | draft, review, publishing lifecycle, public detail |
+| Discovery | `/search`, `/listings/:listingId/similar`, `/listings/compare` | listing search, suggestions, map pins, similarity, comparison |
+| Verification | `/admin/verifications` | verification review queue and admin decisions |
+| AI | `/ai` | natural-language search, grounded conversation records, listing-copy drafts |
 
 ## Authentication and authorization
 
 - Access tokens are short-lived signed JWTs.
 - Refresh tokens are opaque, hashed, stored in `auth.refresh_sessions`, and rotated.
 - A user may have multiple roles through `auth.user_roles`.
+- A newly verified user receives both `BUYER` and `SELLER`; all other non-admin roles are selected explicitly through `/users/me/roles`.
 - `requireAuth` requires an active user; `requireAdmin` additionally requires `ADMIN`.
 - `AUTH_STATIC_OTP` is development-only. Production OTP delivery remains disabled
   until an SMS/email provider is integrated.
@@ -152,9 +156,8 @@ git diff --check
 find src -type f -name '*.js' -exec node --check {} \;
 ```
 
-The configured `npm test` command currently cannot run because `cross-env` is
-missing from the installed development dependencies. Restore that dependency
-and add module-level tests before making it a merge requirement.
+Run the configured unit suite with `npm test`. It uses `cross-env` to set the
+test environment and must pass before a Developer 1 change is handed off.
 
 ## Ownership
 

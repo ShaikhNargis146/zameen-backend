@@ -18,7 +18,8 @@ LEFT JOIN land.area_units unit ON unit.id = details.area_unit_id
 LEFT JOIN land.property_locations property_location ON property_location.property_id = p.id
 LEFT JOIN geo.locations location ON location.id = property_location.location_id
 LEFT JOIN land.property_media cover ON cover.property_id = p.id AND cover.is_cover AND cover.deleted_at IS NULL
-WHERE l.id = ANY($1::uuid[]) AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED'`;
+WHERE l.id = ANY($1::uuid[]) AND l.deleted_at IS NULL
+  AND ($3::boolean OR (l.status = 'PUBLISHED' AND l.review_status = 'APPROVED'))`;
 
 const round = value => Math.round(value * 100) / 100;
 export const formatPriceDisplay = amountMinor => {
@@ -70,10 +71,14 @@ const toCard = async row => ({
   isFavorite: row.isFavorite
 });
 
-export const listingCardsByIds = async (listingIds, actorId = null) => {
+export const listingCardsByIds = async (
+  listingIds,
+  actorId = null,
+  includeUnpublished = false
+) => {
   const ids = [...new Set(listingIds)].filter(Boolean);
   if (!ids.length) return [];
-  const rows = await run("any", cardSql, [ids, actorId]);
+  const rows = await run("any", cardSql, [ids, actorId, includeUnpublished]);
   const cards = await Promise.all(rows.map(toCard));
   const byId = new Map(cards.map(card => [card.listingId, card]));
   return listingIds.map(id => byId.get(id)).filter(Boolean);

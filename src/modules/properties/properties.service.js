@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { HttpError } from "../../shared/http.js";
+import { scannerPresentation } from "../../shared/scanner.js";
 import {
   belongsToProperty,
   createStorageKey,
@@ -172,31 +173,18 @@ export const verificationSummary = async propertyId => {
   };
 };
 export const scanner = async propertyId => {
-  const result = (await repository.scanner(propertyId)) || {
+  const result = await repository.scanner(propertyId);
+  return scannerPresentation({
     propertyId,
-    readinessScore: 0,
-    missingItems: []
-  };
-  const labelFor = item =>
-    String(item).replace(/\b\w/g, character => character.toUpperCase());
-  return {
-    ...result,
-    sections: (result.missingItems || []).map(item => ({
-      key: item.toLowerCase().replace(/\s+/g, "_"),
-      label: labelFor(item),
-      score: 0,
-      maxScore: 0,
-      status: "MISSING"
-    })),
-    missingItems: (result.missingItems || []).map(item => ({
-      code: item.toUpperCase().replace(/\s+/g, "_"),
-      label: item,
-      severity: "MEDIUM"
-    })),
-    disclaimer:
-      "Scanner Lite is a rule-based completeness score. It is not a legal, title, survey, or investment opinion.",
-    generatedAt: new Date().toISOString()
-  };
+    readinessScore: result?.readinessScore || 0,
+    missingItems: result?.missingItems || [
+      "Land details",
+      "Property location",
+      "Parcel identifier",
+      "Property document",
+      "Property media"
+    ]
+  });
 };
 export const passport = async propertyId => {
   const result = await repository.passport(propertyId);
@@ -216,7 +204,7 @@ export const passport = async propertyId => {
   return {
     propertyId: result.propertyId,
     passportCode: result.publicCode,
-    sellerVerification: "NOT_STARTED",
+    sellerVerification: result.sellerVerification,
     locationVerification: checks.LOCATION || "NOT_STARTED",
     parcelInformationAvailable: !(scannerResult?.missingItems || []).includes(
       "Parcel identifier"

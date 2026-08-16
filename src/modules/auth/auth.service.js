@@ -206,7 +206,9 @@ class AuthService {
           );
         userId = existing.id;
       }
-      await repository.addBuyerRole(userId);
+      // A verified individual can browse and create their own listing from the
+      // first session. Business-specific roles are added explicitly later.
+      await repository.addDefaultRoles(userId);
     }
     return this.createSession({
       userId,

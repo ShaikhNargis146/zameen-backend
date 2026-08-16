@@ -39,7 +39,7 @@ export const create = input =>
 export const summary = id =>
   run(
     "oneOrNone",
-    `SELECT l.id, l.listing_code AS "listingCode", l.property_id AS "propertyId", l.transaction_type AS "transactionType", l.title, l.description, l.canonical_language AS "canonicalLanguage", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status, l.rejection_reason AS "rejectionReason", l.submitted_at AS "submittedAt", l.approved_at AS "approvedAt", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", l.sold_at AS "soldAt", l.created_at AS "createdAt", l.updated_at AS "updatedAt" FROM marketplace.listings l WHERE l.id = $1 AND l.deleted_at IS NULL`,
+    `SELECT l.id, l.listing_code AS "listingCode", l.property_id AS "propertyId", l.transaction_type AS "transactionType", l.title, l.description, l.canonical_language AS "canonicalLanguage", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status, l.rejection_reason AS "rejectionReason", l.submitted_at AS "submittedAt", l.approved_at AS "approvedAt", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", l.sold_at AS "soldAt", l.created_at AS "createdAt", l.updated_at AS "updatedAt", jsonb_build_object('id', seller.id, 'displayName', seller.display_name, 'phoneE164', seller.phone_e164, 'email', seller.email) AS seller, CASE WHEN organization.id IS NULL THEN NULL ELSE jsonb_build_object('id', organization.id, 'name', organization.name, 'type', organization.type) END AS organization FROM marketplace.listings l LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL WHERE l.id = $1 AND l.deleted_at IS NULL`,
     [id]
   );
 export const update = (id, changes) =>
@@ -103,7 +103,7 @@ export const sellerListings = ({
 export const publishedDetail = id =>
   run(
     "oneOrNone",
-    `SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.title, l.description, l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status AS "listingStatus", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", p.id AS "propertyId", p.public_code AS "propertyCode", p.status AS "propertyStatus", pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyType", lut.id AS "landUseTypeId", lut.code AS "landUseTypeCode", lut.name AS "landUseType", d.area_value AS "areaValue", au.code AS "areaUnit", d.area_sqft AS "areaSqft", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", d.facing, d.is_corner_plot AS "isCornerPlot", loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType", loc.state_code AS "locationStateCode", pc.code AS pincode, pl.landmark, pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation", CASE WHEN pl.show_exact_location THEN ST_Y(pl.coordinates::geometry) END AS latitude, CASE WHEN pl.show_exact_location THEN ST_X(pl.coordinates::geometry) END AS longitude, seller.id AS "sellerId", seller.display_name AS "sellerDisplayName", organization.id AS "organizationId", organization.name AS "organizationName", organization.type AS "organizationType", s.readiness_score AS "scannerScore", s.missing_items AS "scannerMissingItems" FROM marketplace.listings l JOIN land.properties p ON p.id = l.property_id AND p.deleted_at IS NULL JOIN land.property_types pt ON pt.id = p.property_type_id LEFT JOIN land.land_use_types lut ON lut.id = p.land_use_type_id LEFT JOIN land.property_land_details d ON d.property_id = p.id LEFT JOIN land.area_units au ON au.id = d.area_unit_id LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations loc ON loc.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL LEFT JOIN marketplace.v_listing_scanner s ON s.listing_id = l.id WHERE l.id = $1 AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED' AND l.deleted_at IS NULL`,
+    `SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.title, l.description, l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status AS "listingStatus", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", p.id AS "propertyId", p.public_code AS "propertyCode", p.source AS "propertySource", p.status AS "propertyStatus", pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyType", lut.id AS "landUseTypeId", lut.code AS "landUseTypeCode", lut.name AS "landUseType", ot.id AS "ownershipTypeId", ot.code AS "ownershipTypeCode", ot.name AS "ownershipType", d.area_value AS "areaValue", au.id AS "areaUnitId", au.code AS "areaUnitCode", d.area_sqft AS "areaSqft", d.length_value AS "lengthValue", d.width_value AS "widthValue", du.id AS "dimensionUnitId", du.code AS "dimensionUnitCode", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", rt.id AS "roadTypeId", rt.code AS "roadTypeCode", d.facing, d.open_sides AS "openSides", d.is_corner_plot AS "isCornerPlot", d.has_boundary_wall AS "hasBoundaryWall", d.terrain, d.road_access_type AS "roadAccessType", loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType", loc.parent_id AS "locationParentId", loc.state_code AS "locationStateCode", pc.code AS pincode, pl.address_line AS "addressLine", pl.landmark, NULLIF(concat_ws(', ', pl.address_line, pl.landmark, loc.name, pc.code), '') AS "formattedAddress", pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation", CASE WHEN pl.show_exact_location THEN ST_Y(pl.coordinates::geometry) END AS latitude, CASE WHEN pl.show_exact_location THEN ST_X(pl.coordinates::geometry) END AS longitude, seller.id AS "sellerId", seller.display_name AS "sellerDisplayName", organization.id AS "organizationId", organization.name AS "organizationName", organization.type AS "organizationType" FROM marketplace.listings l JOIN land.properties p ON p.id = l.property_id AND p.deleted_at IS NULL JOIN land.property_types pt ON pt.id = p.property_type_id LEFT JOIN land.land_use_types lut ON lut.id = p.land_use_type_id LEFT JOIN land.ownership_types ot ON ot.id = p.ownership_type_id LEFT JOIN land.property_land_details d ON d.property_id = p.id LEFT JOIN land.area_units au ON au.id = d.area_unit_id LEFT JOIN land.area_units du ON du.id = d.dimension_unit_id LEFT JOIN land.road_types rt ON rt.id = d.road_type_id LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations loc ON loc.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL WHERE l.id = $1 AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED' AND l.deleted_at IS NULL`,
     [id]
   );
 export const media = propertyId =>
@@ -151,6 +151,8 @@ export const isFavorite = (listingId, userId) =>
 export const adminListings = ({
   reviewStatus,
   status,
+  propertyTypeId,
+  locationId,
   search,
   limit,
   offset
@@ -160,11 +162,23 @@ export const adminListings = ({
     `SELECT l.id, l.listing_code AS "listingCode", l.title, l.review_status AS "reviewStatus", l.status, l.submitted_at AS "submittedAt", l.created_at AS "createdAt", count(*) OVER()::int AS total
      FROM marketplace.listings l
      LEFT JOIN auth.users seller ON seller.id = l.seller_user_id
+     JOIN land.properties property ON property.id = l.property_id AND property.deleted_at IS NULL
+     LEFT JOIN land.property_locations property_location ON property_location.property_id = property.id
      WHERE l.deleted_at IS NULL AND ($1::varchar IS NULL OR l.review_status = $1)
        AND ($2::varchar IS NULL OR l.status = $2)
        AND ($3::varchar IS NULL OR l.title ILIKE $3 OR l.listing_code ILIKE $3 OR seller.display_name ILIKE $3)
-     ORDER BY l.submitted_at NULLS LAST, l.created_at DESC LIMIT $4 OFFSET $5`,
-    [reviewStatus, status, search ? `%${search}%` : null, limit, offset]
+       AND ($4::uuid IS NULL OR property.property_type_id = $4)
+       AND ($5::uuid IS NULL OR property_location.location_id = $5)
+     ORDER BY l.submitted_at NULLS LAST, l.created_at DESC LIMIT $6 OFFSET $7`,
+    [
+      reviewStatus,
+      status,
+      search ? `%${search}%` : null,
+      propertyTypeId,
+      locationId,
+      limit,
+      offset
+    ]
   );
 export const adminListing = id => summary(id);
 export const approve = ({ id, expiresAt }) =>

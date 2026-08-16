@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  adminList,
   approval,
   create,
   sellerList
@@ -49,5 +50,17 @@ test("listing approval accepts only future expiry timestamps", () => {
   assert.throws(
     () => approval({ expiresAt: "2020-01-01T00:00:00.000Z" }),
     error => error.code === "VALIDATION_ERROR"
+  );
+});
+
+test("admin listing filters validate property and location identifiers", () => {
+  const propertyTypeId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const locationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const filters = adminList({ propertyTypeId, locationId });
+  assert.equal(filters.propertyTypeId, propertyTypeId);
+  assert.equal(filters.locationId, locationId);
+  assert.throws(
+    () => adminList({ propertyTypeId: "not-a-uuid" }),
+    error => error.code === "INVALID_ID"
   );
 });
