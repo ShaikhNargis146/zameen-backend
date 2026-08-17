@@ -468,6 +468,14 @@ CREATE TABLE marketplace.favorites (
   created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
 );
 CREATE INDEX idx_marketplace_favorites_listing ON marketplace.favorites(listing_id, created_at DESC);
+CREATE INDEX idx_marketplace_favorites_user ON marketplace.favorites(user_id, created_at DESC);
+
+CREATE TABLE marketplace.recently_viewed (
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
+  viewed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
+);
+CREATE INDEX idx_marketplace_recently_viewed_user ON marketplace.recently_viewed(user_id, viewed_at DESC);
 
 CREATE TABLE marketplace.listing_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
@@ -492,6 +500,7 @@ CREATE TABLE marketplace.buyer_requirements (
   CONSTRAINT chk_buyer_requirement_budget_range CHECK (max_budget_minor IS NULL OR min_budget_minor IS NULL OR max_budget_minor >= min_budget_minor)
 );
 CREATE INDEX idx_marketplace_buyer_requirements_user ON marketplace.buyer_requirements(user_id, status);
+CREATE INDEX idx_marketplace_buyer_requirements_user_created ON marketplace.buyer_requirements(user_id, created_at DESC);
 
 CREATE TABLE marketplace.enquiries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
