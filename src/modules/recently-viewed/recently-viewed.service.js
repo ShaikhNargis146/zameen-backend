@@ -1,10 +1,12 @@
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
+import { assertListingAvailable } from "../../shared/listingAvailability.js";
 import * as repository from "./recently-viewed.repository.js";
 
 export const recordView = async ({ actorId, listingId }) => {
   if (!actorId) return;
+  await assertListingAvailable(listingId);
   const result = await repository.upsertView(actorId, listingId);
   if (!result.ok) {
     if (result.error?.code === "23503")

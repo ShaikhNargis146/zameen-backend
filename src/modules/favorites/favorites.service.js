@@ -1,9 +1,11 @@
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
+import { assertListingAvailable } from "../../shared/listingAvailability.js";
 import * as repository from "./favorites.repository.js";
 
 export const addFavorite = async ({ actorId, listingId }) => {
+  await assertListingAvailable(listingId);
   const result = await repository.insertFavorite(actorId, listingId);
   if (!result.ok) {
     if (result.error?.code === "23503")

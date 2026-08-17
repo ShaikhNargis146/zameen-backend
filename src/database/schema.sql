@@ -191,7 +191,7 @@ CREATE TABLE account.organization_members (
   organization_id uuid NOT NULL REFERENCES account.organizations(id) ON DELETE RESTRICT,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   role varchar(30) NOT NULL CHECK (role IN ('OWNER','ADMIN','MEMBER')),
-  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INVITED','REMOVED')),
+  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
   joined_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, user_id)
 );

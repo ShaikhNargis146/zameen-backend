@@ -6,7 +6,7 @@ const run = async (method, sql, params = []) => {
   return result.data;
 };
 
-const organizationColumns = `id, name, type, slug, phone, email, gst_number AS "gstNumber", rera_number AS "reraNumber", logo_storage_key AS "logoUrl", status`;
+const organizationColumns = `id, name, type, slug, phone, email, gst_number AS "gstNumber", rera_number AS "reraNumber", logo_storage_key AS "logoStorageKey", status`;
 
 export const createWithOwner = async ({
   name,
@@ -76,7 +76,7 @@ const listForUserParams = (
 export const listForUser = (userId, filters, { limit, offset }) =>
   run(
     "any",
-    `SELECT o.id, o.name, o.type, o.slug, o.phone, o.email, o.gst_number AS "gstNumber", o.rera_number AS "reraNumber", o.logo_storage_key AS "logoUrl", o.status,
+    `SELECT o.id, o.name, o.type, o.slug, o.phone, o.email, o.gst_number AS "gstNumber", o.rera_number AS "reraNumber", o.logo_storage_key AS "logoStorageKey", o.status,
             m.role, m.joined_at AS "joinedAt", count(*) OVER()::int AS total
      FROM account.organizations o
      JOIN account.organization_members m ON m.organization_id = o.id
@@ -134,7 +134,7 @@ export const listMembers = organizationId =>
             m.role, m.status, m.joined_at AS "joinedAt"
      FROM account.organization_members m
      JOIN auth.users u ON u.id = m.user_id
-     WHERE m.organization_id = $1 AND m.status <> 'REMOVED'
+     WHERE m.organization_id = $1 AND m.status <> 'INACTIVE'
      ORDER BY m.joined_at NULLS LAST, u.display_name`,
     [organizationId]
   );
@@ -161,8 +161,8 @@ export const addMember = (organizationId, userId, role) =>
 export const removeMember = (organizationId, userId) =>
   run(
     "oneOrNone",
-    `UPDATE account.organization_members SET status = 'REMOVED'
-     WHERE organization_id = $1 AND user_id = $2 AND status <> 'REMOVED'
+    `UPDATE account.organization_members SET status = 'INACTIVE'
+     WHERE organization_id = $1 AND user_id = $2 AND status <> 'INACTIVE'
      RETURNING user_id AS "userId"`,
     [organizationId, userId]
   );
