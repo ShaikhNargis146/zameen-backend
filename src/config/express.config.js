@@ -1,15 +1,11 @@
 import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
-import tmp from "tmp";
-import path from "path";
 import logs from "../constants/index.js";
 
-// const session = require('./session.config');
 import cors from "./cors.config.js";
-import clientLogs from "./client-log.config.js";
-
-import routes from "../api/routes/v1/index.js";
+import { apiRateLimit } from "./rate-limit.config.js";
+import routes from "../routes/v1/index.js";
 import error from "../middlewares/error.js";
 
 /**
@@ -18,45 +14,26 @@ import error from "../middlewares/error.js";
  */
 const app = express();
 
-// Set 'views' directory for any views
-// being rendered res.render()
-app.set("views", "./src/view");
-app.set("view engine", "ejs");
-
-// TODO: Include CSRF middlewares here
+// Set security headers before parsing any request body.
+app.use(helmet());
 
 // request logging. dev: console | production: file
 app.use(morgan("combined", logs));
 
-// This middleware take care of the origin when the origin is undefined.
-// origin is undefined when request is local
-app.use((req, _, next) => {
-  req.headers.origin = req.headers.origin || req.headers.host;
-  next();
-});
-
 // CORS configuration
 app.use(cors());
+app.use(apiRateLimit);
 
-// parse body params and attache them to req.body
-app.use(express.json({ limit: "500mb" }));
-app.use(express.urlencoded({ extended: true, limit: "500mb" }));
-
-// secure apps by setting various HTTP headers
-app.use(helmet());
+// Files are direct-to-storage uploads; API requests should carry metadata only.
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 /**
  * App Configurations
  */
 
-// session configuration
-// app.use(session());
-
 // mount api v1 routes
 app.use("/api/v1", routes);
-app.use("/api/client-log", clientLogs);
-
-app.use("/static", express.static(process.env.UPLOAD_PATH));
 
 // if error is not an instanceOf APIError, convert it.
 app.use(error.converter);
@@ -66,8 +43,5 @@ app.use(error.notFound);
 
 // error handler, send stacktrace only during development
 app.use(error.handler);
-
-// temporary files created using tmp will be deleted on UncaughtException
-tmp.setGracefulCleanup();
 
 export default app;

@@ -1,0 +1,239 @@
+import { pg, run } from "../../shared/db.js";
+
+export const findOwned = (listingId, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT l.* FROM marketplace.listings l WHERE l.id = $1 AND l.deleted_at IS NULL AND (l.seller_user_id = $2 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = l.seller_organization_id AND om.user_id = $2 AND om.status = 'ACTIVE'))`,
+    [listingId, userId]
+  );
+export const findAny = listingId =>
+  run(
+    "oneOrNone",
+    `SELECT l.* FROM marketplace.listings l WHERE l.id = $1 AND l.deleted_at IS NULL`,
+    [listingId]
+  );
+export const organizationMembership = (organizationId, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT 1 FROM account.organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'ACTIVE'`,
+    [organizationId, userId]
+  );
+export const create = input =>
+  run(
+    "one",
+    `INSERT INTO marketplace.listings (listing_code, property_id, created_by_user_id, seller_user_id, seller_organization_id, transaction_type, title, description, canonical_language, price_amount_minor, currency, is_negotiable) VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [
+      input.listingCode,
+      input.propertyId,
+      input.userId,
+      input.organizationId,
+      input.transactionType,
+      input.title,
+      input.description,
+      input.canonicalLanguage,
+      input.priceAmountMinor,
+      input.currency,
+      input.isNegotiable
+    ]
+  );
+export const liveListingForProperty = propertyId =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM marketplace.listings
+     WHERE property_id = $1 AND deleted_at IS NULL
+       AND review_status IN ('PENDING', 'APPROVED')
+       AND status IN ('INACTIVE', 'PUBLISHED', 'PAUSED')`,
+    [propertyId]
+  );
+export const summary = id =>
+  run(
+    "oneOrNone",
+    `SELECT l.id, l.listing_code AS "listingCode", l.property_id AS "propertyId", l.transaction_type AS "transactionType", l.title, l.description, l.canonical_language AS "canonicalLanguage", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status, l.rejection_reason AS "rejectionReason", l.submitted_at AS "submittedAt", l.approved_at AS "approvedAt", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", l.sold_at AS "soldAt", l.created_at AS "createdAt", l.updated_at AS "updatedAt", jsonb_build_object('id', seller.id, 'displayName', seller.display_name, 'phoneE164', seller.phone_e164, 'email', seller.email) AS seller, CASE WHEN organization.id IS NULL THEN NULL ELSE jsonb_build_object('id', organization.id, 'name', organization.name, 'type', organization.type) END AS organization FROM marketplace.listings l LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL WHERE l.id = $1 AND l.deleted_at IS NULL`,
+    [id]
+  );
+export const update = (id, changes) =>
+  pg.updateWhere({
+    table: "marketplace.listings",
+    set: changes,
+    where:
+      "id = ${id} AND deleted_at IS NULL AND review_status IN ('DRAFT', 'REJECTED')",
+    params: { id }
+  });
+export const archive = id =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET deleted_at = now(), status = 'WITHDRAWN'
+     WHERE id = $1 AND deleted_at IS NULL AND status <> 'PUBLISHED' RETURNING id`,
+    [id]
+  );
+export const submit = id =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
+     WHERE id = $1 AND deleted_at IS NULL AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
+    [id]
+  );
+export const transition = ({
+  id,
+  status,
+  validStatuses,
+  requiresApproval = false,
+  setPublishedAt = false,
+  setSoldAt = false
+}) =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET status = $2${
+      setPublishedAt ? ", published_at = COALESCE(published_at, now())" : ""
+    }${setSoldAt ? ", sold_at = now()" : ""}
+     WHERE id = $1 AND deleted_at IS NULL AND status = ANY($3::varchar[])
+       AND ($4::boolean = false OR review_status = 'APPROVED')
+     RETURNING id`,
+    [id, status, validStatuses, requiresApproval]
+  );
+const auditSnapshot = value => {
+  if (!value) return {};
+  const { seller, ...listing } = value;
+  return {
+    ...listing,
+    ...(seller
+      ? {
+          seller: {
+            id: seller.id,
+            displayName: seller.displayName || seller.display_name || null
+          }
+        }
+      : {})
+  };
+};
+export const audit = ({ actorId, action, listingId, before, after, note }) =>
+  run(
+    "none",
+    `INSERT INTO ops.audit_logs (actor_user_id, action, entity_type, entity_id, before_data, after_data)
+     VALUES ($1,$2,'marketplace.listings',$3,$4::jsonb,$5::jsonb)`,
+    [
+      actorId,
+      action,
+      listingId,
+      JSON.stringify(auditSnapshot(before)),
+      JSON.stringify({ ...auditSnapshot(after), note: note || null })
+    ]
+  );
+export const sellerListings = ({
+  userId,
+  status,
+  reviewStatus,
+  search,
+  limit,
+  offset
+}) =>
+  run(
+    "any",
+    `SELECT id, listing_code AS "listingCode", title, status, review_status AS "reviewStatus", price_amount_minor AS "priceAmountMinor", currency, created_at AS "createdAt", updated_at AS "updatedAt", count(*) OVER()::int AS total FROM marketplace.listings l WHERE l.deleted_at IS NULL AND (l.seller_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = l.seller_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR l.status = $2) AND ($3::varchar IS NULL OR l.review_status = $3) AND ($4::varchar IS NULL OR l.title ILIKE $4 OR l.listing_code ILIKE $4) ORDER BY l.updated_at DESC LIMIT $5 OFFSET $6`,
+    [userId, status, reviewStatus, search ? `%${search}%` : null, limit, offset]
+  );
+export const publishedDetail = id =>
+  run(
+    "oneOrNone",
+    `SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.title, l.description, l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status AS "listingStatus", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", p.id AS "propertyId", p.public_code AS "propertyCode", p.source AS "propertySource", p.status AS "propertyStatus", pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyType", lut.id AS "landUseTypeId", lut.code AS "landUseTypeCode", lut.name AS "landUseType", ot.id AS "ownershipTypeId", ot.code AS "ownershipTypeCode", ot.name AS "ownershipType", d.area_value AS "areaValue", au.id AS "areaUnitId", au.code AS "areaUnitCode", d.area_sqft AS "areaSqft", d.length_value AS "lengthValue", d.width_value AS "widthValue", du.id AS "dimensionUnitId", du.code AS "dimensionUnitCode", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", rt.id AS "roadTypeId", rt.code AS "roadTypeCode", d.facing, d.open_sides AS "openSides", d.is_corner_plot AS "isCornerPlot", d.has_boundary_wall AS "hasBoundaryWall", d.terrain, d.road_access_type AS "roadAccessType", loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType", loc.parent_id AS "locationParentId", loc.state_code AS "locationStateCode", pc.code AS pincode, pl.address_line AS "addressLine", pl.landmark, NULLIF(concat_ws(', ', pl.address_line, pl.landmark, loc.name, pc.code), '') AS "formattedAddress", pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation", CASE WHEN pl.show_exact_location THEN ST_Y(pl.coordinates::geometry) END AS latitude, CASE WHEN pl.show_exact_location THEN ST_X(pl.coordinates::geometry) END AS longitude, seller.id AS "sellerId", seller.display_name AS "sellerDisplayName", organization.id AS "organizationId", organization.name AS "organizationName", organization.type AS "organizationType" FROM marketplace.listings l JOIN land.properties p ON p.id = l.property_id AND p.deleted_at IS NULL JOIN land.property_types pt ON pt.id = p.property_type_id LEFT JOIN land.land_use_types lut ON lut.id = p.land_use_type_id LEFT JOIN land.ownership_types ot ON ot.id = p.ownership_type_id LEFT JOIN land.property_land_details d ON d.property_id = p.id LEFT JOIN land.area_units au ON au.id = d.area_unit_id LEFT JOIN land.area_units du ON du.id = d.dimension_unit_id LEFT JOIN land.road_types rt ON rt.id = d.road_type_id LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations loc ON loc.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL WHERE l.id = $1 AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED' AND l.deleted_at IS NULL`,
+    [id]
+  );
+export const media = propertyId =>
+  run(
+    "any",
+    `SELECT id, media_type AS "mediaType", storage_key AS "storageKey", thumbnail_storage_key AS "thumbnailStorageKey", mime_type AS "mimeType", caption, sort_order AS "sortOrder", is_cover AS "isCover" FROM land.property_media WHERE property_id = $1 AND deleted_at IS NULL ORDER BY sort_order`,
+    [propertyId]
+  );
+export const amenities = propertyId =>
+  run(
+    "any",
+    `SELECT a.code, a.name, a.category, pa.value_text AS "valueText" FROM land.property_amenities pa JOIN land.amenities a ON a.id = pa.amenity_id WHERE pa.property_id = $1 ORDER BY a.sort_order`,
+    [propertyId]
+  );
+export const parcelSummary = propertyId =>
+  run(
+    "any",
+    `SELECT pit.code AS type, pit.name AS label, pi.identifier_value AS value FROM land.property_parcel_identifiers pi JOIN land.parcel_identifier_types pit ON pit.id = pi.identifier_type_id WHERE pi.property_id = $1 ORDER BY pit.sort_order, pit.name`,
+    [propertyId]
+  );
+export const verification = propertyId =>
+  run(
+    "any",
+    `SELECT check_type AS "checkType", status, reviewed_at AS "reviewedAt", notes AS "publicNote", updated_at AS "updatedAt" FROM land.property_verification_checks WHERE property_id = $1 ORDER BY check_type`,
+    [propertyId]
+  );
+export const passport = propertyId =>
+  run(
+    "oneOrNone",
+    `SELECT property_id AS "propertyId", public_code AS "passportCode", completeness_percent AS "propertyCompletionPercent", verification_checks AS "verificationChecks", document_count AS "documentCount", last_updated AS "lastUpdated" FROM land.v_land_passports WHERE property_id = $1`,
+    [propertyId]
+  );
+export const promotions = id =>
+  run(
+    "any",
+    `SELECT promotion_type AS "promotionType" FROM marketplace.listing_promotions WHERE listing_id = $1 AND status = 'ACTIVE' AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())`,
+    [id]
+  );
+export const isFavorite = (listingId, userId) =>
+  run(
+    "one",
+    `SELECT EXISTS (SELECT 1 FROM marketplace.favorites WHERE listing_id = $1 AND user_id = $2) AS "isFavorite"`,
+    [listingId, userId]
+  );
+export const adminListings = ({
+  reviewStatus,
+  status,
+  propertyTypeId,
+  locationId,
+  search,
+  limit,
+  offset
+}) =>
+  run(
+    "any",
+    `SELECT filtered.*, count(*) OVER()::int AS total
+     FROM (
+       SELECT DISTINCT l.id, l.listing_code AS "listingCode", l.title,
+         l.review_status AS "reviewStatus", l.status,
+         l.submitted_at AS "submittedAt", l.created_at AS "createdAt"
+       FROM marketplace.listings l
+       LEFT JOIN auth.users seller ON seller.id = l.seller_user_id
+       JOIN land.properties property ON property.id = l.property_id AND property.deleted_at IS NULL
+       LEFT JOIN land.property_locations property_location ON property_location.property_id = property.id
+       WHERE l.deleted_at IS NULL AND ($1::varchar IS NULL OR l.review_status = $1)
+         AND ($2::varchar IS NULL OR l.status = $2)
+         AND ($3::varchar IS NULL OR l.title ILIKE $3 OR l.listing_code ILIKE $3 OR seller.display_name ILIKE $3)
+         AND ($4::uuid IS NULL OR property.property_type_id = $4)
+         AND ($5::uuid IS NULL OR property_location.location_id = $5)
+     ) filtered
+     ORDER BY filtered."submittedAt" NULLS LAST, filtered."createdAt" DESC
+     LIMIT $6 OFFSET $7`,
+    [
+      reviewStatus,
+      status,
+      search ? `%${search}%` : null,
+      propertyTypeId,
+      locationId,
+      limit,
+      offset
+    ]
+  );
+export const adminListing = id => summary(id);
+export const approve = ({ id, expiresAt }) =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'INACTIVE', approved_at = now(), expires_at = COALESCE($2, expires_at), rejection_reason = NULL WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
+    [id, expiresAt]
+  );
+export const reject = (id, reason) =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET review_status = 'REJECTED', status = 'INACTIVE', rejection_reason = $2 WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
+    [id, reason]
+  );
+export const suspend = id =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET status = 'SUSPENDED' WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+    [id]
+  );

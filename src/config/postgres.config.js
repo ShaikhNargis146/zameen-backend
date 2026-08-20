@@ -16,12 +16,17 @@ const initOptions = {
 
 const pgp = pgPromise(initOptions);
 
+const connectionString = process.env.DATABASE_URL || null;
 const cn = {
-  host: constants.database.host,
-  port: constants.database.port,
-  database: constants.database.database,
-  user: constants.database.user,
-  password: constants.database.password,
+  ...(connectionString
+    ? { connectionString }
+    : {
+        host: constants.database.host,
+        port: constants.database.port,
+        database: constants.database.database,
+        user: constants.database.user,
+        password: constants.database.password
+      }),
 
   // ✅ IMPORTANT: make connections stable on VMs / NAT / proxies
   keepAlive: true,
@@ -32,10 +37,12 @@ const cn = {
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
 
-  ssl: false
-  // ssl: {
-  //   rejectUnauthorized: false
-  // }
+  ssl:
+    process.env.DB_SSL === "true"
+      ? {
+          rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false"
+        }
+      : false
 };
 
 const db = pgp(cn);

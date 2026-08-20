@@ -1,7 +1,6 @@
 import httpStatus from "http-status";
 import { ValidationError } from "express-validation";
 import APIError from "../utils/APIError.js";
-import env from "../constants/index.js";
 
 /**
  * Error handler. Send stacktrace only during development
@@ -32,24 +31,28 @@ const handler = (err, req, res, next) => {
     const status =
       err?.status || err?.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
 
+    const isServerError = status >= httpStatus.INTERNAL_SERVER_ERROR;
     const payload = {
-      ok: false,
-      status,
-      message: err?.message || "Internal Server Error",
-      error:
-        process.env.NODE_ENV === "production"
-          ? null
-          : err?.stack || String(err),
-      data: null
+      success: false,
+      error: {
+        code: isServerError ? "INTERNAL_ERROR" : err?.code || "REQUEST_ERROR",
+        message:
+          isServerError && process.env.NODE_ENV === "production"
+            ? "Internal Server Error"
+            : err?.message || "Internal Server Error"
+      }
     };
+    const details = err?.details || err?.errors?.details;
+    if (!isServerError && details?.length) payload.error.details = details;
 
     return res.status(status).json(payload);
   } catch (e) {
     // last resort
     if (!res.headersSent) {
-      return res
-        .status(500)
-        .json({ ok: false, message: "Internal Server Error", data: null });
+      return res.status(500).json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Internal Server Error" }
+      });
     }
   }
 };
@@ -64,13 +67,18 @@ const converter = (err, req, res, next) => {
   if (err instanceof ValidationError) {
     convertedError = new APIError({
       message: "Validation Error",
-      errors: err.errors,
+      errors: { details: err.errors },
       status: err.status || httpStatus.INTERNAL_SERVER_ERROR,
       stack: err.stack
     });
   } else if (!(err instanceof APIError)) {
     convertedError = new APIError({
-      message: err.message,
+      message:
+        err.status && err.status < 500 ? err.message : "Internal Server Error",
+      code: err.code || "INTERNAL_ERROR",
+      errors: {
+        details: err.status && err.status < 500 ? err.details : undefined
+      },
       status: err.status || httpStatus.INTERNAL_SERVER_ERROR,
       stack: err.stack
     });
