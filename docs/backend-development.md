@@ -15,7 +15,11 @@ The current implementation is Express and JavaScript. Do not introduce NestJS,
 TypeScript, or another server framework without an approved migration plan.
 
 1. Create `.env` from `.env.example` and set database credentials, `JWT_SECRET`,
-   and a different `TOKEN_PEPPER`.
+   and a different `TOKEN_PEPPER`. Set either the individual `DB_HOST`, `DB_PORT`,
+   `DB`, `DB_USER`, and `DB_PASSWORD` values, or use `DATABASE_URL` for Cloud SQL;
+   `DATABASE_URL` takes precedence when present. Set `DB_SSL=true` when your
+   Cloud SQL connection requires TLS. `DB_SSL_REJECT_UNAUTHORIZED=false` is a
+   local-development fallback only; never use it for staging or production.
 2. Create a new PostgreSQL database with privileges for `pgcrypto`, `citext`,
    `postgis`, and `pg_trgm`.
 3. For a new database, run `npm run db:schema` once. For an existing database,
@@ -25,6 +29,21 @@ TypeScript, or another server framework without an approved migration plan.
 `npm run db:schema` is a clean-install command. It refuses to run when
 `auth.users` already exists, so it cannot overwrite an existing canonical
 database. Never use it as a migration command.
+
+`npm start` never creates or migrates database objects. This is intentional:
+application instances must not race to mutate a shared production database at
+boot. Run the appropriate database command as an explicit deployment step:
+
+```bash
+# Brand-new database only
+npm run db:schema
+
+# Existing canonical database: apply forward-only migrations
+npm run db:migrate
+
+# Then start the API
+npm start
+```
 
 ## Source layout
 
