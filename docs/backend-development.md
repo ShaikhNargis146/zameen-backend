@@ -109,6 +109,15 @@ unless an API-contract change is explicitly approved.
 Provision the first administrator through a controlled database runbook after
 the user verifies their contact method. Never seed default admin credentials.
 
+### OTP delivery environments
+
+| Environment | Required configuration | Expected behavior |
+| --- | --- | --- |
+| Local development | `OTP_DELIVERY_MODE=console` | Each OTP request generates a new six-digit code and writes it to the API server log. Copy that code into the verify request. |
+| Staging / production | `OTP_DELIVERY_MODE=webhook` and `OTP_PROVIDER_WEBHOOK_URL` | The API sends `{ destination, channel, purpose, code }` as JSON to the configured provider webhook. A non-2xx provider response fails the OTP request safely. |
+
+After changing `.env`, restart `npm start`; configuration is loaded when the process starts. Do not add `AUTH_STATIC_OTP`: static OTPs are intentionally unsupported.
+
 ## Database rules
 
 | Schema | Purpose |

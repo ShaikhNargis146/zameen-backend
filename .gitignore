@@ -1,6 +1,5 @@
 # IDE files
 .idea
-.env.example
 # Logs
 logs
 *.log
