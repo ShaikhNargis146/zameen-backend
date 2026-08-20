@@ -18,9 +18,7 @@ const router = express.Router();
 router.get("/status", (req, res) => {
   res.json({
     message: "OK",
-    timestamp: new Date().toISOString(),
-    IP: req.ip,
-    URL: req.originalUrl
+    timestamp: new Date().toISOString()
   });
 });
 

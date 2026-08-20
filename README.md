@@ -1,6 +1,6 @@
 # Zameens backend
 
-Start with [the backend development guide](/Users/shaikhnargis/Documents/zameen/docs/backend-development.md). It is the practical source of truth for contributors; [the architecture](/Users/shaikhnargis/Documents/zameen/docs/architecture.md) contains the wider platform plan.
+Start with [the backend development guide](docs/backend-development.md). It is the practical source of truth for contributors; [the architecture](docs/architecture.md) contains the wider platform plan.
 
 ## Database
 

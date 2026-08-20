@@ -36,6 +36,15 @@ export const create = input =>
       input.isNegotiable
     ]
   );
+export const liveListingForProperty = propertyId =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM marketplace.listings
+     WHERE property_id = $1 AND deleted_at IS NULL
+       AND review_status IN ('PENDING', 'APPROVED')
+       AND status IN ('INACTIVE', 'PUBLISHED', 'PAUSED')`,
+    [propertyId]
+  );
 export const summary = id =>
   run(
     "oneOrNone",
@@ -46,34 +55,57 @@ export const update = (id, changes) =>
   pg.updateWhere({
     table: "marketplace.listings",
     set: changes,
-    where: "id = ${id}",
+    where:
+      "id = ${id} AND deleted_at IS NULL AND review_status IN ('DRAFT', 'REJECTED')",
     params: { id }
   });
 export const archive = id =>
   run(
-    "none",
-    `UPDATE marketplace.listings SET deleted_at = now(), status = 'WITHDRAWN' WHERE id = $1`,
+    "oneOrNone",
+    `UPDATE marketplace.listings SET deleted_at = now(), status = 'WITHDRAWN'
+     WHERE id = $1 AND deleted_at IS NULL AND status <> 'PUBLISHED' RETURNING id`,
     [id]
   );
 export const submit = id =>
   run(
-    "none",
-    `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL WHERE id = $1`,
+    "oneOrNone",
+    `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
+     WHERE id = $1 AND deleted_at IS NULL AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
     [id]
   );
 export const transition = ({
   id,
   status,
+  validStatuses,
+  requiresApproval = false,
   setPublishedAt = false,
   setSoldAt = false
 }) =>
   run(
-    "none",
+    "oneOrNone",
     `UPDATE marketplace.listings SET status = $2${
       setPublishedAt ? ", published_at = COALESCE(published_at, now())" : ""
-    }${setSoldAt ? ", sold_at = now()" : ""} WHERE id = $1`,
-    [id, status]
+    }${setSoldAt ? ", sold_at = now()" : ""}
+     WHERE id = $1 AND deleted_at IS NULL AND status = ANY($3::varchar[])
+       AND ($4::boolean = false OR review_status = 'APPROVED')
+     RETURNING id`,
+    [id, status, validStatuses, requiresApproval]
   );
+const auditSnapshot = value => {
+  if (!value) return {};
+  const { seller, ...listing } = value;
+  return {
+    ...listing,
+    ...(seller
+      ? {
+          seller: {
+            id: seller.id,
+            displayName: seller.displayName || seller.display_name || null
+          }
+        }
+      : {})
+  };
+};
 export const audit = ({ actorId, action, listingId, before, after, note }) =>
   run(
     "none",
@@ -83,8 +115,8 @@ export const audit = ({ actorId, action, listingId, before, after, note }) =>
       actorId,
       action,
       listingId,
-      JSON.stringify(before || {}),
-      JSON.stringify({ ...(after || {}), note: note || null })
+      JSON.stringify(auditSnapshot(before)),
+      JSON.stringify({ ...auditSnapshot(after), note: note || null })
     ]
   );
 export const sellerListings = ({
@@ -159,17 +191,23 @@ export const adminListings = ({
 }) =>
   run(
     "any",
-    `SELECT l.id, l.listing_code AS "listingCode", l.title, l.review_status AS "reviewStatus", l.status, l.submitted_at AS "submittedAt", l.created_at AS "createdAt", count(*) OVER()::int AS total
-     FROM marketplace.listings l
-     LEFT JOIN auth.users seller ON seller.id = l.seller_user_id
-     JOIN land.properties property ON property.id = l.property_id AND property.deleted_at IS NULL
-     LEFT JOIN land.property_locations property_location ON property_location.property_id = property.id
-     WHERE l.deleted_at IS NULL AND ($1::varchar IS NULL OR l.review_status = $1)
-       AND ($2::varchar IS NULL OR l.status = $2)
-       AND ($3::varchar IS NULL OR l.title ILIKE $3 OR l.listing_code ILIKE $3 OR seller.display_name ILIKE $3)
-       AND ($4::uuid IS NULL OR property.property_type_id = $4)
-       AND ($5::uuid IS NULL OR property_location.location_id = $5)
-     ORDER BY l.submitted_at NULLS LAST, l.created_at DESC LIMIT $6 OFFSET $7`,
+    `SELECT filtered.*, count(*) OVER()::int AS total
+     FROM (
+       SELECT DISTINCT l.id, l.listing_code AS "listingCode", l.title,
+         l.review_status AS "reviewStatus", l.status,
+         l.submitted_at AS "submittedAt", l.created_at AS "createdAt"
+       FROM marketplace.listings l
+       LEFT JOIN auth.users seller ON seller.id = l.seller_user_id
+       JOIN land.properties property ON property.id = l.property_id AND property.deleted_at IS NULL
+       LEFT JOIN land.property_locations property_location ON property_location.property_id = property.id
+       WHERE l.deleted_at IS NULL AND ($1::varchar IS NULL OR l.review_status = $1)
+         AND ($2::varchar IS NULL OR l.status = $2)
+         AND ($3::varchar IS NULL OR l.title ILIKE $3 OR l.listing_code ILIKE $3 OR seller.display_name ILIKE $3)
+         AND ($4::uuid IS NULL OR property.property_type_id = $4)
+         AND ($5::uuid IS NULL OR property_location.location_id = $5)
+     ) filtered
+     ORDER BY filtered."submittedAt" NULLS LAST, filtered."createdAt" DESC
+     LIMIT $6 OFFSET $7`,
     [
       reviewStatus,
       status,

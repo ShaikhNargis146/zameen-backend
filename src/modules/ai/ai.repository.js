@@ -1,6 +1,6 @@
 import { pg, run } from "../../shared/db.js";
 
-const conversationColumns = `id, user_id AS "userId", context_type AS "contextType", listing_id AS "listingId", title, created_at AS "createdAt", updated_at AS "updatedAt"`;
+const conversationColumns = `id, user_id AS "userId", context_type AS "contextType", listing_id AS "listingId", title, guest_token_expires_at AS "guestTokenExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt"`;
 export const createConversation = ({
   userId,
   contextType,
@@ -9,9 +9,9 @@ export const createConversation = ({
   guestTokenHash
 }) =>
   pg.one(
-    `INSERT INTO ai.conversations (user_id, context_type, listing_id, title, guest_token_hash)
-     VALUES ($1,$2,$3,$4,$5) RETURNING ${conversationColumns}`,
-    [userId, contextType, listingId, title, guestTokenHash]
+    `INSERT INTO ai.conversations (user_id, context_type, listing_id, title, guest_token_hash, guest_token_expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${conversationColumns}`,
+    [userId, contextType, listingId, title, guestTokenHash, guestTokenExpiresAt]
   );
 export const conversation = id =>
   run(

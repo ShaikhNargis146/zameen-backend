@@ -1,10 +1,12 @@
 import jwt from "jsonwebtoken";
+import { randomInt } from "node:crypto";
 import {
   hashWithPepper,
   randomToken,
   safeEqualHex
 } from "../../utils/crypto.js";
 import * as repository from "./auth.repository.js";
+import { deliverOtp, otpDeliveryConfigured } from "./otp.provider.js";
 
 const accessTtlSeconds = Number(process.env.ACCESS_TOKEN_TTL_SECONDS || 900);
 const refreshTtlDays = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
@@ -20,10 +22,6 @@ const otpPurposes = new Set([
   "VERIFY_PHONE",
   "VERIFY_EMAIL"
 ]);
-const staticOtp =
-  process.env.NODE_ENV !== "production"
-    ? process.env.AUTH_STATIC_OTP || "1234"
-    : null;
 const jwtSecret = process.env.JWT_SECRET || "development-only-change-me";
 if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET)
   throw new Error("JWT_SECRET is required in production");
@@ -94,7 +92,7 @@ class AuthService {
         "INVALID_DESTINATION",
         "Provide a valid phone or email."
       );
-    if (!staticOtp)
+    if (!otpDeliveryConfigured())
       return responseError(
         503,
         "OTP_PROVIDER_UNCONFIGURED",
@@ -128,16 +126,23 @@ class AuthService {
       destination,
       channel
     );
+    const otp = String(randomInt(100000, 1000000));
     const challenge = await repository.createChallenge({
       userId: existing?.id || null,
       destination,
       channel,
       purpose,
-      otpHash: hashWithPepper(`${destination}:${purpose}:${staticOtp}`),
+      otpHash: hashWithPepper(`${destination}:${purpose}:${otp}`),
       expiresAt: new Date(Date.now() + otpTtlSeconds * 1000),
       maxAttempts: otpMaxAttempts,
       ip: input.ip || null
     });
+    try {
+      await deliverOtp({ destination, channel, purpose, code: otp });
+    } catch (error) {
+      await repository.deleteChallenge(challenge.id);
+      throw error;
+    }
     return {
       ok: true,
       data: {
@@ -221,6 +226,7 @@ class AuthService {
 
   static async createSession({
     userId,
+    familyId = null,
     ip = null,
     userAgent = null,
     deviceId = null,
@@ -237,6 +243,7 @@ class AuthService {
     const session = await repository.createRefreshSession({
       userId,
       tokenHash: hashWithPepper(`refresh:${refreshToken}`),
+      familyId,
       ip,
       userAgent,
       deviceId,
@@ -264,18 +271,29 @@ class AuthService {
         "INVALID_REFRESH_TOKEN",
         "Invalid refresh token."
       );
-    const session = await repository.findRefreshSession(
-      hashWithPepper(`refresh:${refreshToken}`)
-    );
-    if (!session)
+    const tokenHash = hashWithPepper(`refresh:${refreshToken}`);
+    const session = await repository.findRefreshSession(tokenHash);
+    if (!session) {
+      const reused = await repository.refreshSessionByHash(tokenHash);
+      if (reused?.revoked_at)
+        await repository.revokeSessionFamily(reused.family_id);
       return responseError(
         401,
         "INVALID_REFRESH_TOKEN",
         "Invalid refresh token."
       );
-    await repository.revokeSession(session.id);
+    }
+    if (!(await repository.consumeRefreshSession(session.id))) {
+      await repository.revokeSessionFamily(session.family_id);
+      return responseError(
+        401,
+        "INVALID_REFRESH_TOKEN",
+        "Invalid refresh token."
+      );
+    }
     return this.createSession({
       userId: session.user_id,
+      familyId: session.family_id,
       ip,
       userAgent,
       deviceId,

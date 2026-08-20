@@ -72,6 +72,10 @@ export const replaceRoles = async (userId, roles) => {
   });
   if (!result.ok) throw result.error;
 };
+const auditSnapshot = value => {
+  const { phoneE164, email, ...safe } = value || {};
+  return safe;
+};
 export const audit = ({
   actorId,
   action,
@@ -88,8 +92,8 @@ export const audit = ({
       actorId,
       action,
       entityId,
-      JSON.stringify(before || {}),
-      JSON.stringify(after || {}),
+      JSON.stringify(auditSnapshot(before)),
+      JSON.stringify(auditSnapshot(after)),
       ip || null,
       requestId || null
     ]

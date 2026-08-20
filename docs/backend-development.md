@@ -95,17 +95,16 @@ unless an API-contract change is explicitly approved.
 | Listings | `/properties/:propertyId/listings`, `/listings`, `/seller/listings`, `/admin/listings` | draft, review, publishing lifecycle, public detail |
 | Discovery | `/search`, `/listings/:listingId/similar`, `/listings/compare` | listing search, suggestions, map pins, similarity, comparison |
 | Verification | `/admin/verifications` | verification review queue and admin decisions |
-| AI | `/ai` | natural-language search, grounded conversation records, listing-copy drafts |
+| AI | `/ai` | Phase 1 rule-based search parsing, grounded conversation records, and listing-copy drafts. It is not connected to an LLM provider yet. |
 
 ## Authentication and authorization
 
 - Access tokens are short-lived signed JWTs.
 - Refresh tokens are opaque, hashed, stored in `auth.refresh_sessions`, and rotated.
 - A user may have multiple roles through `auth.user_roles`.
-- A newly verified user receives both `BUYER` and `SELLER`; all other non-admin roles are selected explicitly through `/users/me/roles`.
+- A newly verified user receives both `BUYER` and `SELLER`. Business roles (`BROKER`, `DEVELOPER`, `CHANNEL_PARTNER`, `CORPORATE`) are granted through the administrator role-management workflow, never by the user.
 - `requireAuth` requires an active user; `requireAdmin` additionally requires `ADMIN`.
-- `AUTH_STATIC_OTP` is development-only. Production OTP delivery remains disabled
-  until an SMS/email provider is integrated.
+- OTP codes are generated per challenge, hashed with the token pepper, and expire after the configured TTL. Configure `OTP_DELIVERY_MODE=webhook` and `OTP_PROVIDER_WEBHOOK_URL` for production. `OTP_DELIVERY_MODE=console` is opt-in and allowed only outside production.
 
 Provision the first administrator through a controlled database runbook after
 the user verifies their contact method. Never seed default admin credentials.

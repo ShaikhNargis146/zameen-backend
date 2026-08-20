@@ -43,6 +43,13 @@ test("map search validates bounds and compare requires unique listing ids", () =
   assert.equal(result.maxPins, 20);
   assert.deepEqual(compare({ listingIds }), listingIds);
   assert.throws(
+    () =>
+      map({
+        bounds: { north: 19.2, south: 18.9, east: 72.9, west: 73.2 }
+      }),
+    error => error.code === "VALIDATION_ERROR"
+  );
+  assert.throws(
     () => compare({ listingIds: [listingIds[0], listingIds[0]] }),
     error => error.code === "VALIDATION_ERROR"
   );

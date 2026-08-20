@@ -6,8 +6,10 @@ import {
   requireAuth
 } from "../auth/auth.routes.js";
 import * as controller from "./ai.controller.js";
+import { aiRateLimit } from "../../config/rate-limit.config.js";
 
 const router = Router();
+router.use(aiRateLimit);
 router.post("/ai/search", optionalAuth, asyncRoute(controller.search));
 router.post(
   "/ai/conversations",

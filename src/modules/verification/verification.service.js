@@ -1,28 +1,10 @@
 import { HttpError } from "../../shared/http.js";
+import { verificationSummaryForChecks } from "../../shared/verification.js";
 import * as repository from "./verification.repository.js";
 
 const summary = async propertyId => {
   const checks = await repository.propertyChecks(propertyId);
-  const statuses = checks.map(check => check.status);
-  const overallStatus = statuses.includes("REJECTED")
-    ? "REJECTED"
-    : statuses.includes("PARTIAL")
-    ? "PARTIAL"
-    : statuses.length && statuses.every(status => status === "VERIFIED")
-    ? "VERIFIED"
-    : statuses.includes("PENDING")
-    ? "PENDING"
-    : "NOT_STARTED";
-  const timestamps = checks
-    .map(check => check.updatedAt)
-    .filter(Boolean)
-    .sort();
-  return {
-    propertyId,
-    overallStatus,
-    checks,
-    lastUpdatedAt: timestamps.at(-1) || null
-  };
+  return verificationSummaryForChecks(propertyId, checks);
 };
 const detail = async verification => ({
   id: verification.id,
@@ -32,7 +14,7 @@ const detail = async verification => ({
     publicCode: verification.propertyCode
   },
   documents: await repository.propertyDocuments(verification.propertyId),
-  internalNotes: [],
+  internalNotes: await repository.internalNotes(verification.id),
   requestedAt: verification.requestedAt,
   requestedBy: verification.requesterName
     ? {
@@ -48,13 +30,23 @@ export const list = async filters => {
   const offset = (filters.page - 1) * filters.limit;
   const rows = await repository.list({ ...filters, offset });
   const total = rows[0]?.total || 0;
+  const checks = await repository.propertyChecksForProperties(
+    rows.map(row => row.propertyId)
+  );
+  const checksByProperty = new Map();
+  for (const check of checks) {
+    const existing = checksByProperty.get(check.propertyId) || [];
+    existing.push(check);
+    checksByProperty.set(check.propertyId, existing);
+  }
   return {
-    data: await Promise.all(
-      rows.map(async ({ total: ignored, ...row }) => ({
-        ...(await summary(row.propertyId)),
-        verificationId: row.id
-      }))
-    ),
+    data: rows.map(({ total: ignored, ...row }) => ({
+      ...verificationSummaryForChecks(
+        row.propertyId,
+        checksByProperty.get(row.propertyId) || []
+      ),
+      verificationId: row.id
+    })),
     meta: {
       page: filters.page,
       limit: filters.limit,
@@ -87,18 +79,19 @@ export const update = async ({ verificationId, actorId, changes, request }) => {
       "CHECK_TYPE_MISMATCH",
       "checkType does not match this verification record."
     );
-  const result = await repository.update({
+  const result = await repository.updateWithAudit({
     verificationId,
     actorId,
-    ...changes
-  });
-  if (!result.ok) throw result.error;
-  await repository.audit({
-    actorId,
-    verificationId,
+    ...changes,
     before,
-    after: changes,
     ...request
   });
+  if (!result.ok) throw result.error;
+  if (!result.data)
+    throw new HttpError(
+      409,
+      "VERIFICATION_UPDATE_CONFLICT",
+      "The verification changed before this update could be applied."
+    );
   return get(verificationId);
 };

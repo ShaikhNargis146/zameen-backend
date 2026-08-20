@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import { signedReadUrl } from "../../utils/storage.js";
@@ -40,12 +40,26 @@ export const create = async ({ propertyId, actorId, input }) => {
       "ORGANIZATION_ACCESS_DENIED",
       "You are not an active member of that organisation."
     );
-  const saved = await repository.create({
-    ...input,
-    propertyId: property.id,
-    userId: actorId,
-    listingCode: listingCode()
-  });
+  if (await repository.liveListingForProperty(property.id))
+    throw new HttpError(
+      409,
+      "LIVE_LISTING_EXISTS",
+      "This property already has a live listing. Update or withdraw it before creating another."
+    );
+  let saved;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      saved = await repository.create({
+        ...input,
+        propertyId: property.id,
+        userId: actorId,
+        listingCode: listingCode()
+      });
+      break;
+    } catch (error) {
+      if (error?.code !== "23505" || attempt === 2) throw error;
+    }
+  }
   return repository.summary(saved.id);
 };
 export const summary = repository.summary;
@@ -58,6 +72,12 @@ export const update = async ({ listing, changes }) => {
     );
   const result = await repository.update(listing.id, changes);
   if (!result.ok) throw result.error;
+  if (!result.data)
+    throw new HttpError(
+      409,
+      "LISTING_UPDATE_CONFLICT",
+      "The listing changed before this update could be applied."
+    );
   return repository.summary(listing.id);
 };
 export const remove = async listing => {
@@ -67,7 +87,12 @@ export const remove = async listing => {
       "WITHDRAW_LISTING_FIRST",
       "Published listings must be withdrawn before deletion."
     );
-  await repository.archive(listing.id);
+  if (!(await repository.archive(listing.id)))
+    throw new HttpError(
+      409,
+      "LISTING_DELETE_CONFLICT",
+      "The listing changed before it could be deleted."
+    );
 };
 export const submit = async listing => {
   if (!["DRAFT", "REJECTED"].includes(listing.review_status))
@@ -76,7 +101,32 @@ export const submit = async listing => {
       "INVALID_TRANSITION",
       "Listing cannot be submitted from its current state."
     );
-  await repository.submit(listing.id);
+  const scanner = await propertyScanner(listing.property_id);
+  if (scanner.readinessScore < 100)
+    throw new HttpError(
+      409,
+      "LISTING_NOT_READY",
+      "Complete the required land, location, parcel, document, and media details before submitting this listing.",
+      scanner.missingItems
+    );
+  let submitted;
+  try {
+    submitted = await repository.submit(listing.id);
+  } catch (error) {
+    if (error?.code === "23505")
+      throw new HttpError(
+        409,
+        "LIVE_LISTING_EXISTS",
+        "This property already has a live listing."
+      );
+    throw error;
+  }
+  if (!submitted)
+    throw new HttpError(
+      409,
+      "LISTING_SUBMIT_CONFLICT",
+      "The listing changed before it could be submitted."
+    );
   return repository.summary(listing.id);
 };
 const transitions = {
@@ -119,12 +169,20 @@ export const transition = async ({
       "LISTING_NOT_APPROVED",
       "Only approved listings may be published."
     );
-  await repository.transition({
+  const updatedTransition = await repository.transition({
     id: listing.id,
     status: rule.status,
+    validStatuses: rule.valid,
+    requiresApproval: Boolean(rule.approved),
     setPublishedAt: rule.published,
     setSoldAt: rule.sold
   });
+  if (!updatedTransition)
+    throw new HttpError(
+      409,
+      "LISTING_TRANSITION_CONFLICT",
+      "The listing changed before this transition could be applied."
+    );
   const updated = await repository.summary(listing.id);
   await repository.audit({
     actorId,

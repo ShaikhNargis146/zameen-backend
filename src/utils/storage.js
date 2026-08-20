@@ -1,5 +1,5 @@
 import { Storage } from "@google-cloud/storage";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { HttpError } from "../shared/http.js";
 
@@ -41,7 +41,9 @@ export const signedWriteUrl = async ({ storageKey, mimeType }) => {
   };
 };
 export const signedReadUrl = async storageKey => {
-  if (!storageKey) return null;
+  // Public listing discovery must continue to work when media storage has not
+  // been provisioned (for example on a fresh developer environment).
+  if (!storageKey || !bucketName) return null;
   const [url] = await ensureStorage()
     .file(storageKey)
     .getSignedUrl({

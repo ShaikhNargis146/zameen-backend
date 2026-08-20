@@ -2,22 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { selfRole } from "../../src/modules/users/users.validation.js";
 
-test("a verified user can select any non-admin onboarding role", () => {
-  for (const roleCode of [
-    "BUYER",
-    "SELLER",
-    "BROKER",
-    "DEVELOPER",
-    "CHANNEL_PARTNER",
-    "CORPORATE"
-  ])
+test("a verified user can select buyer or seller roles", () => {
+  for (const roleCode of ["BUYER", "SELLER"])
     assert.equal(selfRole({ roleCode: roleCode.toLowerCase() }), roleCode);
 });
 
-test("the legacy role field remains supported and ADMIN cannot be self-assigned", () => {
+test("business and administrator roles cannot be self-assigned", () => {
   assert.equal(selfRole({ role: "seller" }), "SELLER");
-  assert.throws(
-    () => selfRole({ roleCode: "ADMIN" }),
-    error => error.code === "ROLE_NOT_SELF_ASSIGNABLE"
-  );
+  for (const roleCode of [
+    "BROKER",
+    "DEVELOPER",
+    "CHANNEL_PARTNER",
+    "CORPORATE",
+    "ADMIN"
+  ])
+    assert.throws(
+      () => selfRole({ roleCode }),
+      error => error.code === "ROLE_NOT_SELF_ASSIGNABLE"
+    );
 });

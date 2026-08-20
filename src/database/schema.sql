@@ -93,6 +93,7 @@ CREATE TABLE auth.refresh_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   token_hash text NOT NULL UNIQUE,
+  family_id uuid NOT NULL DEFAULT gen_random_uuid(),
   device_id varchar(255),
   device_name varchar(255),
   ip_address inet,
@@ -104,6 +105,7 @@ CREATE TABLE auth.refresh_sessions (
   CONSTRAINT chk_refresh_expiry CHECK (expires_at > created_at)
 );
 CREATE INDEX idx_auth_refresh_sessions_active ON auth.refresh_sessions(user_id, expires_at) WHERE revoked_at IS NULL;
+CREATE INDEX idx_auth_refresh_sessions_family_active ON auth.refresh_sessions(family_id, expires_at) WHERE revoked_at IS NULL;
 
 CREATE TABLE auth.user_verification_checks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -191,7 +193,7 @@ CREATE TABLE account.organization_members (
   organization_id uuid NOT NULL REFERENCES account.organizations(id) ON DELETE RESTRICT,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   role varchar(30) NOT NULL CHECK (role IN ('OWNER','ADMIN','MEMBER')),
-  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE')),
+  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INVITED','REMOVED')),
   joined_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, user_id)
 );
@@ -201,6 +203,7 @@ CREATE TABLE account.channel_partner_profiles (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE RESTRICT,
   organization_id uuid REFERENCES account.organizations(id) ON DELETE SET NULL,
   rera_number varchar(100),
+  about text,
   experience_years smallint CHECK (experience_years IS NULL OR experience_years BETWEEN 0 AND 80),
   status varchar(30) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED','SUSPENDED')),
   approved_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
@@ -259,19 +262,27 @@ CREATE TABLE land.amenities (
 CREATE TABLE land.document_types (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(100) NOT NULL UNIQUE,
   name varchar(255) NOT NULL, is_active boolean NOT NULL DEFAULT true,
+  state_location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT,
   sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_land_document_types_state ON land.document_types(state_location_id, sort_order) WHERE is_active = true;
 CREATE TABLE land.parcel_identifier_types (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   state_location_id uuid NOT NULL REFERENCES geo.locations(id) ON DELETE RESTRICT,
   code varchar(50) NOT NULL,
   name varchar(100) NOT NULL,
   is_required boolean NOT NULL DEFAULT false,
+  placeholder varchar(255),
   is_active boolean NOT NULL DEFAULT true,
   sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (state_location_id, code)
+);
+CREATE TABLE land.parcel_configurations (
+  state_location_id uuid PRIMARY KEY REFERENCES geo.locations(id) ON DELETE RESTRICT,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 INSERT INTO land.property_types (code,name,sort_order) VALUES
@@ -420,7 +431,8 @@ CREATE TABLE land.property_verification_checks (
   status varchar(30) NOT NULL DEFAULT 'NOT_STARTED' CHECK (status IN ('NOT_STARTED','PENDING','VERIFIED','REJECTED','PARTIAL')),
   requested_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   requested_at timestamptz,
-  reviewed_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL, reviewed_at timestamptz, notes text,
+  reviewed_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL, reviewed_at timestamptz,
+  notes text, internal_notes text,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (property_id, check_type)
 );
@@ -449,6 +461,8 @@ CREATE INDEX idx_marketplace_listings_property ON marketplace.listings(property_
 CREATE INDEX idx_marketplace_listings_seller_user ON marketplace.listings(seller_user_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_marketplace_listings_seller_org ON marketplace.listings(seller_organization_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_marketplace_listings_published_search ON marketplace.listings(price_amount_minor, published_at DESC) WHERE status = 'PUBLISHED' AND deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_marketplace_one_live_listing_per_property ON marketplace.listings(property_id)
+  WHERE deleted_at IS NULL AND review_status IN ('PENDING', 'APPROVED') AND status IN ('INACTIVE', 'PUBLISHED', 'PAUSED');
 CREATE INDEX idx_marketplace_listings_full_text ON marketplace.listings
   USING gin (to_tsvector('simple', title || ' ' || coalesce(description, '')))
   WHERE deleted_at IS NULL;
@@ -468,6 +482,13 @@ CREATE TABLE marketplace.favorites (
   created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
 );
 CREATE INDEX idx_marketplace_favorites_listing ON marketplace.favorites(listing_id, created_at DESC);
+
+CREATE TABLE marketplace.recently_viewed (
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
+  viewed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
+);
+CREATE INDEX idx_marketplace_recently_viewed_user ON marketplace.recently_viewed(user_id, viewed_at DESC);
 
 CREATE TABLE marketplace.listing_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
@@ -497,7 +518,8 @@ CREATE TABLE marketplace.enquiries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
   buyer_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   enquiry_type varchar(30) NOT NULL CHECK (enquiry_type IN ('CONTACT','CALLBACK','DETAILS','DOCUMENT_REQUEST','GENERAL')),
-  message text, status varchar(30) NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','CONTACTED','INTERESTED','SITE_VISIT','CLOSED','LOST')),
+  message text, preferred_contact_channel varchar(20) CHECK (preferred_contact_channel IS NULL OR preferred_contact_channel IN ('PHONE','WHATSAPP','EMAIL')),
+  status varchar(30) NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','CONTACTED','INTERESTED','SITE_VISIT','CLOSED','LOST')),
   assigned_to_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -513,9 +535,11 @@ CREATE INDEX idx_marketplace_enquiry_notes_enquiry ON marketplace.enquiry_notes(
 CREATE TABLE marketplace.site_visits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
   buyer_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  requested_at timestamptz NOT NULL DEFAULT now(), scheduled_at timestamptz,
+  requested_at timestamptz NOT NULL DEFAULT now(), preferred_date date, preferred_time_slot varchar(50), scheduled_at timestamptz,
+  visitor_count smallint NOT NULL DEFAULT 1 CHECK (visitor_count BETWEEN 1 AND 20),
   status varchar(30) NOT NULL DEFAULT 'REQUESTED' CHECK (status IN ('REQUESTED','CONFIRMED','RESCHEDULED','COMPLETED','CANCELLED')),
-  seller_note text, buyer_note text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+  seller_note text, buyer_note text, reschedule_note text,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_marketplace_site_visits_listing ON marketplace.site_visits(listing_id, scheduled_at);
 CREATE INDEX idx_marketplace_site_visits_buyer ON marketplace.site_visits(buyer_user_id, scheduled_at) WHERE buyer_user_id IS NOT NULL;
@@ -601,16 +625,21 @@ CREATE TABLE commerce.service_requests (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, property_id uuid REFERENCES land.properties(id) ON DELETE RESTRICT,
   listing_id uuid REFERENCES marketplace.listings(id) ON DELETE RESTRICT, order_id uuid REFERENCES commerce.orders(id) ON DELETE RESTRICT,
   status varchar(30) NOT NULL DEFAULT 'REQUESTED' CHECK (status IN ('REQUESTED','PAYMENT_PENDING','IN_PROGRESS','DOCUMENTS_REQUIRED','COMPLETED','CANCELLED')),
-  assigned_to_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL, customer_notes text, internal_notes text, completed_report_storage_key text,
+  assigned_to_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  contact_phone varchar(20), contact_email citext,
+  customer_notes text, internal_notes text, completed_report_storage_key text, completed_report_summary text,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz
 );
 CREATE INDEX idx_commerce_service_requests_user ON commerce.service_requests(user_id, created_at DESC);
 CREATE INDEX idx_commerce_service_requests_queue ON commerce.service_requests(status, assigned_to_user_id, created_at);
 CREATE TABLE commerce.service_request_files (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), service_request_id uuid NOT NULL REFERENCES commerce.service_requests(id) ON DELETE RESTRICT,
-  storage_key text NOT NULL, file_name varchar(255) NOT NULL, uploaded_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  storage_key text NOT NULL, file_name varchar(255) NOT NULL, mime_type varchar(100),
+  file_size_bytes bigint CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0),
+  uploaded_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_commerce_service_request_files_request ON commerce.service_request_files(service_request_id, created_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- CONTENT and OPS.
@@ -662,7 +691,9 @@ CREATE TABLE content.investment_opportunities (
 );
 CREATE TABLE content.investment_interests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), opportunity_id uuid NOT NULL REFERENCES content.investment_opportunities(id) ON DELETE RESTRICT,
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, message text,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  organization_id uuid REFERENCES account.organizations(id) ON DELETE SET NULL,
+  contact_phone varchar(20), contact_email citext, message text,
   status varchar(20) NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','CONTACTED','CLOSED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -721,7 +752,8 @@ CREATE TABLE ai.conversations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   context_type varchar(30) NOT NULL DEFAULT 'GENERAL' CHECK (context_type IN ('GENERAL','SEARCH','PROPERTY')),
   property_id uuid REFERENCES land.properties(id) ON DELETE SET NULL, listing_id uuid REFERENCES marketplace.listings(id) ON DELETE SET NULL,
-  title varchar(255), guest_token_hash char(64), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  title varchar(255), guest_token_hash char(64), guest_token_expires_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_ai_property_context CHECK (context_type <> 'PROPERTY' OR property_id IS NOT NULL OR listing_id IS NOT NULL)
 );
 CREATE INDEX idx_ai_conversations_user ON ai.conversations(user_id, updated_at DESC) WHERE user_id IS NOT NULL;
@@ -811,7 +843,7 @@ BEGIN
   FOREACH item IN ARRAY ARRAY[
     'auth.users','auth.roles','auth.user_verification_checks',
     'geo.locations','account.organizations','account.channel_partner_profiles',
-    'land.property_types','land.land_use_types','land.ownership_types','land.area_units','land.road_types','land.amenities','land.document_types','land.parcel_identifier_types','land.properties','land.property_land_details','land.property_parcel_identifiers','land.property_locations','land.property_verification_checks',
+    'land.property_types','land.land_use_types','land.ownership_types','land.area_units','land.road_types','land.amenities','land.document_types','land.parcel_identifier_types','land.parcel_configurations','land.properties','land.property_land_details','land.property_parcel_identifiers','land.property_locations','land.property_verification_checks',
     'marketplace.listings','marketplace.buyer_requirements','marketplace.enquiries','marketplace.site_visits',
     'commerce.products','commerce.plans','commerce.orders','commerce.payments','commerce.payment_webhook_events','commerce.service_catalog','commerce.service_requests',
     'content.content_items','content.content_translations','content.market_trend_series','content.auctions','content.investment_opportunities','content.investment_interests','content.ads',

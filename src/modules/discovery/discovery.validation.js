@@ -140,13 +140,14 @@ export const map = body => {
     south > 90 ||
     east > 180 ||
     west > 180 ||
-    north < south
+    north < south ||
+    east <= west
   )
     invalid(
       "VALIDATION_ERROR",
       "bounds must be valid north, south, east and west coordinates."
     );
-  const filters = search({ ...(body.filters || {}), page: 1, limit: 1000 });
+  const filters = search(body.filters || {});
   return {
     ...filters,
     north,

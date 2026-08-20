@@ -1,5 +1,5 @@
 import { createLogger, format, transports } from "winston";
-import path from "path";
+import path from "node:path";
 import { fileURLToPath } from "url";
 import "winston-daily-rotate-file";
 

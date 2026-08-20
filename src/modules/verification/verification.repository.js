@@ -39,6 +39,20 @@ export const propertyDocuments = propertyId =>
      WHERE d.property_id = $1 AND d.deleted_at IS NULL ORDER BY d.created_at DESC`,
     [propertyId]
   );
+export const internalNotes = verificationId =>
+  run(
+    "any",
+    `SELECT audit.id, audit.after_data->>'internalNote' AS note,
+       audit.created_at AS "createdAt", actor.id AS "actorId",
+       actor.display_name AS "actorDisplayName"
+     FROM ops.audit_logs audit
+     LEFT JOIN auth.users actor ON actor.id = audit.actor_user_id
+     WHERE audit.entity_type = 'land.property_verification_checks'
+       AND audit.entity_id = $1
+       AND NULLIF(audit.after_data->>'internalNote', '') IS NOT NULL
+     ORDER BY audit.created_at DESC`,
+    [verificationId]
+  );
 export const propertyChecks = propertyId =>
   run(
     "any",
@@ -46,39 +60,50 @@ export const propertyChecks = propertyId =>
      FROM land.property_verification_checks WHERE property_id = $1 ORDER BY check_type`,
     [propertyId]
   );
-export const update = ({
+export const propertyChecksForProperties = propertyIds =>
+  propertyIds.length
+    ? run(
+        "any",
+        `SELECT property_id AS "propertyId", check_type AS "checkType", status,
+           reviewed_at AS "reviewedAt", requested_at AS "requestedAt",
+           notes AS "publicNote", updated_at AS "updatedAt"
+         FROM land.property_verification_checks
+         WHERE property_id = ANY($1::uuid[]) ORDER BY property_id, check_type`,
+        [propertyIds]
+      )
+    : Promise.resolve([]);
+export const updateWithAudit = ({
   verificationId,
   checkType,
   status,
   publicNote,
-  actorId
-}) =>
-  pg.one(
-    `UPDATE land.property_verification_checks
-     SET status = $3, notes = $4, reviewed_by_user_id = $5, reviewed_at = now()
-     WHERE id = $1 AND check_type = $2
-     RETURNING id`,
-    [verificationId, checkType, status, publicNote, actorId]
-  );
-export const audit = ({
-  actorId,
-  verificationId,
-  before,
-  after,
   internalNote,
+  actorId,
+  before,
   ip,
   requestId
 }) =>
-  run(
-    "none",
-    `INSERT INTO ops.audit_logs (actor_user_id, action, entity_type, entity_id, before_data, after_data, ip_address, request_id)
-     VALUES ($1,'VERIFICATION_UPDATED','land.property_verification_checks',$2,$3::jsonb,$4::jsonb,$5,$6)`,
-    [
-      actorId,
-      verificationId,
-      JSON.stringify(before),
-      JSON.stringify({ ...after, internalNote }),
-      ip || null,
-      requestId || null
-    ]
-  );
+  pg.tx(async transaction => {
+    const updated = await transaction.oneOrNone(
+      `UPDATE land.property_verification_checks
+       SET status = $3, notes = $4, internal_notes = $5,
+           reviewed_by_user_id = $6, reviewed_at = now()
+       WHERE id = $1 AND check_type = $2
+       RETURNING id`,
+      [verificationId, checkType, status, publicNote, internalNote, actorId]
+    );
+    if (!updated) return null;
+    await transaction.none(
+      `INSERT INTO ops.audit_logs (actor_user_id, action, entity_type, entity_id, before_data, after_data, ip_address, request_id)
+       VALUES ($1,'VERIFICATION_UPDATED','land.property_verification_checks',$2,$3::jsonb,$4::jsonb,$5,$6)`,
+      [
+        actorId,
+        verificationId,
+        JSON.stringify(before),
+        JSON.stringify({ checkType, status, publicNote, internalNote }),
+        ip || null,
+        requestId || null
+      ]
+    );
+    return updated;
+  });

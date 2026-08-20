@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
 import { scannerPresentation } from "../../shared/scanner.js";
 import {
@@ -7,6 +7,7 @@ import {
   signedReadUrl,
   signedWriteUrl
 } from "../../utils/storage.js";
+import { verificationSummaryForChecks } from "../../shared/verification.js";
 import * as repository from "./properties.repository.js";
 
 const propertyCode = () =>
@@ -48,12 +49,20 @@ export const create = async ({ actorId, input }) => {
       "ORGANIZATION_ACCESS_DENIED",
       "You are not an active member of that organisation."
     );
+  let saved;
   try {
-    const saved = await repository.createProperty({
-      ...input,
-      userId: actorId,
-      publicCode: propertyCode()
-    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        saved = await repository.createProperty({
+          ...input,
+          userId: actorId,
+          publicCode: propertyCode()
+        });
+        break;
+      } catch (error) {
+        if (error?.code !== "23505" || attempt === 2) throw error;
+      }
+    }
     return repository.summary(saved.id);
   } catch (error) {
     if (error?.code === "23503")
@@ -89,6 +98,8 @@ export const update = async ({ propertyId, changes }) => {
       );
     throw result.error;
   }
+  if (!result.data)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
   return repository.summary(propertyId);
 };
 export const getLandDetails = repository.landDetails;
@@ -149,28 +160,7 @@ export const requestVerification = async ({
 };
 export const verificationSummary = async propertyId => {
   const checks = await repository.verification(propertyId);
-  const statuses = checks.map(check => check.status);
-  const overallStatus = statuses.includes("REJECTED")
-    ? "REJECTED"
-    : statuses.length && statuses.every(status => status === "VERIFIED")
-    ? "VERIFIED"
-    : statuses.includes("PARTIAL") || statuses.includes("VERIFIED")
-    ? "PARTIAL"
-    : statuses.includes("PENDING")
-    ? "PENDING"
-    : "NOT_STARTED";
-  return {
-    propertyId,
-    overallStatus,
-    checks,
-    lastUpdatedAt: checks.reduce(
-      (latest, check) =>
-        !latest || (check.reviewedAt || check.requestedAt) > latest
-          ? check.reviewedAt || check.requestedAt
-          : latest,
-      null
-    )
-  };
+  return verificationSummaryForChecks(propertyId, checks);
 };
 export const scanner = async propertyId => {
   const result = await repository.scanner(propertyId);
@@ -267,6 +257,8 @@ export const updateMedia = async ({ propertyId, mediaId, changes }) => {
     throw new HttpError(404, "MEDIA_NOT_FOUND", "Media was not found.");
   const result = await repository.updateMedia(mediaId, changes);
   if (!result.ok) throw result.error;
+  if (!result.data)
+    throw new HttpError(404, "MEDIA_NOT_FOUND", "Media was not found.");
   return mediaResponse(
     (await repository.media(propertyId)).find(item => item.id === mediaId)
   );

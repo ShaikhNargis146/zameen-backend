@@ -51,11 +51,11 @@ export const createChallenge = input =>
       input.ip
     ]
   );
-export const latestChallenge = ({ destination, channel, purpose }) =>
+export const deleteChallenge = id =>
   run(
-    "oneOrNone",
-    `SELECT id, user_id, otp_hash, expires_at, verified_at, attempt_count, max_attempts FROM auth.otp_challenges WHERE destination = $1 AND channel = $2 AND purpose = $3 ORDER BY created_at DESC LIMIT 1`,
-    [destination, channel, purpose]
+    "none",
+    `DELETE FROM auth.otp_challenges WHERE id = $1 AND verified_at IS NULL`,
+    [id]
   );
 export const challengeById = id =>
   run(
@@ -102,10 +102,11 @@ export const findActiveUser = id =>
 export const createRefreshSession = input =>
   run(
     "one",
-    `INSERT INTO auth.refresh_sessions (user_id, token_hash, device_id, device_name, ip_address, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, expires_at`,
+    `INSERT INTO auth.refresh_sessions (user_id, token_hash, family_id, device_id, device_name, ip_address, user_agent, expires_at) VALUES ($1,$2,COALESCE($3, gen_random_uuid()),$4,$5,$6,$7,$8) RETURNING id, family_id, expires_at`,
     [
       input.userId,
       input.tokenHash,
+      input.familyId || null,
       input.deviceId,
       input.deviceName,
       input.ip,
@@ -120,14 +121,34 @@ export const updateLastLogin = id =>
 export const findRefreshSession = hash =>
   run(
     "oneOrNone",
-    `SELECT id, user_id FROM auth.refresh_sessions WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
+    `SELECT id, user_id, family_id FROM auth.refresh_sessions WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
     [hash]
+  );
+export const refreshSessionByHash = hash =>
+  run(
+    "oneOrNone",
+    `SELECT id, user_id, family_id, revoked_at, expires_at FROM auth.refresh_sessions WHERE token_hash = $1`,
+    [hash]
+  );
+export const consumeRefreshSession = id =>
+  run(
+    "oneOrNone",
+    `UPDATE auth.refresh_sessions SET revoked_at = now(), last_used_at = now()
+     WHERE id = $1 AND revoked_at IS NULL AND expires_at > now()
+     RETURNING id`,
+    [id]
   );
 export const revokeSession = id =>
   run(
     "none",
-    `UPDATE auth.refresh_sessions SET revoked_at = now(), last_used_at = now() WHERE id = $1`,
+    `UPDATE auth.refresh_sessions SET revoked_at = now(), last_used_at = now() WHERE id = $1 AND revoked_at IS NULL`,
     [id]
+  );
+export const revokeSessionFamily = familyId =>
+  run(
+    "none",
+    `UPDATE auth.refresh_sessions SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL`,
+    [familyId]
   );
 export const revokeUserSessions = id =>
   run(

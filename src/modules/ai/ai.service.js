@@ -1,13 +1,12 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
+import { hashWithPepper, safeEqualHex } from "../../utils/crypto.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import * as discovery from "../discovery/discovery.service.js";
 import * as repository from "./ai.repository.js";
 
-const guestHash = token =>
-  createHash("sha256")
-    .update(token)
-    .digest("hex");
+const guestTokenTtlHours = Number(process.env.AI_GUEST_TOKEN_TTL_HOURS || 24);
+const guestHash = token => hashWithPepper(`ai-guest:${token}`);
 const snippet = value =>
   String(value || "")
     .replace(/\s+/g, " ")
@@ -80,7 +79,9 @@ const requireAccess = async ({ conversationId, actorId, guestToken }) => {
   if (
     !conversation.userId &&
     guestToken &&
-    guestHash(guestToken) === conversation.guestTokenHash
+    conversation.guestTokenExpiresAt &&
+    new Date(conversation.guestTokenExpiresAt) > new Date() &&
+    safeEqualHex(guestHash(guestToken), conversation.guestTokenHash)
   )
     return conversation;
   throw new HttpError(
@@ -119,7 +120,10 @@ export const createConversation = async ({ actorId, input }) => {
     title: input.initialQuery
       ? snippet(input.initialQuery).slice(0, 255)
       : null,
-    guestTokenHash: guestAccessToken ? guestHash(guestAccessToken) : null
+    guestTokenHash: guestAccessToken ? guestHash(guestAccessToken) : null,
+    guestTokenExpiresAt: guestAccessToken
+      ? new Date(Date.now() + guestTokenTtlHours * 3600000)
+      : null
   });
   if (!result.ok) throw result.error;
   if (input.initialQuery)

@@ -13,7 +13,9 @@ export const updateProfile = async (id, changes) => {
       throw new HttpError(409, "EMAIL_IN_USE", "Email is already in use.");
     throw result.error;
   }
-  return profile(id);
+  const user = await profile(id);
+  if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User was not found.");
+  return user;
 };
 export const addSelfRole = async (id, role) => {
   await repository.addRole(id, role);
