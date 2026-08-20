@@ -1,11 +1,13 @@
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
+import { scannerPresentation } from "../../shared/scanner.js";
 import {
   belongsToProperty,
   createStorageKey,
   signedReadUrl,
   signedWriteUrl
 } from "../../utils/storage.js";
+import { verificationSummaryForChecks } from "../../shared/verification.js";
 import * as repository from "./properties.repository.js";
 
 const propertyCode = () =>
@@ -15,6 +17,21 @@ const propertyCode = () =>
     .toUpperCase()}`;
 export const ownedProperty = async (propertyId, actorId) => {
   const property = await repository.findOwned(propertyId, actorId);
+  if (!property)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  return property;
+};
+export const propertyForAdmin = async propertyId => {
+  const property = await repository.summary(propertyId);
+  if (!property)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  return property;
+};
+export const viewableProperty = async (propertyId, actorId = null) => {
+  const owned = actorId
+    ? await repository.findOwned(propertyId, actorId)
+    : null;
+  const property = owned || (await repository.findPublic(propertyId));
   if (!property)
     throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
   return property;
@@ -32,12 +49,20 @@ export const create = async ({ actorId, input }) => {
       "ORGANIZATION_ACCESS_DENIED",
       "You are not an active member of that organisation."
     );
+  let saved;
   try {
-    const saved = await repository.createProperty({
-      ...input,
-      userId: actorId,
-      publicCode: propertyCode()
-    });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        saved = await repository.createProperty({
+          ...input,
+          userId: actorId,
+          publicCode: propertyCode()
+        });
+        break;
+      } catch (error) {
+        if (error?.code !== "23505" || attempt === 2) throw error;
+      }
+    }
     return repository.summary(saved.id);
   } catch (error) {
     if (error?.code === "23503")
@@ -73,6 +98,8 @@ export const update = async ({ propertyId, changes }) => {
       );
     throw result.error;
   }
+  if (!result.data)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
   return repository.summary(propertyId);
 };
 export const getLandDetails = repository.landDetails;
@@ -120,48 +147,65 @@ export const saveIdentifiers = async ({ propertyId, identifiers }) => {
 export const requestVerification = async ({
   propertyId,
   actorId,
-  checkTypes
+  checkTypes,
+  note = null
 }) => {
   await repository.requestVerification({
     propertyId,
     userId: actorId,
-    checkTypes
+    checkTypes,
+    note
   });
   return verificationSummary(propertyId);
 };
 export const verificationSummary = async propertyId => {
   const checks = await repository.verification(propertyId);
-  const statuses = checks.map(check => check.status);
-  const overallStatus = statuses.includes("REJECTED")
+  return verificationSummaryForChecks(propertyId, checks);
+};
+export const scanner = async propertyId => {
+  const result = await repository.scanner(propertyId);
+  return scannerPresentation({
+    propertyId,
+    readinessScore: result?.readinessScore || 0,
+    missingItems: result?.missingItems || [
+      "Land details",
+      "Property location",
+      "Parcel identifier",
+      "Property document",
+      "Property media"
+    ]
+  });
+};
+export const passport = async propertyId => {
+  const result = await repository.passport(propertyId);
+  if (!result) return { propertyId };
+  const scannerResult = await repository.scanner(propertyId);
+  const checks = result.verificationChecks || {};
+  const values = Object.values(checks);
+  const overallVerificationStatus = values.includes("REJECTED")
     ? "REJECTED"
-    : statuses.length && statuses.every(status => status === "VERIFIED")
-    ? "VERIFIED"
-    : statuses.includes("PARTIAL") || statuses.includes("VERIFIED")
+    : values.includes("PARTIAL")
     ? "PARTIAL"
-    : statuses.includes("PENDING")
+    : values.length && values.every(value => value === "VERIFIED")
+    ? "VERIFIED"
+    : values.includes("PENDING")
     ? "PENDING"
     : "NOT_STARTED";
   return {
-    propertyId,
-    overallStatus,
-    checks,
-    lastUpdatedAt: checks.reduce(
-      (latest, check) =>
-        !latest || (check.reviewedAt || check.requestedAt) > latest
-          ? check.reviewedAt || check.requestedAt
-          : latest,
-      null
-    )
+    propertyId: result.propertyId,
+    passportCode: result.publicCode,
+    sellerVerification: result.sellerVerification,
+    locationVerification: checks.LOCATION || "NOT_STARTED",
+    parcelInformationAvailable: !(scannerResult?.missingItems || []).includes(
+      "Parcel identifier"
+    ),
+    documentCount: Number(result.documentCount),
+    verifiedDocumentCount: result.verifiedDocumentCount,
+    propertyCompletionPercent: result.completenessPercent,
+    overallVerificationStatus,
+    lastVerifiedAt: result.lastVerifiedAt
   };
 };
-export const scanner = async propertyId =>
-  (await repository.scanner(propertyId)) || {
-    propertyId,
-    readinessScore: 0,
-    missingItems: []
-  };
-export const passport = async propertyId =>
-  (await repository.passport(propertyId)) || { propertyId };
 const mediaResponse = async item => ({
   ...item,
   url: await signedReadUrl(item.storageKey),
@@ -213,6 +257,8 @@ export const updateMedia = async ({ propertyId, mediaId, changes }) => {
     throw new HttpError(404, "MEDIA_NOT_FOUND", "Media was not found.");
   const result = await repository.updateMedia(mediaId, changes);
   if (!result.ok) throw result.error;
+  if (!result.data)
+    throw new HttpError(404, "MEDIA_NOT_FOUND", "Media was not found.");
   return mediaResponse(
     (await repository.media(propertyId)).find(item => item.id === mediaId)
   );

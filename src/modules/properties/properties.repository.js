@@ -8,6 +8,13 @@ export const findOwned = (propertyId, userId) =>
     `SELECT p.* FROM land.properties p WHERE p.id = $1 AND p.deleted_at IS NULL AND (p.created_by_user_id = $2 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $2 AND om.status = 'ACTIVE'))`,
     [propertyId, userId]
   );
+export const findPublic = propertyId =>
+  run(
+    "oneOrNone",
+    `SELECT p.* FROM land.properties p WHERE p.id = $1 AND p.deleted_at IS NULL
+     AND EXISTS (SELECT 1 FROM marketplace.listings l WHERE l.property_id = p.id AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED')`,
+    [propertyId]
+  );
 export const activeOrganizationMembership = (organizationId, userId) =>
   run(
     "oneOrNone",
@@ -102,7 +109,7 @@ export const saveLandDetails = input =>
 export const location = propertyId =>
   run(
     "oneOrNone",
-    `SELECT pl.property_id AS "propertyId", pl.location_id AS "locationId", jsonb_build_object('id', l.id, 'name', l.name, 'type', l.type, 'parentId', l.parent_id, 'stateCode', l.state_code) AS location, pc.code AS pincode, pl.address_line AS "addressLine", pl.landmark, CASE WHEN pl.coordinates IS NULL THEN NULL ELSE ST_Y(pl.coordinates::geometry) END AS latitude, CASE WHEN pl.coordinates IS NULL THEN NULL ELSE ST_X(pl.coordinates::geometry) END AS longitude, pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation" FROM land.property_locations pl JOIN geo.locations l ON l.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id WHERE pl.property_id = $1`,
+    `SELECT pl.property_id AS "propertyId", pl.location_id AS "locationId", jsonb_build_object('id', l.id, 'name', l.name, 'type', l.type, 'parentId', l.parent_id, 'stateCode', l.state_code) AS location, pc.code AS pincode, pl.address_line AS "addressLine", pl.landmark, NULLIF(concat_ws(', ', pl.address_line, pl.landmark, l.name, pc.code), '') AS "formattedAddress", CASE WHEN pl.coordinates IS NULL THEN NULL ELSE ST_Y(pl.coordinates::geometry) END AS latitude, CASE WHEN pl.coordinates IS NULL THEN NULL ELSE ST_X(pl.coordinates::geometry) END AS longitude, pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation" FROM land.property_locations pl JOIN geo.locations l ON l.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id WHERE pl.property_id = $1`,
     [propertyId]
   );
 export const postalCode = code =>
@@ -175,13 +182,14 @@ export const replaceIdentifiers = async (propertyId, identifiers) => {
 export const requestVerification = async ({
   propertyId,
   userId,
-  checkTypes
+  checkTypes,
+  note
 }) => {
   const result = await pg.tx(async transaction => {
     for (const checkType of checkTypes)
       await transaction.none(
-        `INSERT INTO land.property_verification_checks (property_id, check_type, status, requested_by_user_id, requested_at) VALUES ($1,$2,'PENDING',$3,now()) ON CONFLICT (property_id, check_type) DO UPDATE SET status = CASE WHEN property_verification_checks.status = 'VERIFIED' THEN 'VERIFIED' ELSE 'PENDING' END, requested_by_user_id = EXCLUDED.requested_by_user_id, requested_at = EXCLUDED.requested_at`,
-        [propertyId, checkType, userId]
+        `INSERT INTO land.property_verification_checks (property_id, check_type, status, requested_by_user_id, requested_at, notes) VALUES ($1,$2,'PENDING',$3,now(),$4) ON CONFLICT (property_id, check_type) DO UPDATE SET status = CASE WHEN property_verification_checks.status = 'VERIFIED' THEN 'VERIFIED' ELSE 'PENDING' END, requested_by_user_id = EXCLUDED.requested_by_user_id, requested_at = EXCLUDED.requested_at, notes = COALESCE(EXCLUDED.notes, property_verification_checks.notes)`,
+        [propertyId, checkType, userId, note]
       );
   });
   if (!result.ok) throw result.error;
@@ -201,7 +209,11 @@ export const scanner = propertyId =>
 export const passport = propertyId =>
   run(
     "oneOrNone",
-    `SELECT property_id AS "propertyId", public_code AS "publicCode", completeness_percent AS "completenessPercent", verification_checks AS "verificationChecks", document_count AS "documentCount", last_updated AS "lastUpdated" FROM land.v_land_passports WHERE property_id = $1`,
+    `SELECT passport.property_id AS "propertyId", passport.public_code AS "publicCode", passport.completeness_percent AS "completenessPercent", passport.verification_checks AS "verificationChecks", passport.document_count AS "documentCount", passport.last_updated AS "lastUpdated",
+       COALESCE((SELECT user_check.status FROM auth.user_verification_checks user_check JOIN land.properties property ON property.created_by_user_id = user_check.user_id WHERE property.id = passport.property_id AND user_check.check_type = 'IDENTITY' ORDER BY user_check.reviewed_at DESC NULLS LAST, user_check.created_at DESC LIMIT 1), 'NOT_STARTED') AS "sellerVerification",
+       (SELECT count(*) FROM land.property_documents document WHERE document.property_id = passport.property_id AND document.deleted_at IS NULL AND document.verification_status = 'VERIFIED')::int AS "verifiedDocumentCount",
+       (SELECT max(reviewed_at) FROM land.property_verification_checks check_item WHERE check_item.property_id = passport.property_id AND check_item.status = 'VERIFIED') AS "lastVerifiedAt"
+     FROM land.v_land_passports passport WHERE passport.property_id = $1`,
     [propertyId]
   );
 export const media = propertyId =>

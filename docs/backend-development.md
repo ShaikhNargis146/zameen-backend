@@ -15,7 +15,11 @@ The current implementation is Express and JavaScript. Do not introduce NestJS,
 TypeScript, or another server framework without an approved migration plan.
 
 1. Create `.env` from `.env.example` and set database credentials, `JWT_SECRET`,
-   and a different `TOKEN_PEPPER`.
+   and a different `TOKEN_PEPPER`. Set either the individual `DB_HOST`, `DB_PORT`,
+   `DB`, `DB_USER`, and `DB_PASSWORD` values, or use `DATABASE_URL` for Cloud SQL;
+   `DATABASE_URL` takes precedence when present. Set `DB_SSL=true` when your
+   Cloud SQL connection requires TLS. `DB_SSL_REJECT_UNAUTHORIZED=false` is a
+   local-development fallback only; never use it for staging or production.
 2. Create a new PostgreSQL database with privileges for `pgcrypto`, `citext`,
    `postgis`, and `pg_trgm`.
 3. For a new database, run `npm run db:schema` once. For an existing database,
@@ -25,6 +29,21 @@ TypeScript, or another server framework without an approved migration plan.
 `npm run db:schema` is a clean-install command. It refuses to run when
 `auth.users` already exists, so it cannot overwrite an existing canonical
 database. Never use it as a migration command.
+
+`npm start` never creates or migrates database objects. This is intentional:
+application instances must not race to mutate a shared production database at
+boot. Run the appropriate database command as an explicit deployment step:
+
+```bash
+# Brand-new database only
+npm run db:schema
+
+# Existing canonical database: apply forward-only migrations
+npm run db:migrate
+
+# Then start the API
+npm start
+```
 
 ## Source layout
 
@@ -59,9 +78,17 @@ Rules:
 - Services throw `HttpError(status, code, message)` for expected business errors.
 - Do not expose SQL errors, tokens, OTPs, stacks, or secrets in responses.
 
-`auth`, `users`, `catalog`, `properties`, and `listings` follow this structure.
+`auth`, `users`, `catalog`, `properties`, `listings`, `discovery`,
+`verification`, and `ai` follow this structure.
 Every new Developer 1 module must use the same five-layer pattern from its
 first endpoint; do not add compatibility route files or bypass a repository.
+
+Discovery owns listing search, map pins, similarity and comparison. The `ai`
+module owns the thin Phase 1 layer: rule-based natural-language filter
+extraction, grounded conversation records, and listing-copy drafts. An
+anonymous AI conversation returns a `guestAccessToken`; clients must send it
+as `X-AI-Conversation-Token` on later message/detail requests. Do not put that
+token in a URL or log it.
 
 ## API contract
 
@@ -85,18 +112,30 @@ unless an API-contract change is explicitly approved.
 | Catalog | `/` | property masters, location hierarchy, PIN lookup |
 | Properties | `/properties` | drafts, land details, location, amenities, identifiers, verification, Scanner Lite, Land Passport |
 | Listings | `/properties/:propertyId/listings`, `/listings`, `/seller/listings`, `/admin/listings` | draft, review, publishing lifecycle, public detail |
+| Discovery | `/search`, `/listings/:listingId/similar`, `/listings/compare` | listing search, suggestions, map pins, similarity, comparison |
+| Verification | `/admin/verifications` | verification review queue and admin decisions |
+| AI | `/ai` | Phase 1 rule-based search parsing, grounded conversation records, and listing-copy drafts. It is not connected to an LLM provider yet. |
 
 ## Authentication and authorization
 
 - Access tokens are short-lived signed JWTs.
 - Refresh tokens are opaque, hashed, stored in `auth.refresh_sessions`, and rotated.
 - A user may have multiple roles through `auth.user_roles`.
+- A newly verified user receives both `BUYER` and `SELLER`. Business roles (`BROKER`, `DEVELOPER`, `CHANNEL_PARTNER`, `CORPORATE`) are granted through the administrator role-management workflow, never by the user.
 - `requireAuth` requires an active user; `requireAdmin` additionally requires `ADMIN`.
-- `AUTH_STATIC_OTP` is development-only. Production OTP delivery remains disabled
-  until an SMS/email provider is integrated.
+- OTP codes are generated per challenge, hashed with the token pepper, and expire after the configured TTL. Configure `OTP_DELIVERY_MODE=webhook` and `OTP_PROVIDER_WEBHOOK_URL` for production. `OTP_DELIVERY_MODE=console` is opt-in and allowed only outside production.
 
 Provision the first administrator through a controlled database runbook after
 the user verifies their contact method. Never seed default admin credentials.
+
+### OTP delivery environments
+
+| Environment | Required configuration | Expected behavior |
+| --- | --- | --- |
+| Local development | `OTP_DELIVERY_MODE=console` | Each OTP request generates a new six-digit code and writes it to the API server log. Copy that code into the verify request. |
+| Staging / production | `OTP_DELIVERY_MODE=webhook` and `OTP_PROVIDER_WEBHOOK_URL` | The API sends `{ destination, channel, purpose, code }` as JSON to the configured provider webhook. A non-2xx provider response fails the OTP request safely. |
+
+After changing `.env`, restart `npm start`; configuration is loaded when the process starts. Do not add `AUTH_STATIC_OTP`: static OTPs are intentionally unsupported.
 
 ## Database rules
 
@@ -144,9 +183,8 @@ git diff --check
 find src -type f -name '*.js' -exec node --check {} \;
 ```
 
-The configured `npm test` command currently cannot run because `cross-env` is
-missing from the installed development dependencies. Restore that dependency
-and add module-level tests before making it a merge requirement.
+Run the configured unit suite with `npm test`. It uses `cross-env` to set the
+test environment and must pass before a Developer 1 change is handed off.
 
 ## Ownership
 

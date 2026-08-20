@@ -1,36 +1,9 @@
 import { run } from "./db.js";
 import { signedReadUrl } from "../utils/storage.js";
 
-const cardsQuery = `
-WITH RECURSIVE location_ancestors AS (
-  SELECT g.id AS location_id, g.id, g.parent_id, g.name, g.type, 0 AS depth
-  FROM geo.locations g
-  WHERE g.id IN (
-    SELECT ploc.location_id
-    FROM land.property_locations ploc
-    JOIN marketplace.listings l ON l.property_id = ploc.property_id
-    WHERE l.id = ANY($1::uuid[])
-  )
-  UNION ALL
-  SELECT la.location_id, parent.id, parent.parent_id, parent.name, parent.type, la.depth + 1
-  FROM location_ancestors la
-  JOIN geo.locations parent ON parent.id = la.parent_id
-),
-location_display AS (
-  SELECT location_id, string_agg(name, ', ' ORDER BY depth) AS display_path
-  FROM location_ancestors
-  WHERE type <> 'COUNTRY'
-  GROUP BY location_id
-)
-SELECT
-  listing.id AS "listingId",
-  listing.listing_code AS "listingCode",
-  listing.property_id AS "propertyId",
-  listing.title,
-  listing.transaction_type AS "transactionType",
-  listing.price_amount_minor AS "priceAmountMinor",
-  listing.published_at AS "publishedAt",
-  pld.area_value AS "areaValue",
+const cardSql = `
+SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.property_id AS "propertyId", l.title,
+  l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.published_at AS "publishedAt",
   pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyTypeName",
   au.id AS "areaUnitId", au.code AS "areaUnitCode", au.name AS "areaUnitName",
   loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType",
@@ -62,7 +35,8 @@ LEFT JOIN land.property_locations ploc ON ploc.property_id = property.id
 LEFT JOIN geo.locations loc ON loc.id = ploc.location_id
 LEFT JOIN location_display disp ON disp.location_id = loc.id
 LEFT JOIN land.property_media media ON media.property_id = property.id AND media.is_cover = true AND media.deleted_at IS NULL
-WHERE listing.id = ANY($1::uuid[]) AND listing.status = 'PUBLISHED' AND listing.review_status = 'APPROVED' AND listing.deleted_at IS NULL
+WHERE listing.id = ANY($1::uuid[]) AND listing.deleted_at IS NULL
+  AND ($3::boolean IS NOT TRUE OR (listing.status = 'PUBLISHED' AND listing.review_status = 'APPROVED'))
 `;
 
 const roundTo = (value, digits) => {
@@ -70,17 +44,22 @@ const roundTo = (value, digits) => {
   return Math.round(value * factor) / factor;
 };
 
+const round = value => Math.round(value * 100) / 100;
 export const formatPriceDisplay = amountMinor => {
-  if (amountMinor === null || amountMinor === undefined) return "Price on request";
+  if (amountMinor === null || amountMinor === undefined)
+    return "Price on request";
   const rupees = Number(amountMinor) / 100;
-  if (rupees >= 1e7)
-    return `₹${roundTo(rupees / 1e7, 2).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
-  if (rupees >= 1e5)
-    return `₹${roundTo(rupees / 1e5, 2).toLocaleString("en-IN", { maximumFractionDigits: 2 })} L`;
+  if (rupees >= 10000000)
+    return `₹${round(rupees / 10000000).toLocaleString("en-IN", {
+      maximumFractionDigits: 2
+    })} Cr`;
+  if (rupees >= 100000)
+    return `₹${round(rupees / 100000).toLocaleString("en-IN", {
+      maximumFractionDigits: 2
+    })} L`;
   return `₹${Math.round(rupees).toLocaleString("en-IN")}`;
 };
-
-const toListingCard = async row => ({
+const toCard = async row => ({
   listingId: row.listingId,
   listingCode: row.listingCode,
   propertyId: row.propertyId,
@@ -91,7 +70,8 @@ const toListingCard = async row => ({
     name: row.propertyTypeName
   },
   transactionType: row.transactionType,
-  priceAmountMinor: row.priceAmountMinor === null ? null : Number(row.priceAmountMinor),
+  priceAmountMinor:
+    row.priceAmountMinor === null ? null : Number(row.priceAmountMinor),
   priceDisplay: formatPriceDisplay(row.priceAmountMinor),
   areaValue: row.areaValue === null ? null : Number(row.areaValue),
   areaUnit: row.areaUnitId
@@ -104,14 +84,12 @@ const toListingCard = async row => ({
         type: row.locationType,
         parentId: row.locationParentId,
         stateCode: row.locationStateCode,
-        latitude: row.locationLatitude === null ? null : Number(row.locationLatitude),
-        longitude: row.locationLongitude === null ? null : Number(row.locationLongitude),
-        displayPath: row.locationDisplayPath || row.locationName
+        displayPath: row.locationName
       }
     : null,
-  thumbnailUrl: await signedReadUrl(row.thumbnailUrl),
+  thumbnailUrl: await signedReadUrl(row.thumbnailStorageKey),
   isPremium: row.isPremium,
-  verificationLabel: row.verificationLabel || null,
+  verificationLabel: null,
   publishedAt: row.publishedAt,
   isFavorite: row.isFavorite
 });
@@ -119,12 +97,21 @@ const toListingCard = async row => ({
 /**
  * Builds ListingCard projections for the given listing IDs, preserving the
  * caller's order (used for favorites/recently-viewed MRU ordering).
+ *
+ * requirePublished defaults to true (public surfaces only ever show live
+ * listings). Pass false for owner-facing CRM views (enquiries, site visits)
+ * where the listing may since have been paused/withdrawn but the record it
+ * relates to still needs to render.
  */
-export const listingCardsByIds = async (listingIds, actorId = null) => {
+export const listingCardsByIds = async (
+  listingIds,
+  actorId = null,
+  { requirePublished = true } = {}
+) => {
   const ids = [...new Set(listingIds)].filter(Boolean);
   if (!ids.length) return [];
-  const rows = await run("any", cardsQuery, [ids, actorId]);
-  const cards = await Promise.all(rows.map(toListingCard));
+  const rows = await run("any", cardSql, [ids, actorId, requirePublished]);
+  const cards = await Promise.all(rows.map(toCard));
   const byId = new Map(cards.map(card => [card.listingId, card]));
   return listingIds.map(id => byId.get(id)).filter(Boolean);
 };

@@ -17,6 +17,16 @@ const positive = (value, field) => {
     ]);
   return number;
 };
+const boolean = (value, field, fallback = null) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  const normalized = String(value)
+    .trim()
+    .toLowerCase();
+  if (["true", "1"].includes(normalized)) return true;
+  if (["false", "0"].includes(normalized)) return false;
+  throw new HttpError(400, "VALIDATION_ERROR", `${field} must be a boolean.`);
+};
 
 export const createProperty = body => {
   if (!body.propertyTypeId)
@@ -84,8 +94,8 @@ export const landDetails = body => ({
   roadTypeId: body.roadTypeId || null,
   facing: body.facing || null,
   openSides: body.openSides ?? null,
-  isCornerPlot: Boolean(body.isCornerPlot),
-  hasBoundaryWall: body.hasBoundaryWall ?? null,
+  isCornerPlot: boolean(body.isCornerPlot, "isCornerPlot", false),
+  hasBoundaryWall: boolean(body.hasBoundaryWall, "hasBoundaryWall"),
   terrain: body.terrain || null,
   roadAccessType: body.roadAccessType || null
 });
@@ -108,7 +118,11 @@ export const propertyLocation = body => {
     latitude,
     longitude,
     locationPrecision: body.locationPrecision || "EXACT",
-    showExactLocation: Boolean(body.showExactLocation)
+    showExactLocation: boolean(
+      body.showExactLocation,
+      "showExactLocation",
+      false
+    )
   };
 };
 export const amenities = body => {
@@ -157,7 +171,21 @@ export const identifiers = body => {
   });
 };
 export const verificationRequest = body => {
-  if (body.checkTypes == null) return [...verificationTypes];
+  const note = body.note == null ? null : String(body.note).trim();
+  if (note && note.length > 500)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "note must be at most 500 characters."
+    );
+  if (body.checkTypes == null)
+    return { checkTypes: [...verificationTypes], note };
+  if (!Array.isArray(body.checkTypes))
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "checkTypes must be an array."
+    );
   const values = [
     ...new Set(body.checkTypes.map(value => String(value).toUpperCase()))
   ];
@@ -167,7 +195,7 @@ export const verificationRequest = body => {
       "VALIDATION_ERROR",
       "Invalid verification check type."
     );
-  return values;
+  return { checkTypes: values, note };
 };
 const fileInput = (body, acceptedMediaTypes = null) => {
   const fileName = String(body.fileName || "").trim();
@@ -207,7 +235,7 @@ export const mediaComplete = body => {
       Number.isInteger(body.sortOrder) && body.sortOrder >= 0
         ? body.sortOrder
         : 0,
-    isCover: Boolean(body.isCover),
+    isCover: boolean(body.isCover, "isCover", false),
     caption: body.caption ? String(body.caption).slice(0, 255) : null
   };
 };

@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 
 const PEPPER = process.env.TOKEN_PEPPER || "dev-pepper-change-me";
 
@@ -13,6 +13,12 @@ export const sha256 = input =>
     .digest("hex");
 
 export const hashWithPepper = input => sha256(`${input}:${PEPPER}`);
+
+export const hmacSha256Hex = (input, secret) =>
+  crypto
+    .createHmac("sha256", secret)
+    .update(String(input))
+    .digest("hex");
 
 export const randomToken = (bytes = 32) =>
   crypto.randomBytes(bytes).toString("hex");

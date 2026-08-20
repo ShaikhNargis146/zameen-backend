@@ -1,4 +1,4 @@
-import { created, ok } from "../../shared/http.js";
+import { created, ok, paginationMeta } from "../../shared/http.js";
 import * as service from "./listings.service.js";
 import * as validation from "./listings.validation.js";
 
@@ -28,34 +28,87 @@ export const remove = async (req, res) => {
 export const submit = async (req, res) =>
   ok(res, await service.submit(req.listing));
 export const pause = async (req, res) =>
-  ok(res, await service.transition(req.listing, "pause"));
-export const resume = async (req, res) =>
-  ok(res, await service.transition(req.listing, "resume"));
-export const withdraw = async (req, res) =>
-  ok(res, await service.transition(req.listing, "withdraw"));
-export const markSold = async (req, res) =>
-  ok(res, await service.transition(req.listing, "sold"));
-export const sellerListings = async (req, res) =>
   ok(
     res,
-    await service.sellerListings({
-      userId: req.actor.id,
-      ...validation.sellerList(req.query)
+    await service.transition({
+      listing: req.listing,
+      action: "pause",
+      actorId: req.actor.id
     })
   );
+export const resume = async (req, res) =>
+  ok(
+    res,
+    await service.transition({
+      listing: req.listing,
+      action: "resume",
+      actorId: req.actor.id
+    })
+  );
+export const withdraw = async (req, res) =>
+  ok(
+    res,
+    await service.transition({
+      listing: req.listing,
+      action: "withdraw",
+      actorId: req.actor.id,
+      reason: validation.optionalReason(req.body || {})
+    })
+  );
+export const markSold = async (req, res) =>
+  ok(
+    res,
+    await service.transition({
+      listing: req.listing,
+      action: "sold",
+      actorId: req.actor.id,
+      reason: validation.optionalReason(req.body || {})
+    })
+  );
+export const sellerListings = async (req, res) => {
+  const input = validation.sellerList(req.query);
+  const result = await service.sellerListings({
+    userId: req.actor.id,
+    ...input
+  });
+  return ok(res, result.items, paginationMeta(result));
+};
 export const detail = async (req, res) =>
-  ok(res, await service.publicDetail(req.params.listingId));
-export const adminListings = async (req, res) =>
-  ok(res, await service.adminListings(validation.reviewStatus(req.query)));
+  ok(
+    res,
+    await service.publicDetail(req.params.listingId, req.actor?.id || null)
+  );
+export const adminListings = async (req, res) => {
+  const input = validation.adminList(req.query);
+  const result = await service.adminListings(input);
+  return ok(res, result.items, paginationMeta(result));
+};
+export const adminListing = async (req, res) =>
+  ok(res, await service.adminListing(req.params.listingId));
 export const approve = async (req, res) =>
-  ok(res, await service.approve(req.params.listingId));
+  ok(
+    res,
+    await service.approve({
+      id: req.params.listingId,
+      approval: validation.approval(req.body || {}),
+      actorId: req.actor.id
+    })
+  );
 export const reject = async (req, res) =>
   ok(
     res,
-    await service.reject(
-      req.params.listingId,
-      validation.reason(req.body || {})
-    )
+    await service.reject({
+      id: req.params.listingId,
+      reason: validation.reason(req.body || {}),
+      actorId: req.actor.id
+    })
   );
 export const suspend = async (req, res) =>
-  ok(res, await service.suspend(req.params.listingId));
+  ok(
+    res,
+    await service.suspend({
+      id: req.params.listingId,
+      reason: validation.reason(req.body || {}),
+      actorId: req.actor.id
+    })
+  );

@@ -12,7 +12,10 @@
     { "key": "documentTypeId", "value": "" },
     { "key": "mediaId", "value": "" },
     { "key": "documentId", "value": "" },
-    { "key": "storageKey", "value": "" }
+    { "key": "storageKey", "value": "" },
+    { "key": "verificationId", "value": "" },
+    { "key": "conversationId", "value": "" },
+    { "key": "guestConversationToken", "value": "" }
   ],
   "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
   "item": [
@@ -64,6 +67,16 @@
         { "name": "Submit listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/submit" } },
         { "name": "Seller listings", "request": { "method": "GET", "url": "{{baseUrl}}/seller/listings?limit=20" } },
         { "name": "Public listing detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/detail" } }
+      ]
+    },
+    {
+      "name": "Discovery and verification",
+      "item": [
+        { "name": "Search suggestions", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/search/suggestions?q=panvel&limit=10" } },
+        { "name": "Similar listings", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/similar?limit=10" } },
+        { "name": "Public scanner", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/properties/{{propertyId}}/scanner" } },
+        { "name": "Verification queue (admin)", "request": { "method": "GET", "url": "{{baseUrl}}/admin/verifications?status=PENDING&page=1&limit=20" } },
+        { "name": "AI conversation detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "header": [{ "key": "X-AI-Conversation-Token", "value": "{{guestConversationToken}}" }], "url": "{{baseUrl}}/ai/conversations/{{conversationId}}" } }
       ]
     }
   ]

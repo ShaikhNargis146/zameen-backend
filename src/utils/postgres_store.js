@@ -167,7 +167,7 @@ const updateWhere = async ({
     const q =
       pgp.helpers.update(set, cs) + ` WHERE ${where} RETURNING ${returning}`;
 
-    const row = await db.one(q, params);
+    const row = await db.oneOrNone(q, params);
     return ok(row);
   } catch (e) {
     return fail(e);

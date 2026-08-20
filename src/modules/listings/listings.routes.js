@@ -4,10 +4,11 @@ import { asyncRoute } from "../../shared/http.js";
 import {
   requireAdmin,
   requireAnyRole,
-  requireAuth
+  requireAuth,
+  optionalAuth
 } from "../auth/auth.routes.js";
 import * as controller from "./listings.controller.js";
-import { ownedListing } from "./listings.service.js";
+import { listingForAdmin, ownedListing } from "./listings.service.js";
 
 const router = Router();
 const requirePropertyContributor = requireAnyRole(
@@ -19,7 +20,8 @@ const requirePropertyContributor = requireAnyRole(
 const requireOwnedListing = requireOwnedResource({
   param: "listingId",
   target: "listing",
-  load: ownedListing
+  load: ownedListing,
+  loadForAdmin: listingForAdmin
 });
 
 router.post(
@@ -33,7 +35,11 @@ router.get(
   requireAuth,
   asyncRoute(controller.sellerListings)
 );
-router.get("/listings/:listingId/detail", asyncRoute(controller.detail));
+router.get(
+  "/listings/:listingId/detail",
+  optionalAuth,
+  asyncRoute(controller.detail)
+);
 router.get(
   "/listings/:listingId",
   requireAuth,
@@ -86,6 +92,11 @@ router.get(
   "/admin/listings",
   requireAdmin,
   asyncRoute(controller.adminListings)
+);
+router.get(
+  "/admin/listings/:listingId",
+  requireAdmin,
+  asyncRoute(controller.adminListing)
 );
 router.post(
   "/admin/listings/:listingId/approve",

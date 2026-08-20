@@ -83,7 +83,7 @@ export const requestVerification = async (req, res) =>
     await service.requestVerification({
       propertyId: req.property.id,
       actorId: req.actor.id,
-      checkTypes: validation.verificationRequest(req.body || {})
+      ...validation.verificationRequest(req.body || {})
     })
   );
 export const verification = async (req, res) =>

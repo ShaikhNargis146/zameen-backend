@@ -17,7 +17,7 @@ export const updateMe = async (req, res) =>
     )
   );
 export const myRoles = async (req, res) =>
-  ok(res, (await service.profile(req.actor.id)).roles);
+  ok(res, await service.roleDetails(req.actor.id));
 export const addMyRole = async (req, res) =>
   ok(
     res,
@@ -38,23 +38,27 @@ export const list = async (req, res) => {
 };
 export const get = async (req, res) =>
   ok(res, await service.adminGet(req.params.userId));
-export const status = async (req, res) =>
-  ok(
+export const status = async (req, res) => {
+  const change = validation.userStatus(req.body || {});
+  return ok(
     res,
     await service.changeStatus({
       actorId: req.actor.id,
       userId: req.params.userId,
-      status: validation.userStatus(req.body || {}),
+      ...change,
       request: requestAudit(req)
     })
   );
-export const roles = async (req, res) =>
-  ok(
+};
+export const roles = async (req, res) => {
+  const change = validation.roles(req.body || {});
+  return ok(
     res,
     await service.changeRoles({
       actorId: req.actor.id,
       userId: req.params.userId,
-      roleCodes: validation.roles(req.body || {}),
+      ...change,
       request: requestAudit(req)
     })
   );
+};
