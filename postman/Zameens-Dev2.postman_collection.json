@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zameens — Developer 2 APIs",
-    "description": "UI-contract Developer 2 endpoints: Organizations, Favorites, Recently Viewed, Buyer Requirements. Set accessToken after OTP verification and replace UUID variables with real values.",
+    "description": "UI-contract Developer 2 endpoints: Reference data, Organizations, Favorites, Recently Viewed, Buyer Requirements, Enquiries, Site Visits, Seller Dashboard, Commerce. Set accessToken after OTP verification and replace UUID variables with real values (use Reference data to look up locationId/propertyTypeId/areaUnitId). The logged-in test user should hold both BUYER and SELLER roles so buyer/* and seller/* endpoints can both be exercised with {{accessToken}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -14,7 +14,13 @@
     { "key": "requirementId", "value": "" },
     { "key": "locationId", "value": "" },
     { "key": "propertyTypeId", "value": "" },
-    { "key": "areaUnitId", "value": "" }
+    { "key": "areaUnitId", "value": "" },
+    { "key": "enquiryId", "value": "" },
+    { "key": "visitId", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "serviceId", "value": "" },
+    { "key": "serviceRequestId", "value": "" }
   ],
   "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
   "item": [
@@ -26,6 +32,14 @@
         { "name": "Refresh session", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"replace-with-refresh-token\"\n}" }, "url": "{{baseUrl}}/auth/refresh" } },
         { "name": "Logout", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout" } },
         { "name": "Logout all sessions", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout-all" } }
+      ]
+    },
+    {
+      "name": "Reference data",
+      "item": [
+        { "name": "Property types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/property-types" } },
+        { "name": "Area units", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/area-units" } },
+        { "name": "Location search", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/search?q=panvel" } }
       ]
     },
     {
@@ -64,6 +78,56 @@
         { "name": "Buyer requirement details", "request": { "method": "GET", "url": "{{baseUrl}}/buyer-requirements/{{requirementId}}" } },
         { "name": "Update buyer requirement", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"PAUSED\",\n  \"maxBudgetMinor\": 25000000000\n}" }, "url": "{{baseUrl}}/buyer-requirements/{{requirementId}}" } },
         { "name": "Delete buyer requirement", "request": { "method": "DELETE", "url": "{{baseUrl}}/buyer-requirements/{{requirementId}}" } }
+      ]
+    },
+    {
+      "name": "Enquiries",
+      "item": [
+        { "name": "Create enquiry", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"enquiryType\": \"CONTACT\",\n  \"message\": \"Interested in this plot, please share more details.\",\n  \"preferredContactChannel\": \"PHONE\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/enquiries" } },
+        { "name": "Buyer: List enquiries", "request": { "method": "GET", "url": "{{baseUrl}}/buyer/enquiries?status=NEW&listingId={{listingId}}" } },
+        { "name": "Buyer: Enquiry details", "request": { "method": "GET", "url": "{{baseUrl}}/buyer/enquiries/{{enquiryId}}" } },
+        { "name": "Seller: List enquiries", "request": { "method": "GET", "url": "{{baseUrl}}/seller/enquiries?status=NEW&listingId={{listingId}}&search=plot" } },
+        { "name": "Seller: Enquiry details", "request": { "method": "GET", "url": "{{baseUrl}}/seller/enquiries/{{enquiryId}}" } },
+        { "name": "Seller: Update enquiry status", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"CONTACTED\"\n}" }, "url": "{{baseUrl}}/seller/enquiries/{{enquiryId}}/status" } },
+        { "name": "Seller: Add enquiry note", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"note\": \"Called the buyer, following up next week.\"\n}" }, "url": "{{baseUrl}}/seller/enquiries/{{enquiryId}}/notes" } },
+        { "name": "Reveal listing contact", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"preferredChannel\": \"WHATSAPP\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/contact-reveal" } }
+      ]
+    },
+    {
+      "name": "Site Visits",
+      "item": [
+        { "name": "Create site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"preferredDate\": \"2026-09-01\",\n  \"preferredTimeSlot\": \"MORNING\",\n  \"visitorCount\": 2,\n  \"note\": \"Would like to see the boundary markers.\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/site-visits" } },
+        { "name": "Buyer: List site visits", "request": { "method": "GET", "url": "{{baseUrl}}/buyer/site-visits?status=REQUESTED&fromDate=2026-08-01&toDate=2026-09-30" } },
+        { "name": "Seller: List site visits", "request": { "method": "GET", "url": "{{baseUrl}}/seller/site-visits?status=REQUESTED&fromDate=2026-08-01&toDate=2026-09-30" } },
+        { "name": "Seller: Confirm site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"scheduledAt\": \"2026-09-02T05:30:00.000Z\",\n  \"sellerNote\": \"Confirmed, will meet at the site entrance.\"\n}" }, "url": "{{baseUrl}}/site-visits/{{visitId}}/confirm" } },
+        { "name": "Reschedule site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"scheduledAt\": \"2026-09-05T05:30:00.000Z\",\n  \"note\": \"Need to move to a later date.\"\n}" }, "url": "{{baseUrl}}/site-visits/{{visitId}}/reschedule" } },
+        { "name": "Cancel site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"No longer interested.\"\n}" }, "url": "{{baseUrl}}/site-visits/{{visitId}}/cancel" } },
+        { "name": "Seller: Complete site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"sellerNote\": \"Visit completed, buyer is interested.\",\n  \"enquiryStatus\": \"INTERESTED\"\n}" }, "url": "{{baseUrl}}/site-visits/{{visitId}}/complete" } }
+      ]
+    },
+    {
+      "name": "Seller Dashboard",
+      "item": [
+        { "name": "Dashboard summary", "request": { "method": "GET", "url": "{{baseUrl}}/seller/dashboard?from=2026-08-01&to=2026-08-22&organizationId={{organizationId}}" } }
+      ]
+    },
+    {
+      "name": "Commerce",
+      "item": [
+        { "name": "List plans", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/plans?audience=PREMIUM" } },
+        { "name": "Create order", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1,\n      \"targetType\": \"LISTING\",\n      \"targetId\": \"{{listingId}}\"\n    }\n  ],\n  \"organizationId\": \"{{organizationId}}\"\n}" }, "url": "{{baseUrl}}/orders" } },
+        { "name": "My orders", "request": { "method": "GET", "url": "{{baseUrl}}/orders/me?status=CREATED" } },
+        { "name": "Order details", "request": { "method": "GET", "url": "{{baseUrl}}/orders/{{orderId}}" } },
+        { "name": "Create payment", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"provider\": \"RAZORPAY\",\n  \"returnUrl\": \"https://app.zameen.com/payments/return\"\n}" }, "url": "{{baseUrl}}/payments/{{orderId}}/create" } },
+        { "name": "Verify payment", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"paymentId\": \"replace-with-payment-id\",\n  \"providerPaymentId\": \"pay_replace_with_id\",\n  \"providerOrderId\": \"order_replace_with_id\",\n  \"signature\": \"replace-with-signature\"\n}" }, "url": "{{baseUrl}}/payments/verify" } },
+        { "name": "Payment webhook", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "x-razorpay-signature", "value": "replace-with-webhook-signature" }], "body": { "mode": "raw", "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_replace_with_id\",\n        \"order_id\": \"order_replace_with_id\"\n      }\n    }\n  }\n}" }, "url": "{{baseUrl}}/payments/webhook" } },
+        { "name": "List services", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/services?type=LEGAL_REVIEW" } },
+        { "name": "Service details", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/services/{{serviceId}}" } },
+        { "name": "Create service request", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"listingId\": \"{{listingId}}\",\n  \"customerNotes\": \"Please review the title before purchase.\",\n  \"contactPhone\": \"+919876543210\",\n  \"contactEmail\": \"buyer@example.com\"\n}" }, "url": "{{baseUrl}}/service-requests" } },
+        { "name": "My service requests", "request": { "method": "GET", "url": "{{baseUrl}}/service-requests/me?status=REQUESTED" } },
+        { "name": "Service request details", "request": { "method": "GET", "url": "{{baseUrl}}/service-requests/{{serviceRequestId}}" } },
+        { "name": "Service request file upload URL", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"title-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 204800\n}" }, "url": "{{baseUrl}}/service-requests/{{serviceRequestId}}/files/upload-url" } },
+        { "name": "Complete service request file", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"title-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 204800,\n  \"storageKey\": \"service-requests/{{serviceRequestId}}/title-deed.pdf\"\n}" }, "url": "{{baseUrl}}/service-requests/{{serviceRequestId}}/files/complete" } }
       ]
     }
   ]

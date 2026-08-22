@@ -37,6 +37,7 @@ router.use("/users", userRoutes);
 router.use("/admin", adminUserRoutes);
 router.use("/admin", organizationAdminRoutes);
 router.use("/admin", verificationRoutes);
+router.use("/admin", commerceAdminRoutes);
 router.use("/", propertyRoutes);
 router.use("/", listingRoutesV1);
 router.use("/", discoveryRoutes);
@@ -49,7 +50,6 @@ router.use("/", buyerRequirementsRoutes);
 router.use("/", enquiriesRoutes);
 router.use("/", siteVisitsRoutes);
 router.use("/", sellerDashboardRoutes);
-router.use("/admin", commerceAdminRoutes);
 router.use("/", commerceRoutes);
 
 export default router;

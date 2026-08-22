@@ -2,16 +2,16 @@ import { run } from "./db.js";
 import { signedReadUrl } from "../utils/storage.js";
 
 const cardSql = `
-SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.property_id AS "propertyId", l.title,
-  l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.published_at AS "publishedAt",
+SELECT listing.id AS "listingId", listing.listing_code AS "listingCode", listing.property_id AS "propertyId", listing.title,
+  listing.transaction_type AS "transactionType", listing.price_amount_minor AS "priceAmountMinor", listing.published_at AS "publishedAt",
   pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyTypeName",
+  pld.area_value AS "areaValue",
   au.id AS "areaUnitId", au.code AS "areaUnitCode", au.name AS "areaUnitName",
   loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType",
   loc.parent_id AS "locationParentId", loc.state_code AS "locationStateCode",
   CASE WHEN loc.center IS NULL THEN NULL ELSE ST_Y(loc.center::geometry) END AS "locationLatitude",
   CASE WHEN loc.center IS NULL THEN NULL ELSE ST_X(loc.center::geometry) END AS "locationLongitude",
-  disp.display_path AS "locationDisplayPath",
-  media.storage_key AS "thumbnailUrl",
+  media.storage_key AS "thumbnailStorageKey",
   EXISTS (
     SELECT 1 FROM marketplace.listing_promotions promo
     WHERE promo.listing_id = listing.id AND promo.promotion_type = 'PREMIUM' AND promo.status = 'ACTIVE'
@@ -33,7 +33,6 @@ LEFT JOIN land.property_land_details pld ON pld.property_id = property.id
 LEFT JOIN land.area_units au ON au.id = pld.area_unit_id
 LEFT JOIN land.property_locations ploc ON ploc.property_id = property.id
 LEFT JOIN geo.locations loc ON loc.id = ploc.location_id
-LEFT JOIN location_display disp ON disp.location_id = loc.id
 LEFT JOIN land.property_media media ON media.property_id = property.id AND media.is_cover = true AND media.deleted_at IS NULL
 WHERE listing.id = ANY($1::uuid[]) AND listing.deleted_at IS NULL
   AND ($3::boolean IS NOT TRUE OR (listing.status = 'PUBLISHED' AND listing.review_status = 'APPROVED'))
