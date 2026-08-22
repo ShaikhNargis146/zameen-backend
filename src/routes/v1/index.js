@@ -25,6 +25,11 @@ import channelPartnersRoutes from "../../modules/channel-partners/channel-partne
 import channelPartnersAdminRoutes from "../../modules/channel-partners/channel-partners.admin.routes.js";
 import investmentOpportunitiesRoutes from "../../modules/investment-opportunities/investment-opportunities.routes.js";
 import investmentOpportunitiesAdminRoutes from "../../modules/investment-opportunities/investment-opportunities.admin.routes.js";
+import auctionsRoutes from "../../modules/auctions/auctions.routes.js";
+import auctionsAdminRoutes from "../../modules/auctions/auctions.admin.routes.js";
+import adsRoutes from "../../modules/ads/ads.routes.js";
+import adsAdminRoutes from "../../modules/ads/ads.admin.routes.js";
+import notificationsRoutes from "../../modules/notifications/notifications.routes.js";
 
 const router = express.Router();
 
@@ -47,6 +52,8 @@ router.use("/admin", commerceAdminRoutes);
 router.use("/admin", contentAdminRoutes);
 router.use("/admin", channelPartnersAdminRoutes);
 router.use("/admin", investmentOpportunitiesAdminRoutes);
+router.use("/admin", auctionsAdminRoutes);
+router.use("/admin", adsAdminRoutes);
 router.use("/", propertyRoutes);
 router.use("/", listingRoutesV1);
 router.use("/", discoveryRoutes);
@@ -63,5 +70,8 @@ router.use("/", commerceRoutes);
 router.use("/", contentRoutes);
 router.use("/", channelPartnersRoutes);
 router.use("/", investmentOpportunitiesRoutes);
+router.use("/", auctionsRoutes);
+router.use("/", adsRoutes);
+router.use("/", notificationsRoutes);
 
 export default router;

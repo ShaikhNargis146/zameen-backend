@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zameens — Developer 2 APIs",
-    "description": "UI-contract Developer 2 endpoints: Reference data, Organizations, Favorites, Recently Viewed, Buyer Requirements, Enquiries, Site Visits, Seller Dashboard, Commerce, Content CMS & Market Trends, Channel Partners, Investment Opportunities. Set accessToken after OTP verification and replace UUID variables with real values (use Reference data to look up locationId/propertyTypeId/areaUnitId). The logged-in test user should hold both BUYER and SELLER roles so buyer/* and seller/* endpoints can both be exercised with {{accessToken}}.",
+    "description": "UI-contract Developer 2 endpoints: Reference data, Organizations, Favorites, Recently Viewed, Buyer Requirements, Enquiries, Site Visits, Seller Dashboard, Commerce, Content CMS & Market Trends, Channel Partners, Investment Opportunities, Auction Directory, Advertisements, Notifications. Set accessToken after OTP verification and replace UUID variables with real values (use Reference data to look up locationId/propertyTypeId/areaUnitId). The logged-in test user should hold both BUYER and SELLER roles so buyer/* and seller/* endpoints can both be exercised with {{accessToken}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -27,7 +27,10 @@
     { "key": "pointId", "value": "" },
     { "key": "partnerId", "value": "" },
     { "key": "opportunityId", "value": "" },
-    { "key": "planId", "value": "" }
+    { "key": "planId", "value": "" },
+    { "key": "auctionId", "value": "" },
+    { "key": "adId", "value": "" },
+    { "key": "notificationId", "value": "" }
   ],
   "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
   "item": [
@@ -187,6 +190,35 @@
         { "name": "Admin: Update investment opportunity", "request": { "method": "PATCH", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"minimumInvestmentMinor\": 7500000\n}" }, "url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}" } },
         { "name": "Admin: Publish investment opportunity", "request": { "method": "POST", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/publish" } },
         { "name": "Admin: Close investment opportunity", "request": { "method": "POST", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Fully subscribed.\"\n}" }, "url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/close" } }
+      ]
+    },
+    {
+      "name": "Auction Directory",
+      "item": [
+        { "name": "List auctions", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/auctions?locationId={{locationId}}&status=UPCOMING&fromDate=2026-01-01&toDate=2026-12-31&page=1&limit=20" } },
+        { "name": "Auction details", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/auctions/{{auctionId}}" } },
+        { "name": "Admin: Create auction", "request": { "method": "POST", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"title\": \"Bank Auction - Prime Plot\",\n  \"institutionName\": \"State Bank of India\",\n  \"locationId\": \"{{locationId}}\",\n  \"reservePriceMinor\": 50000000,\n  \"emdAmountMinor\": 500000,\n  \"auctionAt\": \"2026-09-15T10:00:00.000Z\",\n  \"officialUrl\": \"https://example.com/auction/1\",\n  \"description\": \"Prime residential plot e-auction.\"\n}" }, "url": "{{baseUrl}}/admin/auctions" } },
+        { "name": "Admin: Update auction", "request": { "method": "PATCH", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reservePriceMinor\": 60000000,\n  \"status\": \"CLOSED\"\n}" }, "url": "{{baseUrl}}/admin/auctions/{{auctionId}}" } },
+        { "name": "Admin: Delete auction", "request": { "method": "DELETE", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "url": "{{baseUrl}}/admin/auctions/{{auctionId}}" } }
+      ]
+    },
+    {
+      "name": "Advertisements",
+      "item": [
+        { "name": "List active ads by placement", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/ads?placement=HOME_TOP" } },
+        { "name": "Admin: Create ad", "request": { "method": "POST", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"name\": \"Homepage Banner\",\n  \"placement\": \"HOME_TOP\",\n  \"imageStorageKey\": \"ads/homepage-banner.png\",\n  \"targetUrl\": \"https://example.com/promo\",\n  \"startsAt\": \"2026-01-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-12-31T00:00:00.000Z\",\n  \"status\": \"ACTIVE\"\n}" }, "url": "{{baseUrl}}/admin/ads" } },
+        { "name": "Admin: Update ad", "request": { "method": "PATCH", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"INACTIVE\"\n}" }, "url": "{{baseUrl}}/admin/ads/{{adId}}" } },
+        { "name": "Admin: Delete ad", "request": { "method": "DELETE", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "url": "{{baseUrl}}/admin/ads/{{adId}}" } }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        { "name": "List notifications", "request": { "method": "GET", "url": "{{baseUrl}}/notifications?page=1&limit=20&unreadOnly=false&type=" } },
+        { "name": "Mark notification read", "request": { "method": "PATCH", "url": "{{baseUrl}}/notifications/{{notificationId}}/read" } },
+        { "name": "Mark all notifications read", "request": { "method": "POST", "url": "{{baseUrl}}/notifications/read-all" } },
+        { "name": "Get notification preferences", "request": { "method": "GET", "url": "{{baseUrl}}/notification-preferences" } },
+        { "name": "Update notification preferences", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"emailEnabled\": true,\n  \"smsEnabled\": true,\n  \"whatsappEnabled\": false,\n  \"marketingEnabled\": false\n}" }, "url": "{{baseUrl}}/notification-preferences" } }
       ]
     }
   ]
