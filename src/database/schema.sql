@@ -694,7 +694,7 @@ CREATE TABLE content.investment_opportunities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title varchar(500) NOT NULL, location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT,
   property_id uuid REFERENCES land.properties(id) ON DELETE RESTRICT, investment_type varchar(50) NOT NULL,
   minimum_investment_minor bigint CHECK (minimum_investment_minor IS NULL OR minimum_investment_minor >= 0), description text,
-  status varchar(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','CLOSED')),
+  status varchar(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','CLOSED')), published_at timestamptz,
   created_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE content.investment_interests (

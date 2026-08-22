@@ -19,6 +19,12 @@ import siteVisitsRoutes from "../../modules/site-visits/site-visits.routes.js";
 import sellerDashboardRoutes from "../../modules/seller-dashboard/seller-dashboard.routes.js";
 import commerceRoutes from "../../modules/commerce/commerce.routes.js";
 import commerceAdminRoutes from "../../modules/commerce/commerce.admin.routes.js";
+import contentRoutes from "../../modules/content/content.routes.js";
+import contentAdminRoutes from "../../modules/content/content.admin.routes.js";
+import channelPartnersRoutes from "../../modules/channel-partners/channel-partners.routes.js";
+import channelPartnersAdminRoutes from "../../modules/channel-partners/channel-partners.admin.routes.js";
+import investmentOpportunitiesRoutes from "../../modules/investment-opportunities/investment-opportunities.routes.js";
+import investmentOpportunitiesAdminRoutes from "../../modules/investment-opportunities/investment-opportunities.admin.routes.js";
 
 const router = express.Router();
 
@@ -38,6 +44,9 @@ router.use("/admin", adminUserRoutes);
 router.use("/admin", organizationAdminRoutes);
 router.use("/admin", verificationRoutes);
 router.use("/admin", commerceAdminRoutes);
+router.use("/admin", contentAdminRoutes);
+router.use("/admin", channelPartnersAdminRoutes);
+router.use("/admin", investmentOpportunitiesAdminRoutes);
 router.use("/", propertyRoutes);
 router.use("/", listingRoutesV1);
 router.use("/", discoveryRoutes);
@@ -51,5 +60,8 @@ router.use("/", enquiriesRoutes);
 router.use("/", siteVisitsRoutes);
 router.use("/", sellerDashboardRoutes);
 router.use("/", commerceRoutes);
+router.use("/", contentRoutes);
+router.use("/", channelPartnersRoutes);
+router.use("/", investmentOpportunitiesRoutes);
 
 export default router;
