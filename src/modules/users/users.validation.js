@@ -60,11 +60,20 @@ export const selfRole = body => {
   // `roleCode` is the integration-contract name. Keep `role` temporarily for
   // clients built against the earlier implementation.
   const role = String(body.roleCode || body.role || "").toUpperCase();
-  if (!["BUYER", "SELLER"].includes(role))
+  if (
+    ![
+      "BUYER",
+      "SELLER",
+      "BROKER",
+      "DEVELOPER",
+      "CHANNEL_PARTNER",
+      "CORPORATE"
+    ].includes(role)
+  )
     throw new HttpError(
       400,
       "ROLE_NOT_SELF_ASSIGNABLE",
-      "Only buyer and seller roles may be self-assigned. Business roles require administrator approval."
+      "Only non-administrator roles may be self-assigned."
     );
   return role;
 };

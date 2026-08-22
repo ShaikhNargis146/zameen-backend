@@ -304,7 +304,7 @@ INSERT INTO land.area_units (code,name,sqft_multiplier) VALUES
  ON CONFLICT DO NOTHING;
 INSERT INTO land.road_types (code,name,sort_order) VALUES
  ('TARRED','Tarred Road',10), ('CONCRETE','Concrete Road',20), ('GRAVEL','Gravel Road',30), ('DIRT','Dirt Road',40)
- ON CONFLICT (code) DO NOTHING;
+ON CONFLICT (code) DO NOTHING;
 INSERT INTO land.amenities (code,name,category,sort_order) VALUES
  ('WATER','Water','UTILITIES',10), ('ELECTRICITY','Electricity','UTILITIES',20), ('BOREWELL','Borewell','UTILITIES',30),
  ('DRAINAGE','Drainage','UTILITIES',40), ('APPROACH_ROAD','Approach Road','ACCESS',50), ('STREET_LIGHT','Street Light','ACCESS',60), ('BOUNDARY_WALL','Boundary Wall','SECURITY',70)
@@ -339,11 +339,11 @@ CREATE TABLE land.property_land_details (
   area_sqft numeric(20,4) NOT NULL CHECK (area_sqft > 0),
   length_value numeric(18,4) CHECK (length_value IS NULL OR length_value > 0),
   width_value numeric(18,4) CHECK (width_value IS NULL OR width_value > 0),
-  dimension_unit_id uuid REFERENCES land.area_units(id) ON DELETE RESTRICT,
+  dimension_unit varchar(20) CHECK (dimension_unit IS NULL OR dimension_unit IN ('FT','M')),
   frontage_m numeric(18,4) CHECK (frontage_m IS NULL OR frontage_m > 0),
   road_width_m numeric(18,4) CHECK (road_width_m IS NULL OR road_width_m > 0),
-  road_type_id uuid REFERENCES land.road_types(id) ON DELETE RESTRICT,
-  facing varchar(20) CHECK (facing IS NULL OR facing IN ('NORTH','SOUTH','EAST','WEST','NORTHEAST','NORTHWEST','SOUTHEAST','SOUTHWEST')),
+  road_type varchar(50) CHECK (road_type IS NULL OR road_type IN ('PUCCA','KUTCHA','HIGHWAY','OTHER')),
+  facing varchar(2) CHECK (facing IS NULL OR facing IN ('N','NE','E','SE','S','SW','W','NW')),
   open_sides smallint CHECK (open_sides IS NULL OR open_sides BETWEEN 0 AND 4),
   is_corner_plot boolean NOT NULL DEFAULT false,
   has_boundary_wall boolean,

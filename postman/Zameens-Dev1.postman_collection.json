@@ -1,14 +1,23 @@
 {
   "info": {
     "name": "Zameens — Developer 1 APIs",
-    "description": "UI-contract Developer 1 endpoints. Set accessToken after OTP verification and replace UUID variables with real values.",
+    "description": "Complete Developer 1 UI-contract collection. Run the master/location requests first, use their UUIDs in the variables below, then complete the property and listing flow. All responses use { success, data, meta }. Admin requests require an ADMIN access token.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
     { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "challengeId", "value": "" },
+    { "key": "userId", "value": "" },
     { "key": "propertyId", "value": "" },
     { "key": "listingId", "value": "" },
+    { "key": "propertyTypeId", "value": "" },
+    { "key": "landUseTypeId", "value": "" },
+    { "key": "ownershipTypeId", "value": "" },
+    { "key": "areaUnitId", "value": "" },
+    { "key": "amenityId", "value": "" },
+    { "key": "locationId", "value": "" },
     { "key": "documentTypeId", "value": "" },
     { "key": "mediaId", "value": "" },
     { "key": "documentId", "value": "" },
@@ -20,63 +29,132 @@
   "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
   "item": [
     {
-      "name": "Auth",
+      "name": "Authentication",
       "item": [
-        { "name": "Request OTP", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}" }, "url": "{{baseUrl}}/auth/otp/request" } },
-        { "name": "Verify OTP", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"challengeId\": \"replace-with-challenge-id\",\n  \"otp\": \"1234\",\n  \"deviceId\": \"postman\",\n  \"deviceName\": \"Postman\"\n}" }, "url": "{{baseUrl}}/auth/otp/verify" } },
-        { "name": "Refresh session", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"replace-with-refresh-token\"\n}" }, "url": "{{baseUrl}}/auth/refresh" } },
-        { "name": "Logout", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout" } }
+        { "name": "Request OTP", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('challengeId', body.data.challengeId);"] } }], "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}" }, "url": "{{baseUrl}}/auth/otp/request" } },
+        { "name": "Verify OTP", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) {", "  pm.collectionVariables.set('accessToken', body.data.accessToken);", "  pm.collectionVariables.set('refreshToken', body.data.refreshToken || '');", "  pm.collectionVariables.set('userId', body.data.user.id);", "}"] } }], "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"replace-with-delivered-otp\",\n  \"deviceId\": \"postman\",\n  \"deviceName\": \"Postman\"\n}" }, "url": "{{baseUrl}}/auth/otp/verify" } },
+        { "name": "Refresh session", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }, "url": "{{baseUrl}}/auth/refresh" } },
+        { "name": "Logout", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout" } },
+        { "name": "Logout all sessions", "request": { "method": "POST", "url": "{{baseUrl}}/auth/logout-all" } }
       ]
     },
     {
-      "name": "Users and masters",
+      "name": "Users and administration",
       "item": [
         { "name": "My profile", "request": { "method": "GET", "url": "{{baseUrl}}/users/me" } },
         { "name": "Update profile", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"displayName\": \"Test Seller\",\n  \"preferredLanguage\": \"en\"\n}" }, "url": "{{baseUrl}}/users/me" } },
+        { "name": "My roles", "request": { "method": "GET", "url": "{{baseUrl}}/users/me/roles" } },
+        { "name": "Add a self-service role", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"roleCode\": \"BROKER\"\n}" }, "url": "{{baseUrl}}/users/me/roles" } },
+        { "name": "Admin — list users", "request": { "method": "GET", "url": "{{baseUrl}}/admin/users?page=1&limit=20" } },
+        { "name": "Admin — user detail", "request": { "method": "GET", "url": "{{baseUrl}}/admin/users/{{userId}}" } },
+        { "name": "Admin — change user status", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"ACTIVE\",\n  \"reason\": \"Account reviewed\"\n}" }, "url": "{{baseUrl}}/admin/users/{{userId}}/status" } },
+        { "name": "Admin — replace user roles", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"roles\": [\"BUYER\", \"SELLER\"],\n  \"reason\": \"Account role update\"\n}" }, "url": "{{baseUrl}}/admin/users/{{userId}}/roles" } }
+      ]
+    },
+    {
+      "name": "Masters and locations",
+      "item": [
         { "name": "Property types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/property-types" } },
-        { "name": "Area units", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/area-units" } },
-        { "name": "Location search", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/search?q=panvel" } }
+        { "name": "Land use types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/land-use-types" } },
+        { "name": "Ownership types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/ownership-types" } },
+        { "name": "Road types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/road-types" } },
+        { "name": "Area units", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/area-units?stateCode=MH" } },
+        { "name": "Amenities", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/amenities" } },
+        { "name": "Document types", "request": { "method": "GET", "url": "{{baseUrl}}/document-types?stateCode=MH" } },
+        { "name": "Parcel config", "request": { "method": "GET", "url": "{{baseUrl}}/parcel-config/MH" } },
+        { "name": "Location search", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/search?q=panvel&types=LOCALITY,CITY&stateCode=MH&limit=10" } },
+        { "name": "Location detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/{{locationId}}" } },
+        { "name": "Location children", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/{{locationId}}/children?type=LOCALITY" } },
+        { "name": "Locations by pincode", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/pincode/410206" } },
+        { "name": "States", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/states" } },
+        { "name": "State districts", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/states/{{locationId}}/districts" } },
+        { "name": "District cities", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/districts/{{locationId}}/cities" } },
+        { "name": "City localities", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/locations/cities/{{locationId}}/localities" } },
+        { "name": "Geocode", "request": { "method": "GET", "url": "{{baseUrl}}/geo/geocode?q=Panvel&limit=10" } },
+        { "name": "Reverse geocode", "request": { "method": "GET", "url": "{{baseUrl}}/geo/reverse-geocode?lat=18.9894&lng=73.1175" } }
       ]
     },
     {
       "name": "Properties",
       "item": [
-        { "name": "Create property", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"propertyTypeId\": \"replace-with-property-type-id\"\n}" }, "url": "{{baseUrl}}/properties" } },
+        { "name": "Create property", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('propertyId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"landUseTypeId\": \"{{landUseTypeId}}\",\n  \"ownershipTypeId\": \"{{ownershipTypeId}}\"\n}" }, "url": "{{baseUrl}}/properties" } },
         { "name": "My properties", "request": { "method": "GET", "url": "{{baseUrl}}/properties/me?page=1&limit=20" } },
         { "name": "Property details", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}" } },
-        { "name": "Save land details", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"areaValue\": 1,\n  \"areaUnitId\": \"replace-with-area-unit-id\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/land-details" } },
-        { "name": "Save amenities", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amenities\": []\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/amenities" } },
-        { "name": "Request verification", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"checkTypes\": [\"LOCATION\", \"LAND_DETAILS\"]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/verification/request" } }
+        { "name": "Update property", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"landUseTypeId\": \"{{landUseTypeId}}\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}" } },
+        { "name": "Archive property", "request": { "method": "DELETE", "url": "{{baseUrl}}/properties/{{propertyId}}" } },
+        { "name": "Land details", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/land-details" } },
+        { "name": "Save land details", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"areaValue\": 22,\n  \"areaUnitId\": \"{{areaUnitId}}\",\n  \"lengthValue\": 22,\n  \"widthValue\": 33,\n  \"dimensionUnit\": \"M\",\n  \"frontageM\": 2,\n  \"roadWidthM\": 2,\n  \"roadType\": \"OTHER\",\n  \"facing\": \"SW\",\n  \"openSides\": 1,\n  \"isCornerPlot\": false,\n  \"hasBoundaryWall\": true,\n  \"terrain\": \"UNEVEN\",\n  \"roadAccessType\": \"NO_DIRECT\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/land-details" } },
+        { "name": "Parcel identifiers", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/parcel-identifiers" } },
+        { "name": "Save parcel identifiers", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"identifiers\": [\n    { \"type\": \"GAT_NUMBER\", \"value\": \"123/4\" }\n  ]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/parcel-identifiers" } },
+        { "name": "Property location", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/location" } },
+        { "name": "Save property location", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"locationId\": \"{{locationId}}\",\n  \"pincode\": \"410206\",\n  \"latitude\": 18.9894,\n  \"longitude\": 73.1175,\n  \"locationPrecision\": \"EXACT\",\n  \"showExactLocation\": false\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/location" } },
+        { "name": "Property amenities", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/amenities" } },
+        { "name": "Save amenities", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"amenities\": [\n    { \"amenityId\": \"{{amenityId}}\", \"valueText\": \"Available\" }\n  ]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/amenities" } },
+        { "name": "Request verification", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"checkTypes\": [\"LOCATION\", \"LAND_DETAILS\"],\n  \"note\": \"Please review the submitted property details.\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/verification/request" } },
+        { "name": "Verification summary", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/properties/{{propertyId}}/verification" } },
+        { "name": "Land Passport", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/properties/{{propertyId}}/land-passport" } },
+        { "name": "Scanner Lite", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/properties/{{propertyId}}/scanner" } }
       ]
     },
     {
       "name": "Property media and documents",
       "item": [
-        { "name": "Create media upload ticket", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url" } },
-        { "name": "Complete media upload", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\",\n  \"isCover\": true\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/complete" } },
+        { "name": "Create media upload ticket", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('storageKey', body.data.storageKey);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url" } },
+        { "name": "Complete media upload", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('mediaId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\",\n  \"isCover\": true\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/complete" } },
         { "name": "List media", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/media" } },
-        { "name": "Create document upload ticket", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/upload-url" } },
-        { "name": "Complete document upload", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"documentTypeId\": \"{{documentTypeId}}\",\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/complete" } },
-        { "name": "List documents", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents" } }
+        { "name": "Update media", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"caption\": \"Main road frontage\",\n  \"sortOrder\": 0\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}" } },
+        { "name": "Reorder media", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"mediaIds\": [\"{{mediaId}}\"]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/order" } },
+        { "name": "Set media cover", "request": { "method": "PUT", "url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}/cover" } },
+        { "name": "Delete media", "request": { "method": "DELETE", "url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}" } },
+        { "name": "Create document upload ticket", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('storageKey', body.data.storageKey);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/upload-url" } },
+        { "name": "Complete document upload", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('documentId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"documentTypeId\": \"{{documentTypeId}}\",\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000,\n  \"visibility\": \"PRIVATE\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/complete" } },
+        { "name": "List documents", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents" } },
+        { "name": "Document detail", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}" } },
+        { "name": "Delete document", "request": { "method": "DELETE", "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}" } }
       ]
     },
     {
-      "name": "Listings",
+      "name": "Listings and moderation",
       "item": [
-        { "name": "Create listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"transactionType\": \"SALE\",\n  \"title\": \"Land for sale\",\n  \"description\": \"Well located land parcel\",\n  \"priceAmountMinor\": 100000000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/listings" } },
+        { "name": "Create listing", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('listingId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"transactionType\": \"SALE\",\n  \"title\": \"Land parcel for sale in Panvel\",\n  \"description\": \"Well located land parcel with direct road access and clear documentation.\",\n  \"priceAmountMinor\": 100000000,\n  \"currency\": \"INR\",\n  \"isNegotiable\": true\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/listings" } },
+        { "name": "Seller listings", "request": { "method": "GET", "url": "{{baseUrl}}/seller/listings?page=1&limit=20" } },
+        { "name": "My listing", "request": { "method": "GET", "url": "{{baseUrl}}/listings/{{listingId}}" } },
+        { "name": "Update listing", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"priceAmountMinor\": 95000000,\n  \"isNegotiable\": true\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}" } },
+        { "name": "Delete listing", "request": { "method": "DELETE", "url": "{{baseUrl}}/listings/{{listingId}}" } },
         { "name": "Submit listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/submit" } },
-        { "name": "Seller listings", "request": { "method": "GET", "url": "{{baseUrl}}/seller/listings?limit=20" } },
-        { "name": "Public listing detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/detail" } }
+        { "name": "Pause listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/pause" } },
+        { "name": "Resume listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/resume" } },
+        { "name": "Withdraw listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Seller requested withdrawal\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/withdraw" } },
+        { "name": "Mark listing sold", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Completed sale\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/mark-sold" } },
+        { "name": "Public listing detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/detail" } },
+        { "name": "Admin — list listings", "request": { "method": "GET", "url": "{{baseUrl}}/admin/listings?reviewStatus=PENDING&page=1&limit=20" } },
+        { "name": "Admin — listing detail", "request": { "method": "GET", "url": "{{baseUrl}}/admin/listings/{{listingId}}" } },
+        { "name": "Admin — approve listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"note\": \"Listing approved after review\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve" } },
+        { "name": "Admin — reject listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Please provide clearer property documents.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/reject" } },
+        { "name": "Admin — suspend listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Listing requires compliance review.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/suspend" } }
       ]
     },
     {
       "name": "Discovery and verification",
       "item": [
+        { "name": "Search listings", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"transactionTypes\": [\"SALE\"],\n  \"minPriceMinor\": 50000000,\n  \"maxPriceMinor\": 150000000,\n  \"sort\": \"NEWEST\",\n  \"page\": 1,\n  \"limit\": 20\n}" }, "url": "{{baseUrl}}/search/listings" } },
         { "name": "Search suggestions", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/search/suggestions?q=panvel&limit=10" } },
+        { "name": "Search map", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"bounds\": { \"north\": 19.1, \"south\": 18.8, \"east\": 73.3, \"west\": 73.0 },\n  \"filters\": { \"transactionTypes\": [\"SALE\"] },\n  \"maxPins\": 100\n}" }, "url": "{{baseUrl}}/search/map" } },
         { "name": "Similar listings", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/similar?limit=10" } },
-        { "name": "Public scanner", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/properties/{{propertyId}}/scanner" } },
-        { "name": "Verification queue (admin)", "request": { "method": "GET", "url": "{{baseUrl}}/admin/verifications?status=PENDING&page=1&limit=20" } },
-        { "name": "AI conversation detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "header": [{ "key": "X-AI-Conversation-Token", "value": "{{guestConversationToken}}" }], "url": "{{baseUrl}}/ai/conversations/{{conversationId}}" } }
+        { "name": "Compare listings", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"listingIds\": [\"{{listingId}}\", \"replace-with-second-listing-id\"]\n}" }, "url": "{{baseUrl}}/listings/compare" } },
+        { "name": "Admin — verification queue", "request": { "method": "GET", "url": "{{baseUrl}}/admin/verifications?status=PENDING&page=1&limit=20" } },
+        { "name": "Admin — verification detail", "request": { "method": "GET", "url": "{{baseUrl}}/admin/verifications/{{verificationId}}" } },
+        { "name": "Admin — update verification", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"checkType\": \"LOCATION\",\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}" }, "url": "{{baseUrl}}/admin/verifications/{{verificationId}}" } }
+      ]
+    },
+    {
+      "name": "AI",
+      "item": [
+        { "name": "Natural-language search", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"query\": \"verified land for sale under 1 crore\",\n  \"language\": \"en\",\n  \"page\": 1,\n  \"limit\": 20\n}" }, "url": "{{baseUrl}}/ai/search" } },
+        { "name": "Create AI conversation", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) {", "  pm.collectionVariables.set('conversationId', body.data.id);", "  pm.collectionVariables.set('guestConversationToken', body.data.guestAccessToken || '');", "}"] } }], "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"contextType\": \"GENERAL\",\n  \"initialQuery\": \"Help me find suitable land.\"\n}" }, "url": "{{baseUrl}}/ai/conversations" } },
+        { "name": "Send AI message", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-AI-Conversation-Token", "value": "{{guestConversationToken}}" }], "body": { "mode": "raw", "raw": "{\n  \"content\": \"What should I check before buying?\",\n  \"language\": \"en\"\n}" }, "url": "{{baseUrl}}/ai/conversations/{{conversationId}}/messages" } },
+        { "name": "AI conversation detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "header": [{ "key": "X-AI-Conversation-Token", "value": "{{guestConversationToken}}" }], "url": "{{baseUrl}}/ai/conversations/{{conversationId}}" } },
+        { "name": "Generate listing draft", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"propertyId\": \"{{propertyId}}\",\n  \"priceText\": \"₹95 lakh\",\n  \"highlights\": [\"Direct road access\", \"Clear title documents\"],\n  \"language\": \"en\"\n}" }, "url": "{{baseUrl}}/ai/listing/generate" } }
       ]
     }
   ]
