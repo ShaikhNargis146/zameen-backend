@@ -24,6 +24,10 @@ export const createStorageKey = ({ propertyId, category, fileName }) =>
   `properties/${propertyId}/${category}/${randomUUID()}-${safeName(fileName)}`;
 export const belongsToProperty = ({ propertyId, category, storageKey }) =>
   String(storageKey || "").startsWith(`properties/${propertyId}/${category}/`);
+export const createServiceRequestStorageKey = ({ requestId, fileName }) =>
+  `service-requests/${requestId}/files/${randomUUID()}-${safeName(fileName)}`;
+export const belongsToServiceRequest = ({ requestId, storageKey }) =>
+  String(storageKey || "").startsWith(`service-requests/${requestId}/files/`);
 export const signedWriteUrl = async ({ storageKey, mimeType }) => {
   const [uploadUrl] = await ensureStorage()
     .file(storageKey)

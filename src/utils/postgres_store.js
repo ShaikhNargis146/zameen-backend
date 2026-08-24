@@ -36,11 +36,22 @@ function buildCols({ columns, jsonbCols = [] }) {
 }
 
 /**
- * Strict table formatting using ${table~}
+ * Converts a "schema.table" string (or already-split {table, schema})
+ * into a pg-promise TableName, so schema-qualified names are quoted as
+ * "schema"."table" instead of one literal "schema.table" identifier.
+ */
+function toTableName(table) {
+  if (table instanceof pgp.helpers.TableName) return table;
+  const parts = typeof table === "string" ? pgp.helpers._TN(table) : table;
+  return new pgp.helpers.TableName(parts);
+}
+
+/**
+ * Strict table formatting.
  * Never pass untrusted table names; use server-side constants only.
  */
 function formatTable(table) {
-  return pgp.as.format("${table~}", { table });
+  return pgp.as.format("$1", [toTableName(table)]);
 }
 
 /**
@@ -70,7 +81,7 @@ const insertOne = async ({
 }) => {
   try {
     const cols = buildCols({ columns, jsonbCols });
-    const cs = new pgp.helpers.ColumnSet(cols, { table });
+    const cs = new pgp.helpers.ColumnSet(cols, { table: toTableName(table) });
     const q = pgp.helpers.insert(values, cs) + ` RETURNING ${returning}`;
     const row = await db.one(q);
     return ok(row);
@@ -88,7 +99,7 @@ const insertMany = async ({
 }) => {
   try {
     const cols = buildCols({ columns, jsonbCols });
-    const cs = new pgp.helpers.ColumnSet(cols, { table });
+    const cs = new pgp.helpers.ColumnSet(cols, { table: toTableName(table) });
     const q = pgp.helpers.insert(values, cs) + ` RETURNING ${returning}`;
     const rows = await db.any(q);
     return ok(rows);
@@ -112,7 +123,7 @@ const upsertOne = async ({
 }) => {
   try {
     const cols = buildCols({ columns, jsonbCols });
-    const cs = new pgp.helpers.ColumnSet(cols, { table });
+    const cs = new pgp.helpers.ColumnSet(cols, { table: toTableName(table) });
 
     // Build "col1, col2" conflict identifier list safely
     const conflict = conflictCols.map(c => pgp.as.name(c)).join(", ");
@@ -151,7 +162,7 @@ const updateWhere = async ({
     if (!keys.length) return fail(new Error("Nothing to update"));
 
     const cols = buildCols({ columns: keys, jsonbCols });
-    const cs = new pgp.helpers.ColumnSet(cols, { table });
+    const cs = new pgp.helpers.ColumnSet(cols, { table: toTableName(table) });
 
     const q =
       pgp.helpers.update(set, cs) + ` WHERE ${where} RETURNING ${returning}`;

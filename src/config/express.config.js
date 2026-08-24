@@ -25,7 +25,16 @@ app.use(cors());
 app.use(apiRateLimit);
 
 // Files are direct-to-storage uploads; API requests should carry metadata only.
-app.use(express.json({ limit: "1mb" }));
+// `verify` retains the raw bytes so payment webhook signatures can be checked
+// against the exact payload the provider signed, not the re-serialized JSON.
+app.use(
+  express.json({
+    limit: "1mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    }
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 /**
