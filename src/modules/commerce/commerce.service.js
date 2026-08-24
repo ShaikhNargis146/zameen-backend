@@ -249,12 +249,17 @@ export const verifyPayment = async ({ actorId, input }) => {
       "providerOrderId does not match this payment."
     );
 
-  const verified =
-    payment.provider !== "RAZORPAY" ||
-    safeEqualHex(
-      input.signature,
-      hmacSha256Hex(`${input.providerOrderId}|${input.providerPaymentId}`, razorpayKeySecret)
+  if (payment.provider !== "RAZORPAY")
+    throw new HttpError(
+      400,
+      "PROVIDER_NOT_SUPPORTED",
+      "This payment provider does not support verification."
     );
+
+  const verified = safeEqualHex(
+    input.signature,
+    hmacSha256Hex(`${input.providerOrderId}|${input.providerPaymentId}`, razorpayKeySecret)
+  );
 
   if (!verified) {
     await repository.failPayment({

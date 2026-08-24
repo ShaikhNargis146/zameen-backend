@@ -2,6 +2,7 @@ import { HttpError } from "../../shared/http.js";
 import { paginationMeta, parsePagination } from "../../shared/pagination.js";
 import { signedReadUrl } from "../../utils/storage.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
+import { findMembership } from "../organizations/organizations.repository.js";
 import * as repository from "./channel-partners.repository.js";
 
 const toLocationSummary = row => ({
@@ -78,6 +79,15 @@ const mapReferenceError = error => {
 };
 
 export const apply = async ({ actorId, input }) => {
+  if (input.organizationId) {
+    const membership = await findMembership(input.organizationId, actorId);
+    if (!membership || membership.status !== "ACTIVE")
+      throw new HttpError(
+        403,
+        "ORGANIZATION_MEMBERSHIP_REQUIRED",
+        "You must be an active member of this organization to apply on its behalf."
+      );
+  }
   try {
     await repository.createProfile({ userId: actorId, ...input });
   } catch (error) {

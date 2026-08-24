@@ -10,7 +10,8 @@ const orderStatuses = new Set([
   "CANCELLED",
   "REFUNDED"
 ]);
-const providers = new Set(["RAZORPAY", "STRIPE", "OTHER"]);
+// Phase 1 supports Razorpay only — STRIPE/OTHER have no server-side verification implemented.
+const providers = new Set(["RAZORPAY"]);
 const currencies = new Set(["INR"]);
 const maxOrderItems = 20;
 const e164Pattern = /^\+[1-9]\d{7,14}$/;
@@ -159,7 +160,7 @@ export const orderListQuery = query => ({
 
 export const createPayment = body => ({
   provider: body?.provider
-    ? requiredEnum(body.provider, providers, "PROVIDER", "RAZORPAY, STRIPE, or OTHER")
+    ? requiredEnum(body.provider, providers, "PROVIDER", "RAZORPAY")
     : "RAZORPAY",
   returnUrl: optionalUrl(body?.returnUrl, "RETURN_URL")
 });
