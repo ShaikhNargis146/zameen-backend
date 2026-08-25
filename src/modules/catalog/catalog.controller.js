@@ -9,6 +9,13 @@ import {
 
 export const master = key => async (_req, res) =>
   ok(res, await service.listMaster(key));
+export const documentTypes = async (req, res) =>
+  ok(
+    res,
+    await service.documentTypes(
+      req.query.stateCode ? stateCode(req.query.stateCode) : null
+    )
+  );
 export const areaUnits = async (req, res) =>
   ok(
     res,

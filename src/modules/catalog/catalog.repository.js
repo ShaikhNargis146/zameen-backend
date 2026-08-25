@@ -14,6 +14,12 @@ export const listMaster = key =>
     "any",
     `SELECT id, code, name, sort_order AS "sortOrder" FROM ${masters[key]} WHERE is_active = true ORDER BY sort_order, name`
   );
+export const listDocumentTypes = stateCode =>
+  run(
+    "any",
+    `SELECT dt.id, dt.code, dt.name, state.state_code AS "stateCode", dt.sort_order AS "sortOrder" FROM land.document_types dt LEFT JOIN geo.locations state ON state.id = dt.state_location_id WHERE dt.is_active = true AND ($1::varchar IS NULL OR state.state_code = $1 OR dt.state_location_id IS NULL) ORDER BY dt.sort_order, dt.name`,
+    [stateCode || null]
+  );
 export const listAreaUnits = stateCode =>
   run(
     "any",
@@ -29,7 +35,13 @@ export const listAmenities = category =>
 export const listParcelConfig = code =>
   run(
     "any",
-    `SELECT pit.code AS type, pit.name AS label, pit.is_required AS required, concat('Enter ', pit.name) AS placeholder FROM land.parcel_identifier_types pit JOIN geo.locations state ON state.id = pit.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1 AND pit.is_active = true ORDER BY pit.sort_order, pit.name`,
+    `SELECT pit.code AS type, pit.name AS label, pit.is_required AS required, COALESCE(pit.placeholder, concat('Enter ', pit.name)) AS placeholder FROM land.parcel_identifier_types pit JOIN geo.locations state ON state.id = pit.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1 AND pit.is_active = true ORDER BY pit.sort_order, pit.name`,
+    [code]
+  );
+export const parcelConfiguration = code =>
+  run(
+    "oneOrNone",
+    `SELECT configuration.notes FROM land.parcel_configurations configuration JOIN geo.locations state ON state.id = configuration.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1`,
     [code]
   );
 export const searchLocations = ({ q, types, stateCode, limit }) =>

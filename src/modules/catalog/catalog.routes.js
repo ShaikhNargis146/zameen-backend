@@ -6,9 +6,9 @@ import { masters } from "./catalog.repository.js";
 
 const router = Router();
 for (const key of Object.keys(masters)) {
-  const handler = asyncRoute(controller.master(key));
-  if (key === "document-types") router.get(`/${key}`, requireAuth, handler);
-  else router.get(`/${key}`, handler);
+  if (key === "document-types")
+    router.get(`/${key}`, requireAuth, asyncRoute(controller.documentTypes));
+  else router.get(`/${key}`, asyncRoute(controller.master(key)));
 }
 router.get("/area-units", asyncRoute(controller.areaUnits));
 router.get("/amenities", asyncRoute(controller.amenities));

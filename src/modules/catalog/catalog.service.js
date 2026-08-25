@@ -2,13 +2,20 @@ import { HttpError } from "../../shared/http.js";
 import * as repository from "./catalog.repository.js";
 
 export const listMaster = repository.listMaster;
+export const documentTypes = repository.listDocumentTypes;
 export const areaUnits = repository.listAreaUnits;
 export const amenities = repository.listAmenities;
-export const parcelConfig = async stateCode => ({
-  stateCode,
-  supportedIdentifiers: await repository.listParcelConfig(stateCode),
-  notes: null
-});
+export const parcelConfig = async stateCode => {
+  const [supportedIdentifiers, configuration] = await Promise.all([
+    repository.listParcelConfig(stateCode),
+    repository.parcelConfiguration(stateCode)
+  ]);
+  return {
+    stateCode,
+    supportedIdentifiers,
+    notes: configuration?.notes || null
+  };
+};
 export const searchLocations = repository.searchLocations;
 export const pincodeLocations = repository.locationsForPincode;
 export const states = repository.listStates;

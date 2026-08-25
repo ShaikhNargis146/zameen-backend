@@ -491,13 +491,6 @@ CREATE TABLE marketplace.recently_viewed (
 );
 CREATE INDEX idx_marketplace_recently_viewed_user ON marketplace.recently_viewed(user_id, viewed_at DESC);
 
-CREATE TABLE marketplace.recently_viewed (
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
-  listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
-  viewed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
-);
-CREATE INDEX idx_marketplace_recently_viewed_user ON marketplace.recently_viewed(user_id, viewed_at DESC);
-
 CREATE TABLE marketplace.listing_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
   user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL, session_id varchar(255),
