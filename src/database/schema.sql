@@ -482,6 +482,14 @@ CREATE TABLE marketplace.favorites (
   created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
 );
 CREATE INDEX idx_marketplace_favorites_listing ON marketplace.favorites(listing_id, created_at DESC);
+CREATE INDEX idx_marketplace_favorites_user ON marketplace.favorites(user_id, created_at DESC);
+
+CREATE TABLE marketplace.recently_viewed (
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
+  viewed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, listing_id)
+);
+CREATE INDEX idx_marketplace_recently_viewed_user ON marketplace.recently_viewed(user_id, viewed_at DESC);
 
 CREATE TABLE marketplace.recently_viewed (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
@@ -513,6 +521,7 @@ CREATE TABLE marketplace.buyer_requirements (
   CONSTRAINT chk_buyer_requirement_budget_range CHECK (max_budget_minor IS NULL OR min_budget_minor IS NULL OR max_budget_minor >= min_budget_minor)
 );
 CREATE INDEX idx_marketplace_buyer_requirements_user ON marketplace.buyer_requirements(user_id, status);
+CREATE INDEX idx_marketplace_buyer_requirements_user_created ON marketplace.buyer_requirements(user_id, created_at DESC);
 
 CREATE TABLE marketplace.enquiries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
@@ -535,8 +544,9 @@ CREATE INDEX idx_marketplace_enquiry_notes_enquiry ON marketplace.enquiry_notes(
 CREATE TABLE marketplace.site_visits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
   buyer_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  requested_at timestamptz NOT NULL DEFAULT now(), preferred_date date, preferred_time_slot varchar(50), scheduled_at timestamptz,
-  visitor_count smallint NOT NULL DEFAULT 1 CHECK (visitor_count BETWEEN 1 AND 20),
+  preferred_date date NOT NULL, preferred_time_slot varchar(20) NOT NULL CHECK (preferred_time_slot IN ('MORNING','AFTERNOON','EVENING')),
+  visitor_count integer NOT NULL DEFAULT 1 CHECK (visitor_count BETWEEN 1 AND 20),
+  requested_at timestamptz NOT NULL DEFAULT now(), scheduled_at timestamptz,
   status varchar(30) NOT NULL DEFAULT 'REQUESTED' CHECK (status IN ('REQUESTED','CONFIRMED','RESCHEDULED','COMPLETED','CANCELLED')),
   seller_note text, buyer_note text, reschedule_note text,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
@@ -625,17 +635,15 @@ CREATE TABLE commerce.service_requests (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, property_id uuid REFERENCES land.properties(id) ON DELETE RESTRICT,
   listing_id uuid REFERENCES marketplace.listings(id) ON DELETE RESTRICT, order_id uuid REFERENCES commerce.orders(id) ON DELETE RESTRICT,
   status varchar(30) NOT NULL DEFAULT 'REQUESTED' CHECK (status IN ('REQUESTED','PAYMENT_PENDING','IN_PROGRESS','DOCUMENTS_REQUIRED','COMPLETED','CANCELLED')),
-  assigned_to_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  contact_phone varchar(20), contact_email citext,
-  customer_notes text, internal_notes text, completed_report_storage_key text, completed_report_summary text,
+  assigned_to_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL, customer_notes text, internal_notes text,
+  contact_phone varchar(20), contact_email citext, completed_report_storage_key text, report_summary text,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz
 );
 CREATE INDEX idx_commerce_service_requests_user ON commerce.service_requests(user_id, created_at DESC);
 CREATE INDEX idx_commerce_service_requests_queue ON commerce.service_requests(status, assigned_to_user_id, created_at);
 CREATE TABLE commerce.service_request_files (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), service_request_id uuid NOT NULL REFERENCES commerce.service_requests(id) ON DELETE RESTRICT,
-  storage_key text NOT NULL, file_name varchar(255) NOT NULL, mime_type varchar(100),
-  file_size_bytes bigint CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0),
+  storage_key text NOT NULL, file_name varchar(255) NOT NULL, mime_type varchar(100) NOT NULL, file_size_bytes bigint NOT NULL CHECK (file_size_bytes > 0),
   uploaded_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -686,7 +694,7 @@ CREATE TABLE content.investment_opportunities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title varchar(500) NOT NULL, location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT,
   property_id uuid REFERENCES land.properties(id) ON DELETE RESTRICT, investment_type varchar(50) NOT NULL,
   minimum_investment_minor bigint CHECK (minimum_investment_minor IS NULL OR minimum_investment_minor >= 0), description text,
-  status varchar(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','CLOSED')),
+  status varchar(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PUBLISHED','CLOSED')), published_at timestamptz,
   created_by_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE content.investment_interests (
@@ -700,10 +708,10 @@ CREATE TABLE content.investment_interests (
 CREATE TABLE content.ads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(255) NOT NULL,
   placement varchar(50) NOT NULL CHECK (placement IN ('HOME_TOP','SEARCH_TOP','PROPERTY_SIDEBAR','CONTENT')),
-  image_storage_key text NOT NULL, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz,
-  status varchar(20) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','SCHEDULED','ACTIVE','PAUSED','ENDED')),
+  image_storage_key text NOT NULL, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'INACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SCHEDULED','EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT chk_content_ads_dates CHECK (ends_at IS NULL OR ends_at > starts_at)
+  CONSTRAINT chk_content_ads_dates CHECK (ends_at > starts_at)
 );
 CREATE INDEX idx_content_ads_active ON content.ads(placement, starts_at, ends_at) WHERE status = 'ACTIVE';
 

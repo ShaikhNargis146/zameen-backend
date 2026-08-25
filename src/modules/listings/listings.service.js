@@ -200,7 +200,7 @@ export const sellerListings = async input => {
   const cards = await listingCardsByIds(
     rows.map(row => row.id),
     input.userId,
-    true
+    { requirePublished: false }
   );
   const cardsById = new Map(cards.map(card => [card.listingId, card]));
   return {
@@ -360,7 +360,7 @@ export const adminListings = async input => {
   const cards = await listingCardsByIds(
     rows.map(row => row.id),
     null,
-    true
+    { requirePublished: false }
   );
   const cardsById = new Map(cards.map(card => [card.listingId, card]));
   return {
