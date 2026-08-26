@@ -3095,7 +3095,7 @@ Method
 	/ai/conversations/{conversationId}/messages
 	Conversation owner
 	AiMessageInput
-	AiMessage
+	SSE: AiMessageDelta + AiMessage
 	GET
 	/ai/conversations/{conversationId}
 	Conversation owner
@@ -3107,6 +3107,20 @@ Method
 	AiListingGenerateInput
 	AiListingGenerateResult
 	
+
+AI chat streaming contract
+
+POST /api/v1/ai/conversations/{conversationId}/messages returns `200 text/event-stream`.
+The request body and `X-AI-Conversation-Token` guest authorization remain unchanged.
+The UI must use `fetch` and read the response stream; EventSource cannot make this POST request.
+Each SSE event has JSON in `data` and is one of:
+
+- `message.delta` — `{ "delta": "partial assistant text" }`; append in order to the in-progress assistant bubble.
+- `message.completed` — `{ "message": AiMessage }`; replace/finalize the bubble with this persisted record and its safe sources.
+- `error` — `{ "error": { "code": "...", "message": "..." } }`; show the error and do not treat the partial text as a saved answer.
+
+The connection closes after `message.completed` or `error`. The endpoint does not return the
+standard `{ success, data, meta }` envelope because it is an event stream.
 
 AiSearchInput
 Field
@@ -3318,6 +3332,16 @@ Field
 
 	Created.
 	
+
+AiMessageDelta
+Field
+	Type
+	Required
+	Description
+delta
+	string
+	Yes
+	Assistant text fragment for a `message.delta` SSE event only. It is not stored.
 
 AiListingGenerateInput
 Field

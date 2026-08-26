@@ -141,7 +141,7 @@ validation files:
 * documented HTTP contracts
 * queues
 * scheduled jobs
-* WebSockets/SSE if needed later
+* SSE for streamed AI chat replies; WebSockets if a future feature needs two-way realtime events
 * easier to keep two developers from mixing business logic
 
 Architecture:

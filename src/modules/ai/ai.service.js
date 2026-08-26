@@ -138,7 +138,7 @@ export const createConversation = async ({ actorId, input }) => {
     ...(guestAccessToken ? { guestAccessToken } : {})
   };
 };
-export const addMessage = async ({
+const messageContext = async ({
   conversationId,
   actorId,
   guestToken,
@@ -176,10 +176,8 @@ export const addMessage = async ({
       query: input.content
     })
   ]);
-  const answer = await repository.addMessage({
-    conversationId,
-    role: "ASSISTANT",
-    content: await provider.conversationReply({
+  return {
+    providerInput: {
       language: input.language,
       listing,
       catalog,
@@ -194,7 +192,7 @@ export const addMessage = async ({
         role: item.role,
         content: item.content
       }))
-    }),
+    },
     metadata: {
       sources: [
         ...(listing
@@ -215,9 +213,40 @@ export const addMessage = async ({
         }))
       ]
     }
-  });
-  if (!answer.ok) throw answer.error;
-  return messageResponse(answer.data);
+  };
+};
+
+export const streamMessage = async ({ signal, ...params }) => {
+  const context = await messageContext(params);
+  return {
+    async *[Symbol.asyncIterator]() {
+      let content = "";
+      for await (const delta of provider.streamConversationReply({
+        ...context.providerInput,
+        signal
+      })) {
+        content += delta;
+        yield { type: "delta", delta };
+      }
+      // Keep the persisted message byte-for-byte aligned with rendered deltas,
+      // except for inconsequential leading/trailing whitespace.
+      const response = content.trim();
+      if (!response)
+        throw new HttpError(
+          502,
+          "AI_PROVIDER_INVALID_RESPONSE",
+          "AI service returned an unusable response."
+        );
+      const answer = await repository.addMessage({
+        conversationId: params.conversationId,
+        role: "ASSISTANT",
+        content: response,
+        metadata: context.metadata
+      });
+      if (!answer.ok) throw answer.error;
+      yield { type: "completed", message: messageResponse(answer.data) };
+    }
+  };
 };
 export const getConversation = async ({
   conversationId,

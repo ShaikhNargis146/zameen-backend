@@ -90,7 +90,11 @@ resolves every extracted filter against Zameens master data and then uses the
 normal discovery service; the model never queries the database or decides
 authorization. An anonymous AI conversation returns a `guestAccessToken`;
 clients must send it as `X-AI-Conversation-Token` on later message/detail
-requests. Do not put that token in a URL or log it.
+requests. Do not put that token in a URL or log it. Chat replies are streamed
+from the existing `POST /ai/conversations/:conversationId/messages` endpoint as
+SSE: `message.delta` events are transient UI text and `message.completed`
+contains the persisted `AiMessage`; an SSE `error` is not a saved answer. The
+full event contract is in `Zameens_Phase1_UI_API_Integration_Specification.txt`.
 
 AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
 API process so it receives the changed environment. `OPENAI_MODEL`
@@ -105,7 +109,8 @@ the user to a qualified professional.
 
 ## API contract
 
-All endpoints are under `/api/v1`.
+All endpoints are under `/api/v1`. JSON endpoints use the envelope below; the
+documented AI chat message endpoint is the intentional SSE exception.
 
 ```json
 { "success": true, "data": {}, "meta": {} }

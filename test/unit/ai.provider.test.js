@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   normalizeListingDraft,
-  providerErrorMetadata
+  providerErrorMetadata,
+  streamedTextDelta
 } from "../../src/modules/ai/ai.provider.js";
 
 test("listing drafts are normalized to the UI contract limits", () => {
@@ -42,5 +43,20 @@ test("provider diagnostics exclude provider messages and sanitize log fields", (
       type: "invalid_request_error",
       requestId: "req_123"
     }
+  );
+});
+
+test("only supported OpenAI text events become chat stream deltas", () => {
+  assert.equal(
+    streamedTextDelta({ type: "response.output_text.delta", delta: "Hello" }),
+    "Hello"
+  );
+  assert.equal(
+    streamedTextDelta({ type: "response.refusal.delta", delta: "Sorry" }),
+    "Sorry"
+  );
+  assert.equal(
+    streamedTextDelta({ type: "response.completed", delta: "ignored" }),
+    null
   );
 });

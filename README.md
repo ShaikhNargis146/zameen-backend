@@ -36,5 +36,7 @@ a controlled database runbook after that user has completed verification; the sc
 does not create a default administrator.
 
 The AI endpoints use the OpenAI Responses API. Set `OPENAI_API_KEY` as a deployment
-secret; `OPENAI_MODEL` defaults to `gpt-5-mini`. Without the key, AI requests return
-`AI_PROVIDER_UNCONFIGURED` rather than falling back to generated or rule-based data.
+secret; `OPENAI_MODEL` defaults to `gpt-5-mini`. AI conversation messages stream as
+SSE from the existing POST message endpoint; search and listing drafts remain JSON.
+Without the key, AI requests return `AI_PROVIDER_UNCONFIGURED` rather than falling
+back to generated or rule-based data.
