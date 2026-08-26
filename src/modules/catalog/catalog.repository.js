@@ -1,12 +1,6 @@
 import { run } from "../../shared/db.js";
+import { masters } from "./catalog.constants.js";
 const locationFields = `l.id, l.name, l.type, l.parent_id AS "parentId", l.state_code AS "stateCode", CASE WHEN l.center IS NULL THEN NULL ELSE ST_Y(l.center::geometry) END AS latitude, CASE WHEN l.center IS NULL THEN NULL ELSE ST_X(l.center::geometry) END AS longitude, COALESCE((WITH RECURSIVE ancestors AS (SELECT id, parent_id, name, 0 AS depth FROM geo.locations WHERE id = l.id UNION ALL SELECT parent.id, parent.parent_id, parent.name, ancestors.depth + 1 FROM geo.locations parent JOIN ancestors ON ancestors.parent_id = parent.id) SELECT string_agg(name, ', ' ORDER BY depth DESC) FROM ancestors), l.name) AS "displayPath"`;
-
-const masters = Object.freeze({
-  "property-types": "land.property_types",
-  "land-use-types": "land.land_use_types",
-  "ownership-types": "land.ownership_types",
-  "document-types": "land.document_types"
-});
 
 export const listMaster = key =>
   run(
@@ -84,5 +78,3 @@ export const reverseGeocode = ({ latitude, longitude }) =>
     `SELECT ${locationFields} FROM geo.locations l WHERE l.is_active = true AND l.center IS NOT NULL ORDER BY l.center <-> ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography LIMIT 1`,
     [latitude, longitude]
   );
-
-export { masters };

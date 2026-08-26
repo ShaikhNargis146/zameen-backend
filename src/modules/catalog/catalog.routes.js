@@ -2,7 +2,7 @@ import { Router } from "express";
 import { asyncRoute } from "../../shared/http.js";
 import { requireAuth } from "../auth/auth.routes.js";
 import * as controller from "./catalog.controller.js";
-import { masters } from "./catalog.repository.js";
+import { masters } from "./catalog.constants.js";
 
 const router = Router();
 for (const key of Object.keys(masters)) {

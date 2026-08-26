@@ -465,8 +465,8 @@ Field
 	roleCode
 	string
 	Yes
-	SELLER/BROKER/DEVELOPER/CHANNEL_PARTNER/CORPORATE as allowed
-	Role/capability user wants to enable. Admin role cannot be self-assigned.
+	SELLER/BROKER/DEVELOPER/CORPORATE
+	Role/capability user wants to enable. CHANNEL_PARTNER is assigned only through the approved partner workflow; ADMIN cannot be self-assigned.
 	
 
 3.10 Amenity

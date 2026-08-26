@@ -318,7 +318,6 @@ property_types
 land_use_types
 ownership_types
 area_units
-road_types
 amenities
 document_types
 parcel_identifier_types
