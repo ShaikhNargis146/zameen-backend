@@ -34,3 +34,7 @@ an SMS/email provider for OTP delivery. OTP delivery is deliberately disabled in
 production until a provider is configured. Provision the first administrator through
 a controlled database runbook after that user has completed verification; the schema
 does not create a default administrator.
+
+The AI endpoints use the OpenAI Responses API. Set `OPENAI_API_KEY` as a deployment
+secret; `OPENAI_MODEL` defaults to `gpt-5-mini`. Without the key, AI requests return
+`AI_PROVIDER_UNCONFIGURED` rather than falling back to generated or rule-based data.

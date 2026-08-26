@@ -84,11 +84,20 @@ Every new Developer 1 module must use the same five-layer pattern from its
 first endpoint; do not add compatibility route files or bypass a repository.
 
 Discovery owns listing search, map pins, similarity and comparison. The `ai`
-module owns the thin Phase 1 layer: rule-based natural-language filter
-extraction, grounded conversation records, and listing-copy drafts. An
-anonymous AI conversation returns a `guestAccessToken`; clients must send it
-as `X-AI-Conversation-Token` on later message/detail requests. Do not put that
-token in a URL or log it.
+module uses the OpenAI Responses API for structured natural-language filter
+extraction, grounded conversation replies, and listing-copy drafts. The service
+resolves every extracted filter against Zameens master data and then uses the
+normal discovery service; the model never queries the database or decides
+authorization. An anonymous AI conversation returns a `guestAccessToken`;
+clients must send it as `X-AI-Conversation-Token` on later message/detail
+requests. Do not put that token in a URL or log it.
+
+AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret. `OPENAI_MODEL`
+defaults to `gpt-5-mini` and may be changed per environment. Model responses use
+`store: false`; requests are rate-limited and provider failures return
+`AI_PROVIDER_UNCONFIGURED` or `AI_PROVIDER_UNAVAILABLE` without exposing model
+or provider details. Only published listing and content excerpts are supplied
+as conversation context; do not add private property documents or account data.
 
 ## API contract
 
@@ -114,7 +123,7 @@ unless an API-contract change is explicitly approved.
 | Listings | `/properties/:propertyId/listings`, `/listings`, `/seller/listings`, `/admin/listings` | draft, review, publishing lifecycle, public detail |
 | Discovery | `/search`, `/listings/:listingId/similar`, `/listings/compare` | listing search, suggestions, map pins, similarity, comparison |
 | Verification | `/admin/verifications` | verification review queue and admin decisions |
-| AI | `/ai` | Phase 1 rule-based search parsing, grounded conversation records, and listing-copy drafts. It is not connected to an LLM provider yet. |
+| AI | `/ai` | OpenAI-backed structured search parsing, grounded conversation records, and listing-copy drafts. |
 
 ## Authentication and authorization
 
