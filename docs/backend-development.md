@@ -22,8 +22,8 @@ TypeScript, or another server framework without an approved migration plan.
    local-development fallback only; never use it for staging or production.
 2. Create a new PostgreSQL database with privileges for `pgcrypto`, `citext`,
    `postgis`, and `pg_trgm`.
-3. For a new database, run `npm run db:schema` once. For an existing database,
-   run `npm run db:migrate`.
+3. During initial development, recreate an existing development database and run
+   `npm run db:schema` once.
 4. Run `npm start`, then call `GET /api/v1/status`.
 
 `npm run db:schema` is a clean-install command. It refuses to run when
@@ -38,7 +38,7 @@ boot. Run the appropriate database command as an explicit deployment step:
 # Brand-new database only
 npm run db:schema
 
-# Existing canonical database: apply forward-only migrations
+# Future shared/staging database only: apply forward-only migrations
 npm run db:migrate
 
 # Then start the API
@@ -162,9 +162,11 @@ For every database change:
 3. Test it on a fresh database and staging before production.
 4. Update `src/database/schema.sql` so a new installation has the final state.
 
-`npm run db:migrate` applies every unapplied, forward-only SQL file in
-`migrations/` and records it in `ops.schema_migrations`. Never edit or delete a
-migration that has been applied to a shared environment.
+Initial development has no migrations: `src/database/schema.sql` is the single
+database baseline. Once a shared/staging environment exists, `npm run db:migrate`
+will apply every forward-only SQL file in `migrations/` and record it in
+`ops.schema_migrations`. Never edit or delete a migration that has been applied
+to a shared environment.
 
 ## Media and document uploads
 
