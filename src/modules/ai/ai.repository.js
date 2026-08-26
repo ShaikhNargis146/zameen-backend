@@ -40,7 +40,7 @@ export const messages = conversationId =>
 export const listingContext = id =>
   run(
     "oneOrNone",
-    `SELECT p.id AS "propertyId", pt.name AS "propertyType", d.area_value AS "areaValue", au.name AS "areaUnit",
+    `SELECT p.id AS "propertyId", pt.id AS "propertyTypeId", pt.name AS "propertyType", d.area_value AS "areaValue", au.name AS "areaUnit",
        loc.id AS "locationId", loc.name AS "locationName", l.price_amount_minor AS "priceAmountMinor"
      FROM marketplace.listings l JOIN land.properties p ON p.id = l.property_id
      JOIN land.property_types pt ON pt.id = p.property_type_id
@@ -102,7 +102,7 @@ export const resolveSearchReferences = ({
     ]
   );
 
-export const publishedContentContext = ({ language, locationId }) =>
+export const publishedContentContext = ({ language, locationId, query }) =>
   run(
     "any",
     `SELECT ci.id, ct.slug, ct.title, left(COALESCE(ct.summary, ct.body, ''), 750) AS summary
@@ -110,9 +110,54 @@ export const publishedContentContext = ({ language, locationId }) =>
      JOIN content.content_translations ct ON ct.content_id = ci.id AND ct.language_code = $1
      WHERE ci.deleted_at IS NULL AND ci.status = 'PUBLISHED'
        AND ($2::uuid IS NULL OR ci.location_id IS NULL OR ci.location_id = $2)
-     ORDER BY CASE WHEN ci.location_id = $2::uuid THEN 0 ELSE 1 END, ci.published_at DESC NULLS LAST, ci.created_at DESC
+     ORDER BY
+       CASE WHEN $3::text IS NOT NULL AND to_tsvector('simple', ct.title || ' ' || coalesce(ct.summary, '') || ' ' || coalesce(ct.body, '')) @@ plainto_tsquery('simple', $3) THEN 0 ELSE 1 END,
+       ts_rank(to_tsvector('simple', ct.title || ' ' || coalesce(ct.summary, '') || ' ' || coalesce(ct.body, '')), plainto_tsquery('simple', coalesce($3, ''))) DESC,
+       CASE WHEN ci.location_id = $2::uuid THEN 0 ELSE 1 END,
+       ci.published_at DESC NULLS LAST, ci.created_at DESC
      LIMIT 3`,
-    [language, locationId]
+    [language, locationId, query || null]
+  );
+
+export const marketTrendContext = ({ locationId, propertyTypeId }) =>
+  run(
+    "any",
+    `SELECT mts.id, mts.metric, mts.unit, loc.name AS "locationName", pt.name AS "propertyType",
+       mts.source_name AS "sourceName", mts.source_url AS "sourceUrl",
+       COALESCE((
+         SELECT json_agg(json_build_object('periodDate', point.period_date, 'value', point.value) ORDER BY point.period_date)
+         FROM (
+           SELECT period_date, value FROM content.market_trend_points
+           WHERE series_id = mts.id ORDER BY period_date DESC LIMIT 6
+         ) point
+       ), '[]'::json) AS points
+     FROM content.market_trend_series mts
+     JOIN geo.locations loc ON loc.id = mts.location_id
+     LEFT JOIN land.property_types pt ON pt.id = mts.property_type_id
+     WHERE ($1::uuid IS NOT NULL AND mts.location_id = $1)
+       AND ($2::uuid IS NULL OR mts.property_type_id IS NULL OR mts.property_type_id = $2)
+     ORDER BY CASE WHEN mts.property_type_id = $2::uuid THEN 0 ELSE 1 END, mts.updated_at DESC
+     LIMIT 3`,
+    [locationId, propertyTypeId]
+  );
+
+export const publishedInvestmentContext = ({ locationId, propertyId, query }) =>
+  run(
+    "any",
+    `SELECT io.id, io.title, io.investment_type AS "investmentType",
+       io.minimum_investment_minor AS "minimumInvestmentMinor",
+       left(COALESCE(io.description, ''), 750) AS description,
+       loc.name AS "locationName", io.published_at AS "publishedAt"
+     FROM content.investment_opportunities io
+     LEFT JOIN geo.locations loc ON loc.id = io.location_id
+     WHERE io.status = 'PUBLISHED'
+       AND ($1::uuid IS NULL OR io.location_id IS NULL OR io.location_id = $1 OR io.property_id = $2::uuid)
+     ORDER BY
+       CASE WHEN $3::text IS NOT NULL AND to_tsvector('simple', io.title || ' ' || coalesce(io.description, '')) @@ plainto_tsquery('simple', $3) THEN 0 ELSE 1 END,
+       ts_rank(to_tsvector('simple', io.title || ' ' || coalesce(io.description, '')), plainto_tsquery('simple', coalesce($3, ''))) DESC,
+       io.published_at DESC NULLS LAST, io.created_at DESC
+     LIMIT 3`,
+    [locationId, propertyId, query || null]
   );
 export const ownedPropertyContext = (propertyId, userId) =>
   run(

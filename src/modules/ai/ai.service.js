@@ -158,22 +158,38 @@ export const addMessage = async ({
   const listing = conversation.listingId
     ? await repository.listingContext(conversation.listingId)
     : null;
-  const messages = await repository.messages(conversationId);
-  const content = await repository.publishedContentContext({
-    language: input.language,
-    locationId: listing?.locationId || null
-  });
+  const [messages, catalog, content, trends, investments] = await Promise.all([
+    repository.messages(conversationId),
+    repository.searchCatalog(),
+    repository.publishedContentContext({
+      language: input.language,
+      locationId: listing?.locationId || null,
+      query: input.content
+    }),
+    repository.marketTrendContext({
+      locationId: listing?.locationId || null,
+      propertyTypeId: listing?.propertyTypeId || null
+    }),
+    repository.publishedInvestmentContext({
+      locationId: listing?.locationId || null,
+      propertyId: listing?.propertyId || null,
+      query: input.content
+    })
+  ]);
   const answer = await repository.addMessage({
     conversationId,
     role: "ASSISTANT",
     content: await provider.conversationReply({
       language: input.language,
       listing,
+      catalog,
       content: content.map(item => ({
         id: item.id,
         title: item.title,
         summary: item.summary
       })),
+      trends,
+      investments,
       messages: messages.slice(-20).map(item => ({
         role: item.role,
         content: item.content
@@ -188,6 +204,14 @@ export const addMessage = async ({
           type: "CONTENT",
           contentId: item.id,
           slug: item.slug
+        })),
+        ...trends.map(item => ({
+          type: "MARKET_TREND",
+          trendSeriesId: item.id
+        })),
+        ...investments.map(item => ({
+          type: "INVESTMENT_OPPORTUNITY",
+          opportunityId: item.id
         }))
       ]
     }

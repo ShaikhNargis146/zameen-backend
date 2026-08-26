@@ -96,8 +96,11 @@ AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret. `OPENAI_MODE
 defaults to `gpt-5-mini` and may be changed per environment. Model responses use
 `store: false`; requests are rate-limited and provider failures return
 `AI_PROVIDER_UNCONFIGURED` or `AI_PROVIDER_UNAVAILABLE` without exposing model
-or provider details. Only published listing and content excerpts are supplied
-as conversation context; do not add private property documents or account data.
+or provider details. The assistant can answer property, land/area, market-trend
+and published investment-opportunity questions from published listing, master,
+content and trend data. Do not add private property documents or account data;
+financial, legal and valuation guidance must remain clearly general and direct
+the user to a qualified professional.
 
 ## API contract
 
