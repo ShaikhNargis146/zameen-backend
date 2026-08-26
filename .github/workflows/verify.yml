@@ -1,0 +1,45 @@
+name: Verify backend
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop, feature/discovery]
+
+jobs:
+  test-and-clean-install:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: zameens
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d zameens"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: development
+      PORT: 8080
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB: zameens
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: ci-only-jwt-secret
+      TOKEN_PEPPER: ci-only-token-pepper
+      OTP_DELIVERY_MODE: console
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run db:schema

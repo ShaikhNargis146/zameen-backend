@@ -133,7 +133,7 @@ unless an API-contract change is explicitly approved.
 - Access tokens are short-lived signed JWTs.
 - Refresh tokens are opaque, hashed, stored in `auth.refresh_sessions`, and rotated.
 - A user may have multiple roles through `auth.user_roles`.
-- A newly verified user receives both `BUYER` and `SELLER`. Business roles (`BROKER`, `DEVELOPER`, `CHANNEL_PARTNER`, `CORPORATE`) are granted through the administrator role-management workflow, never by the user.
+- A newly verified user receives both `BUYER` and `SELLER`. A user may enable the `BROKER`, `DEVELOPER` or `CORPORATE` capability through `/users/me/roles`, as defined in the UI contract. `CHANNEL_PARTNER` remains approval-workflow-only and `ADMIN` cannot be self-assigned. These capabilities are not verification badges; public verification is represented by the listing verification workflow.
 - `requireAuth` requires an active user; `requireAdmin` additionally requires `ADMIN`.
 - OTP codes are generated per challenge, hashed with the token pepper, and expire after the configured TTL. Configure `OTP_DELIVERY_MODE=webhook` and `OTP_PROVIDER_WEBHOOK_URL` for production. `OTP_DELIVERY_MODE=console` is opt-in and allowed only outside production.
 
