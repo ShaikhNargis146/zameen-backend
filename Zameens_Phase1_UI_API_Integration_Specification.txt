@@ -41,6 +41,10 @@ Header
 	Optional
 	en
 	Supported: en, hi, mr, gu, pa, te, ta.
+	X-AI-Conversation-Token
+	Guest AI conversation follow-up
+	Token returned by POST /ai/conversations
+	Required for a guest to read or add messages to that conversation.
 	X-Request-ID
 	Optional
 	uuid
@@ -409,6 +413,11 @@ Field
 	
 
 	Last successful login.
+	guestAccessToken
+	string|null
+	No
+	Guest only
+	Send as X-AI-Conversation-Token for subsequent guest message/read calls.
 	createdAt
 	datetime
 	Yes
