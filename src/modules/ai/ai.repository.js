@@ -6,7 +6,8 @@ export const createConversation = ({
   contextType,
   listingId,
   title,
-  guestTokenHash
+  guestTokenHash,
+  guestTokenExpiresAt
 }) =>
   pg.one(
     `INSERT INTO ai.conversations (user_id, context_type, listing_id, title, guest_token_hash, guest_token_expires_at)
