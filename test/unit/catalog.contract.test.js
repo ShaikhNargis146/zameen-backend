@@ -30,4 +30,8 @@ test("the schema supports state-scoped document types", async () => {
   );
   assert.match(schema, /uq_land_document_types_global/);
   assert.match(schema, /uq_land_document_types_state/);
+  assert.match(
+    schema,
+    /ON CONFLICT \(code\) WHERE state_location_id IS NULL DO NOTHING/
+  );
 });
