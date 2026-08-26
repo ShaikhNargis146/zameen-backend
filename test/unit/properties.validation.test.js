@@ -35,6 +35,17 @@ test("land details accept the compact facing values from the UI contract", () =>
   );
 });
 
+test("land details accept zero-width normalized measurements", () => {
+  const result = landDetails({
+    areaValue: 1,
+    areaUnitId: "11111111-1111-1111-1111-111111111111",
+    frontageM: 0,
+    roadWidthM: 0
+  });
+  assert.equal(result.frontageM, 0);
+  assert.equal(result.roadWidthM, 0);
+});
+
 test("verification requests accept an optional note and reject malformed check types", () => {
   assert.deepEqual(verificationRequest({ note: "Please verify access road." }), {
     checkTypes: [

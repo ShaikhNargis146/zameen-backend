@@ -12,6 +12,17 @@ ALTER TABLE account.organization_members
 ALTER TABLE land.document_types
   ADD COLUMN IF NOT EXISTS state_location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT;
 
+ALTER TABLE land.document_types
+  DROP CONSTRAINT IF EXISTS document_types_code_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_land_document_types_global
+  ON land.document_types(code)
+  WHERE state_location_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_land_document_types_state
+  ON land.document_types(state_location_id, code)
+  WHERE state_location_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_land_document_types_state
   ON land.document_types(state_location_id, sort_order)
   WHERE is_active = true;

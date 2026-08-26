@@ -247,12 +247,6 @@ CREATE TABLE land.area_units (
 );
 CREATE UNIQUE INDEX uq_land_area_units_global ON land.area_units(code) WHERE state_location_id IS NULL;
 CREATE UNIQUE INDEX uq_land_area_units_state ON land.area_units(state_location_id, code) WHERE state_location_id IS NOT NULL;
-CREATE TABLE land.road_types (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(50) NOT NULL UNIQUE,
-  name varchar(100) NOT NULL, is_active boolean NOT NULL DEFAULT true,
-  sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
-  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
-);
 CREATE TABLE land.amenities (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(50) NOT NULL UNIQUE,
   name varchar(100) NOT NULL, category varchar(50), is_active boolean NOT NULL DEFAULT true,
@@ -260,12 +254,14 @@ CREATE TABLE land.amenities (
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE land.document_types (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(100) NOT NULL UNIQUE,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(100) NOT NULL,
   name varchar(255) NOT NULL, is_active boolean NOT NULL DEFAULT true,
   state_location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT,
   sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX uq_land_document_types_global ON land.document_types(code) WHERE state_location_id IS NULL;
+CREATE UNIQUE INDEX uq_land_document_types_state ON land.document_types(state_location_id, code) WHERE state_location_id IS NOT NULL;
 CREATE INDEX idx_land_document_types_state ON land.document_types(state_location_id, sort_order) WHERE is_active = true;
 CREATE TABLE land.parcel_identifier_types (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -302,9 +298,6 @@ INSERT INTO land.area_units (code,name,sqft_multiplier) VALUES
  ('ACRE','Acre',43560), ('HECTARE','Hectare',107639.1042), ('GUNTHA','Guntha',1089),
  ('KANAL','Kanal',5445), ('CENT','Cent',435.6)
  ON CONFLICT DO NOTHING;
-INSERT INTO land.road_types (code,name,sort_order) VALUES
- ('TARRED','Tarred Road',10), ('CONCRETE','Concrete Road',20), ('GRAVEL','Gravel Road',30), ('DIRT','Dirt Road',40)
-ON CONFLICT (code) DO NOTHING;
 INSERT INTO land.amenities (code,name,category,sort_order) VALUES
  ('WATER','Water','UTILITIES',10), ('ELECTRICITY','Electricity','UTILITIES',20), ('BOREWELL','Borewell','UTILITIES',30),
  ('DRAINAGE','Drainage','UTILITIES',40), ('APPROACH_ROAD','Approach Road','ACCESS',50), ('STREET_LIGHT','Street Light','ACCESS',60), ('BOUNDARY_WALL','Boundary Wall','SECURITY',70)
@@ -340,8 +333,8 @@ CREATE TABLE land.property_land_details (
   length_value numeric(18,4) CHECK (length_value IS NULL OR length_value > 0),
   width_value numeric(18,4) CHECK (width_value IS NULL OR width_value > 0),
   dimension_unit varchar(20) CHECK (dimension_unit IS NULL OR dimension_unit IN ('FT','M')),
-  frontage_m numeric(18,4) CHECK (frontage_m IS NULL OR frontage_m > 0),
-  road_width_m numeric(18,4) CHECK (road_width_m IS NULL OR road_width_m > 0),
+  frontage_m numeric(18,4) CHECK (frontage_m IS NULL OR frontage_m >= 0),
+  road_width_m numeric(18,4) CHECK (road_width_m IS NULL OR road_width_m >= 0),
   road_type varchar(50) CHECK (road_type IS NULL OR road_type IN ('PUCCA','KUTCHA','HIGHWAY','OTHER')),
   facing varchar(2) CHECK (facing IS NULL OR facing IN ('N','NE','E','SE','S','SW','W','NW')),
   open_sides smallint CHECK (open_sides IS NULL OR open_sides BETWEEN 0 AND 4),
@@ -844,7 +837,7 @@ BEGIN
   FOREACH item IN ARRAY ARRAY[
     'auth.users','auth.roles','auth.user_verification_checks',
     'geo.locations','account.organizations','account.channel_partner_profiles',
-    'land.property_types','land.land_use_types','land.ownership_types','land.area_units','land.road_types','land.amenities','land.document_types','land.parcel_identifier_types','land.parcel_configurations','land.properties','land.property_land_details','land.property_parcel_identifiers','land.property_locations','land.property_verification_checks',
+    'land.property_types','land.land_use_types','land.ownership_types','land.area_units','land.amenities','land.document_types','land.parcel_identifier_types','land.parcel_configurations','land.properties','land.property_land_details','land.property_parcel_identifiers','land.property_locations','land.property_verification_checks',
     'marketplace.listings','marketplace.buyer_requirements','marketplace.enquiries','marketplace.site_visits',
     'commerce.products','commerce.plans','commerce.orders','commerce.payments','commerce.payment_webhook_events','commerce.service_catalog','commerce.service_requests',
     'content.content_items','content.content_translations','content.market_trend_series','content.auctions','content.investment_opportunities','content.investment_interests','content.ads',

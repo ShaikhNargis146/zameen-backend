@@ -57,7 +57,6 @@
         { "name": "Property types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/property-types" } },
         { "name": "Land use types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/land-use-types" } },
         { "name": "Ownership types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/ownership-types" } },
-        { "name": "Road types", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/road-types" } },
         { "name": "Area units", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/area-units?stateCode=MH" } },
         { "name": "Amenities", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/amenities" } },
         { "name": "Document types", "request": { "method": "GET", "url": "{{baseUrl}}/document-types?stateCode=MH" } },

@@ -52,6 +52,16 @@ const nonNegative = (value, field) => {
     );
   return number;
 };
+const integerInRange = (value, field, min, max) => {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      `${field} must be an integer from ${min} to ${max}.`
+    );
+  return number;
+};
 
 export const createProperty = body => {
   if (!body.propertyTypeId)
@@ -125,16 +135,7 @@ export const landDetails = body => ({
   openSides:
     body.openSides === undefined || body.openSides === null
       ? null
-      : (() => {
-          const value = Number(body.openSides);
-          if (!Number.isInteger(value) || value < 0 || value > 4)
-            throw new HttpError(
-              400,
-              "VALIDATION_ERROR",
-              "openSides must be an integer from 0 to 4."
-            );
-          return value;
-        })(),
+      : integerInRange(body.openSides, "openSides", 0, 4),
   isCornerPlot: boolean(body.isCornerPlot, "isCornerPlot", false),
   hasBoundaryWall: boolean(body.hasBoundaryWall, "hasBoundaryWall"),
   terrain: optionalEnum(body.terrain, "terrain", terrains),
