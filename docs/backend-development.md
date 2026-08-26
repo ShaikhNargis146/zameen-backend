@@ -92,7 +92,8 @@ authorization. An anonymous AI conversation returns a `guestAccessToken`;
 clients must send it as `X-AI-Conversation-Token` on later message/detail
 requests. Do not put that token in a URL or log it.
 
-AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret. `OPENAI_MODEL`
+AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
+API process so it receives the changed environment. `OPENAI_MODEL`
 defaults to `gpt-5-mini` and may be changed per environment. Model responses use
 `store: false`; requests are rate-limited and provider failures return
 `AI_PROVIDER_UNCONFIGURED` or `AI_PROVIDER_UNAVAILABLE` without exposing model

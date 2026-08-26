@@ -13,6 +13,23 @@ const timeout = Number.isFinite(configuredTimeout)
   : 15000;
 const model = () => process.env.OPENAI_MODEL || defaultModel;
 
+const safeDiagnosticValue = value => {
+  if (value === undefined || value === null || value === "") return "none";
+  return String(value)
+    .replace(/[^a-zA-Z0-9_.-]/g, "_")
+    .slice(0, 100);
+};
+
+// Provider errors can contain a response body or an echoed request. Keep logs useful
+// for operations without ever writing those values, prompts, or credentials to disk.
+export const providerErrorMetadata = error => ({
+  name: safeDiagnosticValue(error?.name),
+  status: Number.isInteger(error?.status) ? error.status : "none",
+  code: safeDiagnosticValue(error?.code),
+  type: safeDiagnosticValue(error?.type),
+  requestId: safeDiagnosticValue(error?.request_id || error?.requestID)
+});
+
 const client = () => {
   if (!process.env.OPENAI_API_KEY)
     throw new HttpError(
@@ -43,7 +60,13 @@ const request = async ({ instructions, input, text, maxOutputTokens }) => {
     return output;
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    logger.warn(`OpenAI request failed: ${error?.name || "unknown error"}`);
+    const diagnostic = providerErrorMetadata(error);
+    logger.warn(
+      "OpenAI request failed " +
+        `[name=${diagnostic.name}, status=${diagnostic.status}, ` +
+        `code=${diagnostic.code}, type=${diagnostic.type}, ` +
+        `requestId=${diagnostic.requestId}]`
+    );
     throw new HttpError(
       503,
       "AI_PROVIDER_UNAVAILABLE",
