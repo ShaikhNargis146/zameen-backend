@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
+import { paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { hashWithPepper, safeEqualHex } from "../../utils/crypto.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import * as discovery from "../discovery/discovery.service.js";
@@ -18,7 +19,8 @@ const publicConversation = conversation => ({
   contextType: conversation.contextType,
   listingId: conversation.listingId,
   title: conversation.title,
-  createdAt: conversation.createdAt
+  createdAt: conversation.createdAt,
+  updatedAt: conversation.updatedAt
 });
 const messageResponse = message => ({
   ...message,
@@ -136,6 +138,24 @@ export const createConversation = async ({ actorId, input }) => {
   return {
     ...publicConversation(result.data),
     ...(guestAccessToken ? { guestAccessToken } : {})
+  };
+};
+export const listConversations = async ({ actorId, pagination }) => {
+  const { page, limit, offset } = pagination;
+  const counted = await repository.conversationsForUser(actorId, pagination);
+  const { data: rows, total } = splitCountedRows(counted);
+  return {
+    data: rows.map(row => ({
+      ...publicConversation(row),
+      lastMessage: row.lastMessageContent
+        ? {
+            role: row.lastMessageRole,
+            content: row.lastMessageContent,
+            createdAt: row.lastMessageAt
+          }
+        : null
+    })),
+    meta: paginationMeta({ page, limit, total })
   };
 };
 const messageContext = async ({

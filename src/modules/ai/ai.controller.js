@@ -39,6 +39,13 @@ export const createConversation = async (req, res) =>
       input: validation.conversation(req.body || {})
     })
   );
+export const listConversations = async (req, res) => {
+  const { data, meta } = await service.listConversations({
+    actorId: req.actor.id,
+    pagination: validation.conversationList(req.query || {})
+  });
+  ok(res, data, meta);
+};
 export const addMessage = async (req, res) => {
   const abortController = new AbortController();
   const stream = await service.streamMessage({

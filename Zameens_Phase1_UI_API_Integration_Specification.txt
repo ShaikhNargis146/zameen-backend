@@ -3091,6 +3091,11 @@ Method
 	Public/auth
 	CreateAiConversation
 	AiConversation
+	GET
+	/ai/conversations
+	Authenticated user
+	page, limit query
+	AiConversation[] + PaginationMeta
 	POST
 	/ai/conversations/{conversationId}/messages
 	Conversation owner
@@ -3251,7 +3256,18 @@ Field
 	
 
 	Created.
-	
+
+	updatedAt
+	datetime
+	Yes
+	Read-only
+	Most recent activity; used to order the signed-in user's chat history.
+	lastMessage
+	object|null
+	No
+	History list only
+	Most recent message preview: role, content, createdAt.
+
 
 AiConversationDetail
 Field
@@ -3331,7 +3347,6 @@ Field
 	
 
 	Created.
-	
 
 AiMessageDelta
 Field

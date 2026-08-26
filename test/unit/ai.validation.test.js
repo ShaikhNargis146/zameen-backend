@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   conversation,
+  conversationList,
   listingGenerate,
   search
 } from "../../src/modules/ai/ai.validation.js";
@@ -23,6 +24,14 @@ test("property AI conversations require a listing context", () => {
     contextType: "PROPERTY",
     listingId,
     initialQuery: null
+  });
+});
+
+test("AI conversation history uses bounded pagination", () => {
+  assert.deepEqual(conversationList({ page: "2", limit: "100" }), {
+    page: 2,
+    limit: 50,
+    offset: 50
   });
 });
 

@@ -95,6 +95,9 @@ from the existing `POST /ai/conversations/:conversationId/messages` endpoint as
 SSE: `message.delta` events are transient UI text and `message.completed`
 contains the persisted `AiMessage`; an SSE `error` is not a saved answer. The
 full event contract is in `Zameens_Phase1_UI_API_Integration_Specification.txt`.
+Signed-in users load their retained chat history through paginated `GET
+/ai/conversations`; anonymous conversations remain accessible only with their
+guest conversation token.
 
 AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
 API process so it receives the changed environment. `OPENAI_MODEL`

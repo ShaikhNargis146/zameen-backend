@@ -27,8 +27,18 @@ export const addMessage = ({
   metadata = null
 }) =>
   pg.one(
-    `INSERT INTO ai.messages (conversation_id, role, content, metadata) VALUES ($1,$2,$3,$4::jsonb)
-     RETURNING id, role, content, metadata, created_at AS "createdAt"`,
+    `WITH inserted AS (
+       INSERT INTO ai.messages (conversation_id, role, content, metadata)
+       VALUES ($1,$2,$3,$4::jsonb)
+       RETURNING id, conversation_id, role, content, metadata, created_at
+     ), touched AS (
+       UPDATE ai.conversations conversation
+       SET title = COALESCE(conversation.title, CASE WHEN $2 = 'USER' THEN left($3, 255) END),
+           updated_at = now()
+       FROM inserted
+       WHERE conversation.id = inserted.conversation_id
+     )
+     SELECT id, role, content, metadata, created_at AS "createdAt" FROM inserted`,
     [conversationId, role, content, metadata ? JSON.stringify(metadata) : null]
   );
 export const messages = conversationId =>
@@ -36,6 +46,25 @@ export const messages = conversationId =>
     "any",
     `SELECT id, role, content, metadata, created_at AS "createdAt" FROM ai.messages WHERE conversation_id = $1 ORDER BY created_at, id`,
     [conversationId]
+  );
+export const conversationsForUser = (userId, { limit, offset }) =>
+  run(
+    "any",
+    `SELECT ${conversationColumns}, count(*) OVER()::int AS total,
+       latest.role AS "lastMessageRole", latest.content AS "lastMessageContent",
+       latest.created_at AS "lastMessageAt"
+     FROM ai.conversations conversation
+     LEFT JOIN LATERAL (
+       SELECT role, content, created_at
+       FROM ai.messages
+       WHERE conversation_id = conversation.id
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1
+     ) latest ON true
+     WHERE conversation.user_id = $1
+     ORDER BY conversation.updated_at DESC, conversation.id DESC
+     LIMIT $2 OFFSET $3`,
+    [userId, limit, offset]
   );
 export const listingContext = id =>
   run(

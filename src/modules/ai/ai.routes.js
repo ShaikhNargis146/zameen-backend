@@ -16,6 +16,11 @@ router.post(
   optionalAuth,
   asyncRoute(controller.createConversation)
 );
+router.get(
+  "/ai/conversations",
+  requireAuth,
+  asyncRoute(controller.listConversations)
+);
 router.post(
   "/ai/conversations/:conversationId/messages",
   optionalAuth,
