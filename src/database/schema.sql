@@ -306,7 +306,7 @@ INSERT INTO land.document_types (code,name,sort_order) VALUES
  ('SALE_DEED','Sale Deed',10), ('SEVEN_TWELVE','7/12 Extract',20), ('PROPERTY_CARD','Property Card',30),
  ('MUTATION','Mutation',40), ('NA_ORDER','NA Order',50), ('TITLE_REPORT','Title Report',60),
  ('TAX_RECEIPT','Tax Receipt',70), ('SURVEY_PLAN','Survey Plan',80), ('LAYOUT_APPROVAL','Layout Approval',90), ('RERA','RERA',100), ('OTHER','Other',999)
- ON CONFLICT (code) WHERE state_location_id IS NULL DO NOTHING;
+ ON CONFLICT DO NOTHING;
 
 CREATE TABLE land.properties (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

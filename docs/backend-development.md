@@ -45,6 +45,38 @@ npm run db:migrate
 npm start
 ```
 
+### Loading the India location hierarchy
+
+The location hierarchy is operational data, not schema seed data. The
+canonical schema is created first; LGD data is then loaded explicitly. Do not
+put a national data dump in `schema.sql`, do not load it on application startup,
+and do not commit downloaded source workbooks or generated CSV files.
+
+Download the four LGD exports (states, districts, sub-districts and villages)
+into the ignored `locations_data/` directory, then run:
+
+```bash
+npm run locations:prepare
+npm run locations:check
+npm run locations:import
+```
+
+`locations:prepare` uses Python 3 with `openpyxl` to stream the LGD `.xlsx`
+workbooks into ignored CSV files. `locations:check` validates every hierarchy
+reference and makes no database change. `locations:import` repeats that
+preflight and writes only when given its explicit `--apply` flag. It is
+idempotent: LGD code-based reserved slugs preserve the import identity, and a
+new LGD download updates the matching names instead of duplicating locations.
+Install the one data-tool dependency with `python3 -m pip install openpyxl` if
+it is not already available on the machine that runs `locations:prepare`.
+
+The API contract uses two-letter state/UT codes such as `MH`; the loader maps
+the numeric LGD state code to that value and propagates it to every imported
+descendant, so `GET /locations/search?stateCode=MH` works. The LGD exports do
+not contain PIN-to-location relationships, city/locality curation, or map
+coordinates. Load those through separately verified India Post and geocoding
+data processes; do not infer them from village records.
+
 ## Source layout
 
 ```text

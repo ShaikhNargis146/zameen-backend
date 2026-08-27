@@ -12,6 +12,12 @@ pids
 *.pid
 *.seed
 pdf_worker
+.location-import
+__pycache__/
+
+# Downloaded source data must not be committed. The reproducible loader is in
+# scripts/ and its source is documented in docs/backend-development.md.
+locations_data
 
 # Dependency directory
 # Commenting this out is preferred by some people, see
