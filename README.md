@@ -12,8 +12,10 @@ and `ai` PostgreSQL schemas.
 For a new database, run `npm run db:schema` once. The SQL is a clean-install
 script; it must not be run on an existing database as a migration. Existing
 canonical databases created from the earlier baseline must run
-`npm run db:migrate` before this version is deployed. The migrations are
-forward-only and must never be edited after reaching a shared environment.
+`npm run db:migrate` before this version is deployed. During the current
+development phase this applies one idempotent canonical-upgrade script. Once a
+shared staging/production schema is frozen, migrations become forward-only and
+must never be rewritten.
 
 ## Implemented API modules
 

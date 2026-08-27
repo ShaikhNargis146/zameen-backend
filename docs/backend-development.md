@@ -232,12 +232,12 @@ For every database change:
 3. Test it on a fresh database and staging before production.
 4. Update `src/database/schema.sql` so a new installation has the final state.
 
-`src/database/schema.sql` is the clean-install baseline. The retained
-baseline-alignment migrations support existing canonical databases created from
-the earlier schema; run `npm run db:migrate` for those databases before deploying
-new application code. New databases use `npm run db:schema` first, then may run
-`npm run db:migrate` safely to record the current alignment migrations. Never
-edit or delete a migration that has been applied to a shared environment.
+`src/database/schema.sql` is the clean-install baseline. During the current
+development phase, the single retained upgrade migration safely aligns an
+existing canonical database and replaces the old development migration ledger
+entries. New databases use `npm run db:schema` first, then may run
+`npm run db:migrate` safely. Once a shared staging or production schema is
+frozen, never edit or delete a migration that has been applied there.
 
 ## Media and document uploads
 
