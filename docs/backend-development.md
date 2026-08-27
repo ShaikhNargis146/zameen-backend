@@ -238,6 +238,14 @@ contain metadata only. The client flow is: request `upload-url`, upload the
 file to the returned signed URL, then call `complete` with the returned storage
 key and metadata. Do not raise the global body limit to accommodate files.
 
+Configure `GCS_BUCKET` and an Application Default Credential that can sign
+URLs and write to that bucket. For local development use
+`GOOGLE_APPLICATION_CREDENTIALS` pointing to a service-account JSON file; do
+not commit that file. Restart the API after changing either variable because
+the storage client is created during process startup. The bucket must also
+allow the UI origin (for example `http://localhost:5173`) in its **bucket CORS
+policy**. API CORS settings do not control direct browser uploads to GCS.
+
 ## Testing and verification
 
 Run these checks before handing work to another developer:
