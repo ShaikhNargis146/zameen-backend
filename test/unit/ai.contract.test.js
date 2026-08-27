@@ -14,3 +14,12 @@ test("AI chat is authenticated and has no guest-token implementation", async () 
   assert.match(routes, /conversations\/:conversationId\/messages",\n  requireAuth/);
   assert.doesNotMatch(`${controller}${service}${repository}${schema}`, /guestToken|guest_token/i);
 });
+
+test("conversation history query qualifies columns from its latest-message join", async () => {
+  const repository = await readFile(
+    new URL("../../src/modules/ai/ai.repository.js", import.meta.url),
+    "utf8"
+  );
+  assert.match(repository, /conversation\.created_at AS "createdAt"/);
+  assert.match(repository, /ORDER BY conversation\.updated_at DESC/);
+});
