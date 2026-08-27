@@ -60,3 +60,27 @@ test("safe provider configuration errors remain actionable in production", () =>
     }
   });
 });
+
+test("safe storage availability errors remain actionable in production", () => {
+  const original = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  const res = response();
+  error.handler(
+    {
+      status: 503,
+      code: "STORAGE_UNAVAILABLE",
+      message: "File storage is temporarily unavailable."
+    },
+    {},
+    res
+  );
+  process.env.NODE_ENV = original;
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.body, {
+    success: false,
+    error: {
+      code: "STORAGE_UNAVAILABLE",
+      message: "File storage is temporarily unavailable."
+    }
+  });
+});

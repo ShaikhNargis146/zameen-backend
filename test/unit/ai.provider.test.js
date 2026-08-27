@@ -5,6 +5,7 @@ import {
   providerErrorMetadata,
   streamedTextDelta
 } from "../../src/modules/ai/ai.provider.js";
+import { storageErrorMetadata } from "../../src/utils/storage.js";
 
 test("listing drafts are normalized to the UI contract limits", () => {
   const result = normalizeListingDraft({
@@ -43,6 +44,17 @@ test("provider diagnostics exclude provider messages and sanitize log fields", (
       type: "invalid_request_error",
       requestId: "req_123"
     }
+  );
+});
+
+test("storage diagnostics exclude provider messages and sanitize log fields", () => {
+  assert.deepEqual(
+    storageErrorMetadata({
+      name: "FetchError",
+      code: "ECONNRESET",
+      message: "This must never be logged"
+    }),
+    { name: "FetchError", code: "ECONNRESET", status: "none" }
   );
 });
 

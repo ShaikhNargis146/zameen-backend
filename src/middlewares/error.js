@@ -5,7 +5,9 @@ import APIError from "../utils/APIError.js";
 const publicServiceErrorCodes = new Set([
   "OTP_PROVIDER_UNCONFIGURED",
   "AI_PROVIDER_UNCONFIGURED",
-  "AI_PROVIDER_UNAVAILABLE"
+  "AI_PROVIDER_UNAVAILABLE",
+  "STORAGE_UNCONFIGURED",
+  "STORAGE_UNAVAILABLE"
 ]);
 
 /**
