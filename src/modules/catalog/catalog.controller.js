@@ -3,6 +3,7 @@ import * as service from "./catalog.service.js";
 import {
   coordinates,
   locationSearch,
+  locationType,
   searchQuery,
   stateCode
 } from "./catalog.validation.js";
@@ -45,7 +46,7 @@ export const children = type => async (req, res) =>
         req.params.stateId ||
         req.params.districtId ||
         req.params.cityId,
-      type
+      type || locationType(req.query)
     )
   );
 export const cities = async (req, res) =>

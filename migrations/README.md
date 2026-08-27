@@ -1,8 +1,7 @@
 # Database migrations
 
-Initial development uses `src/database/schema.sql` as its single database baseline.
-There are intentionally no migrations yet.
+`src/database/schema.sql` is the clean-install database baseline. The numbered
+migrations bring an already-created canonical database forward safely.
 
-After the first shared/staging database is established, add one reviewed,
-forward-only SQL migration per schema change. Never rewrite or consolidate a
-migration that has reached a shared environment.
+Add one reviewed, forward-only SQL migration per schema change. Never rewrite
+or consolidate a migration that has reached a shared environment.

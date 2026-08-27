@@ -336,10 +336,34 @@ export const listDocuments = async propertyId =>
       documentResponse(item, true)
     )
   );
-export const getDocument = async ({ propertyId, documentId }) => {
+export const canReadDocument = ({ document, isOwner, isAdmin, hasGrant }) =>
+  isAdmin || isOwner || (document.visibility === "APPROVED_BUYERS" && hasGrant);
+export const getDocument = async ({ propertyId, documentId, actor }) => {
   const item = await repository.document(propertyId, documentId);
   if (!item)
     throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document was not found.");
+  const isAdmin = actor.roles?.includes("ADMIN") || false;
+  const isOwner = isAdmin
+    ? false
+    : Boolean(await repository.findOwned(propertyId, actor.id));
+  const hasGrant =
+    !isAdmin && !isOwner && item.visibility === "APPROVED_BUYERS"
+      ? Boolean(
+          await repository.hasActiveDocumentAccessGrant(documentId, actor.id)
+        )
+      : false;
+  if (!canReadDocument({ document: item, isOwner, isAdmin, hasGrant }))
+    throw new HttpError(
+      403,
+      "DOCUMENT_ACCESS_DENIED",
+      "You are not authorized to access this document."
+    );
+  if (isAdmin)
+    await repository.auditAdminDocumentRead({
+      actorId: actor.id,
+      documentId,
+      propertyId
+    });
   return documentResponse(item, true);
 };
 export const deleteDocument = async ({ propertyId, documentId }) => {

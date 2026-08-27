@@ -1705,7 +1705,10 @@ Field
 	Conditional
 	IMAGE/VIDEO/DRONE_VIDEO/SITE_PLAN
 	Required for media upload, omitted for document upload.
-	
+MIME policy: `IMAGE` accepts JPEG, PNG, and WebP; `VIDEO` and `DRONE_VIDEO`
+accept MP4 and WebM; `SITE_PLAN` accepts PDF, JPEG, PNG, and WebP. Property
+documents initially accept PDF, JPEG, and PNG. The API rejects every other
+MIME type before issuing an upload URL.
 
 UploadTicket
 Field
@@ -1993,7 +1996,10 @@ Field
 	Yes
 	Read-only
 	Upload time.
-	
+For `GET /properties/{propertyId}/documents/{documentId}`, “Authorized” means
+the property owner, an administrator (audited), or a user with an active,
+unrevoked, non-expired access grant when visibility is `APPROVED_BUYERS`.
+The signed `downloadUrl` is issued only after this authorization check.
 
 4.12 Listing Creation & Management
 Owner: Backend Dev 1   |   UI surfaces: Seller listing wizard, seller inventory

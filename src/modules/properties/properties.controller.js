@@ -166,8 +166,9 @@ export const document = async (req, res) =>
   ok(
     res,
     await service.getDocument({
-      propertyId: req.property.id,
-      documentId: req.params.documentId
+      propertyId: req.params.propertyId,
+      documentId: req.params.documentId,
+      actor: req.actor
     })
   );
 export const deleteDocument = async (req, res) => {

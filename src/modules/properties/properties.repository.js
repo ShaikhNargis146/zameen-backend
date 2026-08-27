@@ -291,6 +291,25 @@ export const document = (propertyId, documentId) =>
     `SELECT d.id, d.storage_key AS "storageKey", d.file_name AS "fileName", d.mime_type AS "mimeType", d.file_size_bytes AS "fileSizeBytes", d.visibility, d.verification_status AS "verificationStatus", d.created_at AS "createdAt", jsonb_build_object('id', dt.id, 'code', dt.code, 'name', dt.name, 'sortOrder', dt.sort_order) AS "documentType" FROM land.property_documents d JOIN land.document_types dt ON dt.id = d.document_type_id WHERE d.id = $1 AND d.property_id = $2 AND d.deleted_at IS NULL`,
     [documentId, propertyId]
   );
+export const hasActiveDocumentAccessGrant = (documentId, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT 1
+     FROM land.property_document_access_grants
+     WHERE property_document_id = $1
+       AND grantee_user_id = $2
+       AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > now())`,
+    [documentId, userId]
+  );
+export const auditAdminDocumentRead = ({ actorId, documentId, propertyId }) =>
+  run(
+    "none",
+    `INSERT INTO ops.audit_logs
+       (actor_user_id, action, entity_type, entity_id, after_data)
+     VALUES ($1,'DOCUMENT_ADMIN_READ','land.property_documents',$2,$3::jsonb)`,
+    [actorId, documentId, JSON.stringify({ propertyId })]
+  );
 export const createDocument = input =>
   run(
     "one",

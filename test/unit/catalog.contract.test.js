@@ -26,13 +26,17 @@ test("location search uses indexable name and alias candidate queries", async ()
 });
 
 test("hierarchy endpoints preserve LGD sub-district and village types as fallbacks", async () => {
-  const [repository, routes] = await Promise.all([
+  const [repository, routes, controller] = await Promise.all([
     readFile(
       new URL("../../src/modules/catalog/catalog.repository.js", import.meta.url),
       "utf8"
     ),
     readFile(
       new URL("../../src/modules/catalog/catalog.routes.js", import.meta.url),
+      "utf8"
+    ),
+    readFile(
+      new URL("../../src/modules/catalog/catalog.controller.js", import.meta.url),
       "utf8"
     )
   ]);
@@ -42,6 +46,7 @@ test("hierarchy endpoints preserve LGD sub-district and village types as fallbac
   assert.match(repository, /l\.type = 'VILLAGE'/);
   assert.match(routes, /asyncRoute\(controller\.cities\)/);
   assert.match(routes, /asyncRoute\(controller\.localities\)/);
+  assert.match(controller, /type \|\| locationType\(req\.query\)/);
 });
 
 test("the fresh schema defines recently viewed only once", async () => {

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireOwnedResource } from "../../shared/authorization.js";
 import { asyncRoute } from "../../shared/http.js";
+import { requireUuidParam } from "../../shared/request-validation.js";
 import {
   optionalAuth,
   requireAnyRole,
@@ -14,6 +15,9 @@ import {
 } from "./properties.service.js";
 
 const router = Router();
+router.param("propertyId", requireUuidParam);
+router.param("mediaId", requireUuidParam);
+router.param("documentId", requireUuidParam);
 const requirePropertyContributor = requireAnyRole(
   "SELLER",
   "BROKER",
@@ -198,7 +202,6 @@ router.get(
 router.get(
   "/properties/:propertyId/documents/:documentId",
   requireAuth,
-  requireOwnedProperty,
   asyncRoute(controller.document)
 );
 router.delete(
