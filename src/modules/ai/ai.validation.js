@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { parsePagination } from "../../shared/pagination.js";
 
 const contexts = new Set(["GENERAL", "SEARCH", "PROPERTY"]);
 const languages = new Set(["en", "hi", "mr", "gu", "pa", "te", "ta"]);
@@ -55,6 +56,8 @@ export const conversation = body => {
   };
 };
 export const conversationId = value => uuid(value, "conversationId");
+export const conversationList = query =>
+  parsePagination(query, { maxLimit: 50 });
 export const message = body => ({
   content: text(body.content, "content", 1, 4000, true),
   language: language(body.language)

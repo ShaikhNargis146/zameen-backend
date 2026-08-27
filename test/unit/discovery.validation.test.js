@@ -17,6 +17,7 @@ test("discovery search normalizes safe filter input and pagination", () => {
     transactionTypes: ["sale"],
     minArea: 1,
     areaUnitId: unitId,
+    facing: ["ne"],
     verifiedOnly: "true",
     sort: "price_asc",
     page: 2,
@@ -24,6 +25,7 @@ test("discovery search normalizes safe filter input and pagination", () => {
   });
   assert.deepEqual(result.transactionTypes, ["SALE"]);
   assert.equal(result.verifiedOnly, true);
+  assert.deepEqual(result.facing, ["NE"]);
   assert.equal(result.sort, "PRICE_ASC");
   assert.equal(result.offset, 10);
 });

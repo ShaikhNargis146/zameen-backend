@@ -1,18 +1,17 @@
 import { run } from "../../shared/db.js";
+import { masters } from "./catalog.constants.js";
 const locationFields = `l.id, l.name, l.type, l.parent_id AS "parentId", l.state_code AS "stateCode", CASE WHEN l.center IS NULL THEN NULL ELSE ST_Y(l.center::geometry) END AS latitude, CASE WHEN l.center IS NULL THEN NULL ELSE ST_X(l.center::geometry) END AS longitude, COALESCE((WITH RECURSIVE ancestors AS (SELECT id, parent_id, name, 0 AS depth FROM geo.locations WHERE id = l.id UNION ALL SELECT parent.id, parent.parent_id, parent.name, ancestors.depth + 1 FROM geo.locations parent JOIN ancestors ON ancestors.parent_id = parent.id) SELECT string_agg(name, ', ' ORDER BY depth DESC) FROM ancestors), l.name) AS "displayPath"`;
-
-const masters = Object.freeze({
-  "property-types": "land.property_types",
-  "land-use-types": "land.land_use_types",
-  "ownership-types": "land.ownership_types",
-  "road-types": "land.road_types",
-  "document-types": "land.document_types"
-});
 
 export const listMaster = key =>
   run(
     "any",
     `SELECT id, code, name, sort_order AS "sortOrder" FROM ${masters[key]} WHERE is_active = true ORDER BY sort_order, name`
+  );
+export const listDocumentTypes = stateCode =>
+  run(
+    "any",
+    `SELECT dt.id, dt.code, dt.name, state.state_code AS "stateCode", dt.sort_order AS "sortOrder" FROM land.document_types dt LEFT JOIN geo.locations state ON state.id = dt.state_location_id WHERE dt.is_active = true AND ($1::varchar IS NULL OR state.state_code = $1 OR dt.state_location_id IS NULL) ORDER BY dt.sort_order, dt.name`,
+    [stateCode || null]
   );
 export const listAreaUnits = stateCode =>
   run(
@@ -29,7 +28,13 @@ export const listAmenities = category =>
 export const listParcelConfig = code =>
   run(
     "any",
-    `SELECT pit.code AS type, pit.name AS label, pit.is_required AS required, concat('Enter ', pit.name) AS placeholder FROM land.parcel_identifier_types pit JOIN geo.locations state ON state.id = pit.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1 AND pit.is_active = true ORDER BY pit.sort_order, pit.name`,
+    `SELECT pit.code AS type, pit.name AS label, pit.is_required AS required, COALESCE(pit.placeholder, concat('Enter ', pit.name)) AS placeholder FROM land.parcel_identifier_types pit JOIN geo.locations state ON state.id = pit.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1 AND pit.is_active = true ORDER BY pit.sort_order, pit.name`,
+    [code]
+  );
+export const parcelConfiguration = code =>
+  run(
+    "oneOrNone",
+    `SELECT configuration.notes FROM land.parcel_configurations configuration JOIN geo.locations state ON state.id = configuration.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1`,
     [code]
   );
 export const searchLocations = ({ q, types, stateCode, limit }) =>
@@ -73,5 +78,3 @@ export const reverseGeocode = ({ latitude, longitude }) =>
     `SELECT ${locationFields} FROM geo.locations l WHERE l.is_active = true AND l.center IS NOT NULL ORDER BY l.center <-> ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography LIMIT 1`,
     [latitude, longitude]
   );
-
-export { masters };

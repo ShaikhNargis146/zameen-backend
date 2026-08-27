@@ -9,7 +9,9 @@ The prior database design has been replaced with the clean-install schema in
 `auth`, `account`, `geo`, `land`, `marketplace`, `commerce`, `content`, `ops`,
 and `ai` PostgreSQL schemas.
 
-Run `npm run db:schema` once for a new database. The SQL is a clean-install script; it must not be run on the prior database as a migration.
+During initial development, recreate a development database and run `npm run db:schema` once. The SQL is a clean-install script; it must not be run on an existing database as a migration.
+
+There are intentionally no migration scripts yet. Once a shared/staging database exists, future schema changes will be added as forward-only migrations and applied with `npm run db:migrate`.
 
 ## Implemented API modules
 
@@ -32,3 +34,9 @@ an SMS/email provider for OTP delivery. OTP delivery is deliberately disabled in
 production until a provider is configured. Provision the first administrator through
 a controlled database runbook after that user has completed verification; the schema
 does not create a default administrator.
+
+The AI endpoints use the OpenAI Responses API. Set `OPENAI_API_KEY` as a deployment
+secret; `OPENAI_MODEL` defaults to `gpt-5-mini`. AI conversation messages stream as
+SSE from the existing POST message endpoint; search and listing drafts remain JSON.
+Without the key, AI requests return `AI_PROVIDER_UNCONFIGURED` rather than falling
+back to generated or rule-based data.

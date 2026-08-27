@@ -2,13 +2,13 @@ import { Router } from "express";
 import { asyncRoute } from "../../shared/http.js";
 import { requireAuth } from "../auth/auth.routes.js";
 import * as controller from "./catalog.controller.js";
-import { masters } from "./catalog.repository.js";
+import { masters } from "./catalog.constants.js";
 
 const router = Router();
 for (const key of Object.keys(masters)) {
-  const handler = asyncRoute(controller.master(key));
-  if (key === "document-types") router.get(`/${key}`, requireAuth, handler);
-  else router.get(`/${key}`, handler);
+  if (key === "document-types")
+    router.get(`/${key}`, requireAuth, asyncRoute(controller.documentTypes));
+  else router.get(`/${key}`, asyncRoute(controller.master(key)));
 }
 router.get("/area-units", asyncRoute(controller.areaUnits));
 router.get("/amenities", asyncRoute(controller.amenities));

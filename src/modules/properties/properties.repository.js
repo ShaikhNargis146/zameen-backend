@@ -74,7 +74,7 @@ export const update = (propertyId, changes) =>
 export const landDetails = propertyId =>
   run(
     "oneOrNone",
-    `SELECT d.property_id AS "propertyId", d.area_value AS "areaValue", d.area_unit_id AS "areaUnitId", u.code AS "areaUnitCode", d.area_sqft AS "normalizedAreaSqft", d.length_value AS "lengthValue", d.width_value AS "widthValue", d.dimension_unit_id AS "dimensionUnitId", du.code AS "dimensionUnitCode", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", d.road_type_id AS "roadTypeId", rt.code AS "roadTypeCode", d.facing, d.open_sides AS "openSides", d.is_corner_plot AS "isCornerPlot", d.has_boundary_wall AS "hasBoundaryWall", d.terrain, d.road_access_type AS "roadAccessType" FROM land.property_land_details d JOIN land.area_units u ON u.id = d.area_unit_id LEFT JOIN land.area_units du ON du.id = d.dimension_unit_id LEFT JOIN land.road_types rt ON rt.id = d.road_type_id WHERE d.property_id = $1`,
+    `SELECT d.property_id AS "propertyId", d.area_value AS "areaValue", d.area_unit_id AS "areaUnitId", u.code AS "areaUnitCode", d.area_sqft AS "normalizedAreaSqft", d.length_value AS "lengthValue", d.width_value AS "widthValue", d.dimension_unit AS "dimensionUnit", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", d.road_type AS "roadType", d.facing, d.open_sides AS "openSides", d.is_corner_plot AS "isCornerPlot", d.has_boundary_wall AS "hasBoundaryWall", d.terrain, d.road_access_type AS "roadAccessType" FROM land.property_land_details d JOIN land.area_units u ON u.id = d.area_unit_id WHERE d.property_id = $1`,
     [propertyId]
   );
 export const areaUnit = id =>
@@ -86,7 +86,7 @@ export const areaUnit = id =>
 export const saveLandDetails = input =>
   run(
     "none",
-    `INSERT INTO land.property_land_details (property_id, area_value, area_unit_id, area_sqft, length_value, width_value, dimension_unit_id, frontage_m, road_width_m, road_type_id, facing, open_sides, is_corner_plot, has_boundary_wall, terrain, road_access_type) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (property_id) DO UPDATE SET area_value=EXCLUDED.area_value, area_unit_id=EXCLUDED.area_unit_id, area_sqft=EXCLUDED.area_sqft, length_value=EXCLUDED.length_value, width_value=EXCLUDED.width_value, dimension_unit_id=EXCLUDED.dimension_unit_id, frontage_m=EXCLUDED.frontage_m, road_width_m=EXCLUDED.road_width_m, road_type_id=EXCLUDED.road_type_id, facing=EXCLUDED.facing, open_sides=EXCLUDED.open_sides, is_corner_plot=EXCLUDED.is_corner_plot, has_boundary_wall=EXCLUDED.has_boundary_wall, terrain=EXCLUDED.terrain, road_access_type=EXCLUDED.road_access_type`,
+    `INSERT INTO land.property_land_details (property_id, area_value, area_unit_id, area_sqft, length_value, width_value, dimension_unit, frontage_m, road_width_m, road_type, facing, open_sides, is_corner_plot, has_boundary_wall, terrain, road_access_type) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (property_id) DO UPDATE SET area_value=EXCLUDED.area_value, area_unit_id=EXCLUDED.area_unit_id, area_sqft=EXCLUDED.area_sqft, length_value=EXCLUDED.length_value, width_value=EXCLUDED.width_value, dimension_unit=EXCLUDED.dimension_unit, frontage_m=EXCLUDED.frontage_m, road_width_m=EXCLUDED.road_width_m, road_type=EXCLUDED.road_type, facing=EXCLUDED.facing, open_sides=EXCLUDED.open_sides, is_corner_plot=EXCLUDED.is_corner_plot, has_boundary_wall=EXCLUDED.has_boundary_wall, terrain=EXCLUDED.terrain, road_access_type=EXCLUDED.road_access_type`,
     [
       input.propertyId,
       input.areaValue,
@@ -94,10 +94,10 @@ export const saveLandDetails = input =>
       input.areaSqft,
       input.lengthValue,
       input.widthValue,
-      input.dimensionUnitId,
+      input.dimensionUnit,
       input.frontageM,
       input.roadWidthM,
-      input.roadTypeId,
+      input.roadType,
       input.facing,
       input.openSides,
       input.isCornerPlot,

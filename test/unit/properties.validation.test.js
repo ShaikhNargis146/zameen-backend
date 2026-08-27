@@ -16,6 +16,36 @@ test("property boolean fields do not treat the string false as true", () => {
   assert.equal(details.hasBoundaryWall, false);
 });
 
+test("land details accept the compact facing values from the UI contract", () => {
+  const details = landDetails({
+    areaValue: 1,
+    areaUnitId: "unit-1",
+    dimensionUnit: "M",
+    facing: "NE",
+    roadType: "OTHER",
+    roadAccessType: "NO_DIRECT",
+    terrain: "UNEVEN"
+  });
+  assert.equal(details.facing, "NE");
+  assert.equal(details.dimensionUnit, "M");
+  assert.equal(details.roadType, "OTHER");
+  assert.throws(
+    () => landDetails({ areaValue: 1, areaUnitId: "unit-1", facing: "UP" }),
+    error => error.code === "VALIDATION_ERROR"
+  );
+});
+
+test("land details accept zero-width normalized measurements", () => {
+  const result = landDetails({
+    areaValue: 1,
+    areaUnitId: "11111111-1111-1111-1111-111111111111",
+    frontageM: 0,
+    roadWidthM: 0
+  });
+  assert.equal(result.frontageM, 0);
+  assert.equal(result.roadWidthM, 0);
+});
+
 test("verification requests accept an optional note and reject malformed check types", () => {
   assert.deepEqual(verificationRequest({ note: "Please verify access road." }), {
     checkTypes: [

@@ -2,6 +2,12 @@ import httpStatus from "http-status";
 import { ValidationError } from "express-validation";
 import APIError from "../utils/APIError.js";
 
+const publicServiceErrorCodes = new Set([
+  "OTP_PROVIDER_UNCONFIGURED",
+  "AI_PROVIDER_UNCONFIGURED",
+  "AI_PROVIDER_UNAVAILABLE"
+]);
+
 /**
  * Error handler. Send stacktrace only during development
  * @public
@@ -32,12 +38,18 @@ const handler = (err, req, res, next) => {
       err?.status || err?.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
 
     const isServerError = status >= httpStatus.INTERNAL_SERVER_ERROR;
+    const isPublicServiceError = publicServiceErrorCodes.has(err?.code);
     const payload = {
       success: false,
       error: {
-        code: isServerError ? "INTERNAL_ERROR" : err?.code || "REQUEST_ERROR",
+        code:
+          isServerError && !isPublicServiceError
+            ? "INTERNAL_ERROR"
+            : err?.code || "REQUEST_ERROR",
         message:
-          isServerError && process.env.NODE_ENV === "production"
+          isServerError &&
+          !isPublicServiceError &&
+          process.env.NODE_ENV === "production"
             ? "Internal Server Error"
             : err?.message || "Internal Server Error"
       }

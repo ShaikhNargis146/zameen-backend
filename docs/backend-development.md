@@ -22,8 +22,8 @@ TypeScript, or another server framework without an approved migration plan.
    local-development fallback only; never use it for staging or production.
 2. Create a new PostgreSQL database with privileges for `pgcrypto`, `citext`,
    `postgis`, and `pg_trgm`.
-3. For a new database, run `npm run db:schema` once. For an existing database,
-   run `npm run db:migrate`.
+3. During initial development, recreate an existing development database and run
+   `npm run db:schema` once.
 4. Run `npm start`, then call `GET /api/v1/status`.
 
 `npm run db:schema` is a clean-install command. It refuses to run when
@@ -38,7 +38,7 @@ boot. Run the appropriate database command as an explicit deployment step:
 # Brand-new database only
 npm run db:schema
 
-# Existing canonical database: apply forward-only migrations
+# Future shared/staging database only: apply forward-only migrations
 npm run db:migrate
 
 # Then start the API
@@ -84,15 +84,36 @@ Every new Developer 1 module must use the same five-layer pattern from its
 first endpoint; do not add compatibility route files or bypass a repository.
 
 Discovery owns listing search, map pins, similarity and comparison. The `ai`
-module owns the thin Phase 1 layer: rule-based natural-language filter
-extraction, grounded conversation records, and listing-copy drafts. An
-anonymous AI conversation returns a `guestAccessToken`; clients must send it
-as `X-AI-Conversation-Token` on later message/detail requests. Do not put that
-token in a URL or log it.
+module uses the OpenAI Responses API for structured natural-language filter
+extraction, grounded conversation replies, and listing-copy drafts. The service
+resolves every extracted filter against Zameens master data and then uses the
+normal discovery service; the model never queries the database or decides
+authorization. An anonymous AI conversation returns a `guestAccessToken`;
+clients must send it as `X-AI-Conversation-Token` on later message/detail
+requests. Do not put that token in a URL or log it. Chat replies are streamed
+from the existing `POST /ai/conversations/:conversationId/messages` endpoint as
+SSE: `message.delta` events are transient UI text and `message.completed`
+contains the persisted `AiMessage`; an SSE `error` is not a saved answer. The
+full event contract is in `Zameens_Phase1_UI_API_Integration_Specification.txt`.
+Signed-in users load their retained chat history through paginated `GET
+/ai/conversations`; anonymous conversations remain accessible only with their
+guest conversation token.
+
+AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
+API process so it receives the changed environment. `OPENAI_MODEL`
+defaults to `gpt-5-mini` and may be changed per environment. Model responses use
+`store: false`; requests are rate-limited and provider failures return
+`AI_PROVIDER_UNCONFIGURED` or `AI_PROVIDER_UNAVAILABLE` without exposing model
+or provider details. The assistant can answer property, land/area, market-trend
+and published investment-opportunity questions from published listing, master,
+content and trend data. Do not add private property documents or account data;
+financial, legal and valuation guidance must remain clearly general and direct
+the user to a qualified professional.
 
 ## API contract
 
-All endpoints are under `/api/v1`.
+All endpoints are under `/api/v1`. JSON endpoints use the envelope below; the
+documented AI chat message endpoint is the intentional SSE exception.
 
 ```json
 { "success": true, "data": {}, "meta": {} }
@@ -114,14 +135,14 @@ unless an API-contract change is explicitly approved.
 | Listings | `/properties/:propertyId/listings`, `/listings`, `/seller/listings`, `/admin/listings` | draft, review, publishing lifecycle, public detail |
 | Discovery | `/search`, `/listings/:listingId/similar`, `/listings/compare` | listing search, suggestions, map pins, similarity, comparison |
 | Verification | `/admin/verifications` | verification review queue and admin decisions |
-| AI | `/ai` | Phase 1 rule-based search parsing, grounded conversation records, and listing-copy drafts. It is not connected to an LLM provider yet. |
+| AI | `/ai` | OpenAI-backed structured search parsing, grounded conversation records, and listing-copy drafts. |
 
 ## Authentication and authorization
 
 - Access tokens are short-lived signed JWTs.
 - Refresh tokens are opaque, hashed, stored in `auth.refresh_sessions`, and rotated.
 - A user may have multiple roles through `auth.user_roles`.
-- A newly verified user receives both `BUYER` and `SELLER`. Business roles (`BROKER`, `DEVELOPER`, `CHANNEL_PARTNER`, `CORPORATE`) are granted through the administrator role-management workflow, never by the user.
+- A newly verified user receives both `BUYER` and `SELLER`. A user may enable the `BROKER`, `DEVELOPER` or `CORPORATE` capability through `/users/me/roles`, as defined in the UI contract. `CHANNEL_PARTNER` remains approval-workflow-only and `ADMIN` cannot be self-assigned. These capabilities are not verification badges; public verification is represented by the listing verification workflow.
 - `requireAuth` requires an active user; `requireAdmin` additionally requires `ADMIN`.
 - OTP codes are generated per challenge, hashed with the token pepper, and expire after the configured TTL. Configure `OTP_DELIVERY_MODE=webhook` and `OTP_PROVIDER_WEBHOOK_URL` for production. `OTP_DELIVERY_MODE=console` is opt-in and allowed only outside production.
 
@@ -162,9 +183,11 @@ For every database change:
 3. Test it on a fresh database and staging before production.
 4. Update `src/database/schema.sql` so a new installation has the final state.
 
-`npm run db:migrate` applies every unapplied, forward-only SQL file in
-`migrations/` and records it in `ops.schema_migrations`. Never edit or delete a
-migration that has been applied to a shared environment.
+Initial development has no migrations: `src/database/schema.sql` is the single
+database baseline. Once a shared/staging environment exists, `npm run db:migrate`
+will apply every forward-only SQL file in `migrations/` and record it in
+`ops.schema_migrations`. Never edit or delete a migration that has been applied
+to a shared environment.
 
 ## Media and document uploads
 

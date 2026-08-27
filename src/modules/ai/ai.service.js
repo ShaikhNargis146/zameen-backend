@@ -1,8 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
+import { paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { hashWithPepper, safeEqualHex } from "../../utils/crypto.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import * as discovery from "../discovery/discovery.service.js";
+import { search as validateListingSearch } from "../discovery/discovery.validation.js";
+import * as provider from "./ai.provider.js";
 import * as repository from "./ai.repository.js";
 
 const guestTokenTtlHours = Number(process.env.AI_GUEST_TOKEN_TTL_HOURS || 24);
@@ -11,55 +14,13 @@ const snippet = value =>
   String(value || "")
     .replace(/\s+/g, " ")
     .trim();
-const parsedSearch = ({ query, page, limit }) => {
-  const normalized = snippet(query).toLowerCase();
-  const crore = normalized.match(
-    /(?:₹|rs\.?\s*)?(\d+(?:\.\d+)?)\s*(?:cr|crore)/i
-  );
-  const lakh = normalized.match(
-    /(?:₹|rs\.?\s*)?(\d+(?:\.\d+)?)\s*(?:lakh|lac)/i
-  );
-  return {
-    locationIds: [],
-    propertyTypeIds: [],
-    transactionTypes: normalized.match(/rent|lease/)
-      ? ["LEASE"]
-      : normalized.match(/buy|sale|sell/)
-      ? ["SALE"]
-      : [],
-    minPriceMinor: null,
-    maxPriceMinor: crore
-      ? Math.round(Number(crore[1]) * 10000000 * 100)
-      : lakh
-      ? Math.round(Number(lakh[1]) * 100000 * 100)
-      : null,
-    minArea: null,
-    maxArea: null,
-    areaUnitId: null,
-    verifiedOnly: /verified/.test(normalized),
-    minRoadWidthM: null,
-    facing: [],
-    cornerPlot: null,
-    sellerType: [],
-    sort: "RELEVANCE",
-    page,
-    limit,
-    offset: (page - 1) * limit
-  };
-};
-const responseMessage = ({ content, listing }) => {
-  if (listing)
-    return `For this ${listing.propertyType || "property"}${
-      listing.locationName ? ` in ${listing.locationName}` : ""
-    }, I can help with the available listing details, land information, and next steps. ${content}`;
-  return `I can help you discover properties, understand land details, and prepare a listing. ${content}`;
-};
 const publicConversation = conversation => ({
   id: conversation.id,
   contextType: conversation.contextType,
   listingId: conversation.listingId,
   title: conversation.title,
-  createdAt: conversation.createdAt
+  createdAt: conversation.createdAt,
+  updatedAt: conversation.updatedAt
 });
 const messageResponse = message => ({
   ...message,
@@ -92,17 +53,59 @@ const requireAccess = async ({ conversationId, actorId, guestToken }) => {
 };
 
 export const search = async ({ input, actorId }) => {
-  const filters = parsedSearch(input);
+  const intent = await provider.searchIntent({
+    query: input.query,
+    language: input.language,
+    catalog: await repository.searchCatalog()
+  });
+  const references = await repository.resolveSearchReferences(intent);
+  if (
+    (intent.minArea !== null || intent.maxArea !== null) &&
+    !references.areaUnitId
+  )
+    throw new HttpError(
+      502,
+      "AI_PROVIDER_INVALID_RESPONSE",
+      "AI service returned an unusable response."
+    );
+  const filters = validateListingSearch({
+    locationIds: references.locationIds,
+    propertyTypeIds: references.propertyTypeIds,
+    transactionTypes: intent.transactionTypes,
+    minPriceMinor: intent.minPriceMinor,
+    maxPriceMinor: intent.maxPriceMinor,
+    minArea: intent.minArea,
+    maxArea: intent.maxArea,
+    areaUnitId: references.areaUnitId,
+    verifiedOnly: intent.verifiedOnly,
+    minRoadWidthM: intent.minRoadWidthM,
+    facing: intent.facing,
+    cornerPlot: intent.cornerPlot,
+    sellerType: intent.sellerType,
+    sort: intent.sort,
+    page: input.page,
+    limit: input.limit
+  });
   const result = await discovery.search({ filters, actorId });
+  const isAmbiguous =
+    !filters.locationIds.length &&
+    !filters.propertyTypeIds.length &&
+    !filters.transactionTypes.length &&
+    filters.minPriceMinor === null &&
+    filters.maxPriceMinor === null &&
+    filters.minArea === null &&
+    filters.maxArea === null;
+  const clarificationNeeded = intent.clarificationNeeded || isAmbiguous;
+  const clarificationQuestion = clarificationNeeded
+    ? snippet(intent.clarificationQuestion).slice(0, 500) ||
+      "What location, property type, budget, or area do you have in mind?"
+    : null;
+  const { offset, ...parsedFilters } = filters;
   return {
     normalizedQuery: snippet(input.query),
-    parsedFilters: { ...filters, offset: undefined },
-    clarificationNeeded:
-      !filters.transactionTypes.length && filters.maxPriceMinor === null,
-    clarificationQuestion:
-      !filters.transactionTypes.length && filters.maxPriceMinor === null
-        ? "Are you looking to buy or lease, and what is your approximate budget?"
-        : null,
+    parsedFilters,
+    clarificationNeeded,
+    clarificationQuestion,
     results: result.data,
     meta: result.meta
   };
@@ -137,7 +140,25 @@ export const createConversation = async ({ actorId, input }) => {
     ...(guestAccessToken ? { guestAccessToken } : {})
   };
 };
-export const addMessage = async ({
+export const listConversations = async ({ actorId, pagination }) => {
+  const { page, limit, offset } = pagination;
+  const counted = await repository.conversationsForUser(actorId, pagination);
+  const { data: rows, total } = splitCountedRows(counted);
+  return {
+    data: rows.map(row => ({
+      ...publicConversation(row),
+      lastMessage: row.lastMessageContent
+        ? {
+            role: row.lastMessageRole,
+            content: row.lastMessageContent,
+            createdAt: row.lastMessageAt
+          }
+        : null
+    })),
+    meta: paginationMeta({ page, limit, total })
+  };
+};
+const messageContext = async ({
   conversationId,
   actorId,
   guestToken,
@@ -157,18 +178,95 @@ export const addMessage = async ({
   const listing = conversation.listingId
     ? await repository.listingContext(conversation.listingId)
     : null;
-  const answer = await repository.addMessage({
-    conversationId,
-    role: "ASSISTANT",
-    content: responseMessage({ content: input.content, listing }),
+  const [messages, catalog, content, trends, investments] = await Promise.all([
+    repository.messages(conversationId),
+    repository.searchCatalog(),
+    repository.publishedContentContext({
+      language: input.language,
+      locationId: listing?.locationId || null,
+      query: input.content
+    }),
+    repository.marketTrendContext({
+      locationId: listing?.locationId || null,
+      propertyTypeId: listing?.propertyTypeId || null
+    }),
+    repository.publishedInvestmentContext({
+      locationId: listing?.locationId || null,
+      propertyId: listing?.propertyId || null,
+      query: input.content
+    })
+  ]);
+  return {
+    providerInput: {
+      language: input.language,
+      listing,
+      catalog,
+      content: content.map(item => ({
+        id: item.id,
+        title: item.title,
+        summary: item.summary
+      })),
+      trends,
+      investments,
+      messages: messages.slice(-20).map(item => ({
+        role: item.role,
+        content: item.content
+      }))
+    },
     metadata: {
-      sources: listing
-        ? [{ type: "LISTING", listingId: conversation.listingId }]
-        : []
+      sources: [
+        ...(listing
+          ? [{ type: "LISTING", listingId: conversation.listingId }]
+          : []),
+        ...content.map(item => ({
+          type: "CONTENT",
+          contentId: item.id,
+          slug: item.slug
+        })),
+        ...trends.map(item => ({
+          type: "MARKET_TREND",
+          trendSeriesId: item.id
+        })),
+        ...investments.map(item => ({
+          type: "INVESTMENT_OPPORTUNITY",
+          opportunityId: item.id
+        }))
+      ]
     }
-  });
-  if (!answer.ok) throw answer.error;
-  return messageResponse(answer.data);
+  };
+};
+
+export const streamMessage = async ({ signal, ...params }) => {
+  const context = await messageContext(params);
+  return {
+    async *[Symbol.asyncIterator]() {
+      let content = "";
+      for await (const delta of provider.streamConversationReply({
+        ...context.providerInput,
+        signal
+      })) {
+        content += delta;
+        yield { type: "delta", delta };
+      }
+      // Keep the persisted message byte-for-byte aligned with rendered deltas,
+      // except for inconsequential leading/trailing whitespace.
+      const response = content.trim();
+      if (!response)
+        throw new HttpError(
+          502,
+          "AI_PROVIDER_INVALID_RESPONSE",
+          "AI service returned an unusable response."
+        );
+      const answer = await repository.addMessage({
+        conversationId: params.conversationId,
+        role: "ASSISTANT",
+        content: response,
+        metadata: context.metadata
+      });
+      if (!answer.ok) throw answer.error;
+      yield { type: "completed", message: messageResponse(answer.data) };
+    }
+  };
 };
 export const getConversation = async ({
   conversationId,
@@ -194,39 +292,21 @@ export const generateListing = async ({ actorId, input }) => {
     : null;
   if (input.propertyId && !property)
     throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
-  const propertyType =
-    property?.propertyType ||
-    (input.propertyTypeId
-      ? (await repository.propertyType(input.propertyTypeId))?.name
-      : null) ||
-    "property";
-  const location = property?.locationName || input.locationText;
-  const area = property?.areaValue
-    ? `${property.areaValue} ${property.areaUnit || ""}`.trim()
-    : input.areaText;
-  const highlights = input.highlights.length
-    ? input.highlights
-    : [
-        area && `Approx. ${area}`,
-        input.roadWidthText && `${input.roadWidthText} road access`
-      ].filter(Boolean);
-  const title = [area, propertyType, location && `in ${location}`]
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .slice(0, 255);
-  const description = [
-    `Explore this ${propertyType}${location ? ` located in ${location}` : ""}.`,
-    area ? `The property offers approximately ${area}.` : null,
-    input.priceText ? `Expected price: ${input.priceText}.` : null,
-    highlights.length ? `Highlights include ${highlights.join(", ")}.` : null
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const propertyType = input.propertyTypeId
+    ? await repository.propertyType(input.propertyTypeId)
+    : null;
+  const draft = provider.normalizeListingDraft(
+    await provider.listingDraft({
+      language: input.language,
+      property,
+      input: {
+        ...input,
+        propertyTypeName: propertyType?.name || null
+      }
+    })
+  );
   return {
-    title: title || `Verified ${propertyType} opportunity`,
-    description,
-    highlights,
+    ...draft,
     disclaimer:
       "AI-generated draft. Review all property, location, legal and price details before publishing."
   };

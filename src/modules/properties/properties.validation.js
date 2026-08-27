@@ -8,6 +8,11 @@ const verificationTypes = new Set([
   "DOCUMENTS",
   "SITE_VISIT"
 ]);
+const facings = new Set(["N", "NE", "E", "SE", "S", "SW", "W", "NW"]);
+const dimensionUnits = new Set(["FT", "M"]);
+const roadTypes = new Set(["PUCCA", "KUTCHA", "HIGHWAY", "OTHER"]);
+const terrains = new Set(["FLAT", "SLOPED", "UNEVEN", "OTHER"]);
+const roadAccessTypes = new Set(["DIRECT", "SHARED", "NO_DIRECT", "OTHER"]);
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const positive = (value, field) => {
   const number = Number(value);
@@ -26,6 +31,36 @@ const boolean = (value, field, fallback = null) => {
   if (["true", "1"].includes(normalized)) return true;
   if (["false", "0"].includes(normalized)) return false;
   throw new HttpError(400, "VALIDATION_ERROR", `${field} must be a boolean.`);
+};
+const optionalEnum = (value, field, values) => {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = String(value)
+    .trim()
+    .toUpperCase();
+  if (!values.has(normalized))
+    throw new HttpError(400, "VALIDATION_ERROR", `${field} is invalid.`);
+  return normalized;
+};
+const nonNegative = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      `${field} must be a non-negative number.`
+    );
+  return number;
+};
+const integerInRange = (value, field, min, max) => {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      `${field} must be an integer from ${min} to ${max}.`
+    );
+  return number;
 };
 
 export const createProperty = body => {
@@ -88,16 +123,27 @@ export const landDetails = body => ({
     body.lengthValue == null ? null : positive(body.lengthValue, "lengthValue"),
   widthValue:
     body.widthValue == null ? null : positive(body.widthValue, "widthValue"),
-  dimensionUnitId: body.dimensionUnitId || null,
-  frontageM: body.frontageM == null ? null : Number(body.frontageM),
-  roadWidthM: body.roadWidthM == null ? null : Number(body.roadWidthM),
-  roadTypeId: body.roadTypeId || null,
-  facing: body.facing || null,
-  openSides: body.openSides ?? null,
+  dimensionUnit: optionalEnum(
+    body.dimensionUnit,
+    "dimensionUnit",
+    dimensionUnits
+  ),
+  frontageM: nonNegative(body.frontageM, "frontageM"),
+  roadWidthM: nonNegative(body.roadWidthM, "roadWidthM"),
+  roadType: optionalEnum(body.roadType, "roadType", roadTypes),
+  facing: optionalEnum(body.facing, "facing", facings),
+  openSides:
+    body.openSides === undefined || body.openSides === null
+      ? null
+      : integerInRange(body.openSides, "openSides", 0, 4),
   isCornerPlot: boolean(body.isCornerPlot, "isCornerPlot", false),
   hasBoundaryWall: boolean(body.hasBoundaryWall, "hasBoundaryWall"),
-  terrain: body.terrain || null,
-  roadAccessType: body.roadAccessType || null
+  terrain: optionalEnum(body.terrain, "terrain", terrains),
+  roadAccessType: optionalEnum(
+    body.roadAccessType,
+    "roadAccessType",
+    roadAccessTypes
+  )
 });
 export const propertyLocation = body => {
   if (!body.locationId)

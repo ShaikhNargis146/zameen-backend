@@ -21,7 +21,11 @@ test("production errors never expose raw database messages", () => {
   process.env.NODE_ENV = "production";
   const res = response();
   error.handler(
-    { status: 500, code: "23505", message: "duplicate key value violates unique constraint" },
+    {
+      status: 500,
+      code: "23505",
+      message: "duplicate key value violates unique constraint"
+    },
     {},
     res
   );
@@ -30,5 +34,29 @@ test("production errors never expose raw database messages", () => {
   assert.deepEqual(res.body, {
     success: false,
     error: { code: "INTERNAL_ERROR", message: "Internal Server Error" }
+  });
+});
+
+test("safe provider configuration errors remain actionable in production", () => {
+  const original = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  const res = response();
+  error.handler(
+    {
+      status: 503,
+      code: "AI_PROVIDER_UNCONFIGURED",
+      message: "AI service is unavailable."
+    },
+    {},
+    res
+  );
+  process.env.NODE_ENV = original;
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.body, {
+    success: false,
+    error: {
+      code: "AI_PROVIDER_UNCONFIGURED",
+      message: "AI service is unavailable."
+    }
   });
 });

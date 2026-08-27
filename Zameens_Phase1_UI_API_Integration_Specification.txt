@@ -41,6 +41,10 @@ Header
 	Optional
 	en
 	Supported: en, hi, mr, gu, pa, te, ta.
+	X-AI-Conversation-Token
+	Guest AI conversation follow-up
+	Token returned by POST /ai/conversations
+	Required for a guest to read or add messages to that conversation.
 	X-Request-ID
 	Optional
 	uuid
@@ -409,6 +413,11 @@ Field
 	
 
 	Last successful login.
+	guestAccessToken
+	string|null
+	No
+	Guest only
+	Send as X-AI-Conversation-Token for subsequent guest message/read calls.
 	createdAt
 	datetime
 	Yes
@@ -465,8 +474,8 @@ Field
 	roleCode
 	string
 	Yes
-	SELLER/BROKER/DEVELOPER/CHANNEL_PARTNER/CORPORATE as allowed
-	Role/capability user wants to enable. Admin role cannot be self-assigned.
+	SELLER/BROKER/DEVELOPER/CORPORATE
+	Role/capability user wants to enable. CHANNEL_PARTNER is assigned only through the approved partner workflow; ADMIN cannot be self-assigned.
 	
 
 3.10 Amenity
@@ -3082,11 +3091,16 @@ Method
 	Public/auth
 	CreateAiConversation
 	AiConversation
+	GET
+	/ai/conversations
+	Authenticated user
+	page, limit query
+	AiConversation[] + PaginationMeta
 	POST
 	/ai/conversations/{conversationId}/messages
 	Conversation owner
 	AiMessageInput
-	AiMessage
+	SSE: AiMessageDelta + AiMessage
 	GET
 	/ai/conversations/{conversationId}
 	Conversation owner
@@ -3098,6 +3112,20 @@ Method
 	AiListingGenerateInput
 	AiListingGenerateResult
 	
+
+AI chat streaming contract
+
+POST /api/v1/ai/conversations/{conversationId}/messages returns `200 text/event-stream`.
+The request body and `X-AI-Conversation-Token` guest authorization remain unchanged.
+The UI must use `fetch` and read the response stream; EventSource cannot make this POST request.
+Each SSE event has JSON in `data` and is one of:
+
+- `message.delta` — `{ "delta": "partial assistant text" }`; append in order to the in-progress assistant bubble.
+- `message.completed` — `{ "message": AiMessage }`; replace/finalize the bubble with this persisted record and its safe sources.
+- `error` — `{ "error": { "code": "...", "message": "..." } }`; show the error and do not treat the partial text as a saved answer.
+
+The connection closes after `message.completed` or `error`. The endpoint does not return the
+standard `{ success, data, meta }` envelope because it is an event stream.
 
 AiSearchInput
 Field
@@ -3228,7 +3256,18 @@ Field
 	
 
 	Created.
-	
+
+	updatedAt
+	datetime
+	Yes
+	Read-only
+	Most recent activity; used to order the signed-in user's chat history.
+	lastMessage
+	object|null
+	No
+	History list only
+	Most recent message preview: role, content, createdAt.
+
 
 AiConversationDetail
 Field
@@ -3308,7 +3347,16 @@ Field
 	
 
 	Created.
-	
+
+AiMessageDelta
+Field
+	Type
+	Required
+	Description
+delta
+	string
+	Yes
+	Assistant text fragment for a `message.delta` SSE event only. It is not stored.
 
 AiListingGenerateInput
 Field
