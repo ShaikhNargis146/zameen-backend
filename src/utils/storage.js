@@ -19,7 +19,7 @@ export const storageErrorMetadata = error => ({
   code: safeDiagnosticValue(error?.code),
   status: Number.isInteger(error?.code) ? error.code : "none"
 });
-const storageUnavailable = error => {
+export const storageUnavailable = error => {
   if (error instanceof HttpError) return error;
   const diagnostic = storageErrorMetadata(error);
   logger.warn(
@@ -79,12 +79,16 @@ export const signedReadUrl = async storageKey => {
   // Public listing discovery must continue to work when media storage has not
   // been provisioned (for example on a fresh developer environment).
   if (!storageKey || !bucketName) return null;
-  const [url] = await ensureStorage()
-    .file(storageKey)
-    .getSignedUrl({
-      version: "v4",
-      action: "read",
-      expires: Date.now() + 15 * 60 * 1000
-    });
-  return url;
+  try {
+    const [url] = await ensureStorage()
+      .file(storageKey)
+      .getSignedUrl({
+        version: "v4",
+        action: "read",
+        expires: Date.now() + 15 * 60 * 1000
+      });
+    return url;
+  } catch (error) {
+    throw storageUnavailable(error);
+  }
 };

@@ -5,7 +5,11 @@ import {
   providerErrorMetadata,
   streamedTextDelta
 } from "../../src/modules/ai/ai.provider.js";
-import { storageErrorMetadata } from "../../src/utils/storage.js";
+import {
+  storageErrorMetadata,
+  storageUnavailable
+} from "../../src/utils/storage.js";
+import { HttpError } from "../../src/shared/http.js";
 
 test("listing drafts are normalized to the UI contract limits", () => {
   const result = normalizeListingDraft({
@@ -56,6 +60,12 @@ test("storage diagnostics exclude provider messages and sanitize log fields", ()
     }),
     { name: "FetchError", code: "ECONNRESET", status: "none" }
   );
+  const original = new HttpError(
+    503,
+    "STORAGE_UNAVAILABLE",
+    "File storage is temporarily unavailable."
+  );
+  assert.equal(storageUnavailable(original), original);
 });
 
 test("only supported OpenAI text events become chat stream deltas", () => {

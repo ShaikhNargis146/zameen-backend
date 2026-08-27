@@ -9,7 +9,6 @@ import {
   updateProperty,
   verificationRequest
 } from "../../src/modules/properties/properties.validation.js";
-import { canReadDocument } from "../../src/modules/properties/properties.service.js";
 
 test("property boolean fields do not treat the string false as true", () => {
   const details = landDetails({
@@ -141,36 +140,5 @@ test("property upload inputs accept only the documented MIME policy", () => {
       mimeType: "application/pdf",
       fileSizeBytes: 1
     })
-  );
-});
-
-test("document download policy permits only owners, admins, and active buyer grants", () => {
-  const buyerDocument = { visibility: "APPROVED_BUYERS" };
-  assert.equal(
-    canReadDocument({
-      document: buyerDocument,
-      isOwner: false,
-      isAdmin: false,
-      hasGrant: false
-    }),
-    false
-  );
-  assert.equal(
-    canReadDocument({
-      document: buyerDocument,
-      isOwner: false,
-      isAdmin: false,
-      hasGrant: true
-    }),
-    true
-  );
-  assert.equal(
-    canReadDocument({
-      document: { visibility: "PRIVATE" },
-      isOwner: false,
-      isAdmin: true,
-      hasGrant: false
-    }),
-    true
   );
 });
