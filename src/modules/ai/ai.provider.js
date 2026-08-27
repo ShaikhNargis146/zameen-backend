@@ -12,6 +12,8 @@ const timeout = Number.isFinite(configuredTimeout)
   ? Math.min(Math.max(configuredTimeout, 1000), 60000)
   : 15000;
 const model = () => process.env.OPENAI_MODEL || defaultModel;
+const responseReasoning = () =>
+  /^gpt-5(?:[.-]|$)/.test(model()) ? { reasoning: { effort: "minimal" } } : {};
 
 const safeDiagnosticValue = value => {
   if (value === undefined || value === null || value === "") return "none";
@@ -60,6 +62,7 @@ const request = async ({ instructions, input, text, maxOutputTokens }) => {
   try {
     const response = await client().responses.create({
       model: model(),
+      ...responseReasoning(),
       store: false,
       instructions,
       input,
@@ -218,8 +221,12 @@ const conversationRequest = ({
   messages
 }) => ({
   model: model(),
+  ...responseReasoning(),
   store: false,
-  max_output_tokens: 700,
+  // This limit includes GPT-5 reasoning tokens as well as visible text.
+  // Grounding is assembled server-side, so use the lowest supported GPT-5
+  // reasoning level and reserve most of the response budget for the answer.
+  max_output_tokens: 1200,
   instructions: conversationInstructions,
   input: JSON.stringify({
     language,
@@ -239,6 +246,15 @@ export const streamedTextDelta = event =>
     ? event.delta
     : null;
 
+// OpenAI normally sends delta events. Some completed streams only expose the
+// assembled part, so use it as a fallback only when no delta was received.
+export const streamedTextDone = event =>
+  ["response.output_text.done", "response.refusal.done"].includes(
+    event?.type
+  ) && typeof event.text === "string"
+    ? event.text
+    : null;
+
 export const streamConversationReply = async function*({ signal, ...params }) {
   let stream;
   try {
@@ -250,9 +266,19 @@ export const streamConversationReply = async function*({ signal, ...params }) {
     throw providerUnavailable(error);
   }
   try {
+    let receivedDelta = false;
+    let completedText = null;
+    const eventTypes = new Set();
     for await (const event of stream) {
+      const eventType = safeDiagnosticValue(event?.type || "unknown");
+      if (eventTypes.size < 12) eventTypes.add(eventType);
       const delta = streamedTextDelta(event);
-      if (delta !== null) yield delta;
+      if (delta !== null) {
+        receivedDelta = true;
+        yield delta;
+      }
+      const doneText = streamedTextDone(event);
+      if (doneText !== null) completedText = doneText;
       if (event?.type === "response.failed") {
         const diagnostic = providerErrorMetadata(event.response?.error);
         logger.warn(
@@ -265,6 +291,32 @@ export const streamConversationReply = async function*({ signal, ...params }) {
           "AI service is temporarily unavailable."
         );
       }
+      if (event?.type === "response.incomplete") {
+        const reason = safeDiagnosticValue(
+          event.response?.incomplete_details?.reason
+        );
+        logger.warn(`OpenAI stream incomplete [reason=${reason}]`);
+        throw new HttpError(
+          503,
+          "AI_PROVIDER_INCOMPLETE",
+          "AI response was interrupted. Please try again."
+        );
+      }
+    }
+    if (!receivedDelta && completedText) {
+      yield completedText;
+      return;
+    }
+    if (!receivedDelta) {
+      logger.warn(
+        "OpenAI stream completed without text " +
+          `[eventTypes=${[...eventTypes].join(",") || "none"}]`
+      );
+      throw new HttpError(
+        502,
+        "AI_PROVIDER_INVALID_RESPONSE",
+        "AI service returned an unusable response."
+      );
     }
   } catch (error) {
     throw providerUnavailable(error);

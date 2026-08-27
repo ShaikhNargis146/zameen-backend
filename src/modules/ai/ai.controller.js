@@ -4,7 +4,11 @@ import * as validation from "./ai.validation.js";
 
 const publicServiceErrorCodes = new Set([
   "AI_PROVIDER_UNCONFIGURED",
-  "AI_PROVIDER_UNAVAILABLE"
+  "AI_PROVIDER_UNAVAILABLE",
+  "AI_CONTEXT_UNAVAILABLE",
+  "AI_PROVIDER_INVALID_RESPONSE",
+  "AI_PROVIDER_INCOMPLETE",
+  "AI_CONVERSATION_UNAVAILABLE"
 ]);
 const sse = (res, event, data) =>
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

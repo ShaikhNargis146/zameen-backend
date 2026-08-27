@@ -1,6 +1,7 @@
 import { HttpError } from "../../shared/http.js";
 import { paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
+import logger from "../../utils/logger.js";
 import * as discovery from "../discovery/discovery.service.js";
 import { search as validateListingSearch } from "../discovery/discovery.validation.js";
 import * as provider from "./ai.provider.js";
@@ -22,6 +23,17 @@ const messageResponse = message => ({
   ...message,
   sources: message.metadata?.sources || []
 });
+const safeLogValue = value =>
+  String(value || "none")
+    .replace(/[^a-zA-Z0-9_.-]/g, "_")
+    .slice(0, 100);
+const logChatFailure = (stage, error) =>
+  logger.error(
+    `AI chat ${stage} failed ` +
+      `[name=${safeLogValue(error?.name)}, ` +
+      `status=${safeLogValue(error?.status || error?.statusCode)}, ` +
+      `code=${safeLogValue(error?.code)}]`
+  );
 
 const requireAccess = async ({ conversationId, actorId }) => {
   const conversation = await repository.conversation(conversationId);
@@ -138,33 +150,48 @@ const messageContext = async ({ conversationId, actorId, input }) => {
     conversationId,
     actorId
   });
+  const listing = conversation.listingId
+    ? await repository.listingContext(conversation.listingId)
+    : null;
+  let catalog;
+  let content;
+  let trends;
+  let investments;
+  try {
+    [catalog, content, trends, investments] = await Promise.all([
+      repository.searchCatalog(),
+      repository.publishedContentContext({
+        language: input.language,
+        locationId: listing?.locationId || null,
+        query: input.content
+      }),
+      repository.marketTrendContext({
+        locationId: listing?.locationId || null,
+        propertyTypeId: listing?.propertyTypeId || null
+      }),
+      repository.publishedInvestmentContext({
+        locationId: listing?.locationId || null,
+        propertyId: listing?.propertyId || null,
+        query: input.content
+      })
+    ]);
+  } catch (error) {
+    // Context is database-derived. Do not save a user message if assembling it
+    // failed, otherwise retries create duplicate history entries.
+    logChatFailure("context", error);
+    throw new HttpError(
+      503,
+      "AI_CONTEXT_UNAVAILABLE",
+      "AI chat context is temporarily unavailable."
+    );
+  }
   const saved = await repository.addMessage({
     conversationId,
     role: "USER",
     content: input.content
   });
   if (!saved.ok) throw saved.error;
-  const listing = conversation.listingId
-    ? await repository.listingContext(conversation.listingId)
-    : null;
-  const [messages, catalog, content, trends, investments] = await Promise.all([
-    repository.messages(conversationId),
-    repository.searchCatalog(),
-    repository.publishedContentContext({
-      language: input.language,
-      locationId: listing?.locationId || null,
-      query: input.content
-    }),
-    repository.marketTrendContext({
-      locationId: listing?.locationId || null,
-      propertyTypeId: listing?.propertyTypeId || null
-    }),
-    repository.publishedInvestmentContext({
-      locationId: listing?.locationId || null,
-      propertyId: listing?.propertyId || null,
-      query: input.content
-    })
-  ]);
+  const messages = await repository.messages(conversationId);
   return {
     providerInput: {
       language: input.language,
@@ -206,20 +233,37 @@ const messageContext = async ({ conversationId, actorId, input }) => {
 };
 
 export const streamMessage = async ({ signal, ...params }) => {
-  const context = await messageContext(params);
   return {
     async *[Symbol.asyncIterator]() {
+      // The controller sends SSE headers before it starts this iterator. That
+      // keeps every chat failure in the documented SSE error channel, including
+      // database context failures that happen before the OpenAI request.
+      const context = await messageContext(params);
       let content = "";
-      for await (const delta of provider.streamConversationReply({
-        ...context.providerInput,
-        signal
-      })) {
-        content += delta;
-        yield { type: "delta", delta };
+      try {
+        for await (const delta of provider.streamConversationReply({
+          ...context.providerInput,
+          signal
+        })) {
+          content += delta;
+          yield { type: "delta", delta };
+        }
+      } catch (error) {
+        logChatFailure("provider-stream", error);
+        throw error;
       }
       // Keep the persisted message byte-for-byte aligned with rendered deltas,
       // except for inconsequential leading/trailing whitespace.
       const response = content.trim();
+      if (!response)
+        logChatFailure(
+          "provider-stream-empty",
+          new HttpError(
+            502,
+            "AI_PROVIDER_INVALID_RESPONSE",
+            "AI service returned an unusable response."
+          )
+        );
       if (!response)
         throw new HttpError(
           502,
@@ -232,7 +276,14 @@ export const streamMessage = async ({ signal, ...params }) => {
         content: response,
         metadata: context.metadata
       });
-      if (!answer.ok) throw answer.error;
+      if (!answer.ok) {
+        logChatFailure("assistant-message-save", answer.error);
+        throw new HttpError(
+          503,
+          "AI_CONVERSATION_UNAVAILABLE",
+          "AI chat history is temporarily unavailable."
+        );
+      }
       yield { type: "completed", message: messageResponse(answer.data) };
     }
   };

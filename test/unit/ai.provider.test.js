@@ -3,7 +3,8 @@ import test from "node:test";
 import {
   normalizeListingDraft,
   providerErrorMetadata,
-  streamedTextDelta
+  streamedTextDelta,
+  streamedTextDone
 } from "../../src/modules/ai/ai.provider.js";
 import {
   storageErrorMetadata,
@@ -79,6 +80,17 @@ test("only supported OpenAI text events become chat stream deltas", () => {
   );
   assert.equal(
     streamedTextDelta({ type: "response.completed", delta: "ignored" }),
+    null
+  );
+});
+
+test("completed OpenAI text is available only as a stream fallback", () => {
+  assert.equal(
+    streamedTextDone({ type: "response.output_text.done", text: "Hello" }),
+    "Hello"
+  );
+  assert.equal(
+    streamedTextDone({ type: "response.completed", text: "ignored" }),
     null
   );
 });
