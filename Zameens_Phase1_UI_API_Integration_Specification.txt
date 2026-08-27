@@ -1060,7 +1060,18 @@ Method
 	Authenticated
 	lat,lng
 	GeoResult
-	
+
+
+Location hierarchy data note
+
+`/locations/districts/{districtId}/cities` prefers `CITY` children and falls back
+to the official LGD `SUBDISTRICT` children only when curated city data is not
+available. `/locations/cities/{cityId}/localities` similarly prefers `LOCALITY`
+and falls back to LGD `VILLAGE` children. The returned `LocationSummary.type` is
+always authoritative; UI must use that value and must not relabel a sub-district
+or village as a city/locality. This keeps the locked endpoint paths useful while
+preserving the source-data meaning.
+
 
 LocationSearchQuery
 Field

@@ -25,6 +25,25 @@ test("location search uses indexable name and alias candidate queries", async ()
   assert.match(schema, /idx_geo_locations_name_prefix/);
 });
 
+test("hierarchy endpoints preserve LGD sub-district and village types as fallbacks", async () => {
+  const [repository, routes] = await Promise.all([
+    readFile(
+      new URL("../../src/modules/catalog/catalog.repository.js", import.meta.url),
+      "utf8"
+    ),
+    readFile(
+      new URL("../../src/modules/catalog/catalog.routes.js", import.meta.url),
+      "utf8"
+    )
+  ]);
+  assert.match(repository, /citiesForDistrict/);
+  assert.match(repository, /l\.type = 'SUBDISTRICT'/);
+  assert.match(repository, /localitiesForCity/);
+  assert.match(repository, /l\.type = 'VILLAGE'/);
+  assert.match(routes, /asyncRoute\(controller\.cities\)/);
+  assert.match(routes, /asyncRoute\(controller\.localities\)/);
+});
+
 test("the fresh schema defines recently viewed only once", async () => {
   const schema = await readFile(
     new URL("../../src/database/schema.sql", import.meta.url),

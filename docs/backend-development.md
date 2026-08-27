@@ -22,8 +22,10 @@ TypeScript, or another server framework without an approved migration plan.
    local-development fallback only; never use it for staging or production.
 2. Create a new PostgreSQL database with privileges for `pgcrypto`, `citext`,
    `postgis`, and `pg_trgm`.
-3. During initial development, recreate an existing development database and run
-   `npm run db:schema` once.
+3. For a new database, run `npm run db:schema` once. For an existing canonical
+   database, run `npm run db:migrate` before deploying this release. During
+   initial development, a non-shared development database may instead be
+   recreated and initialized with `npm run db:schema`.
 4. Run `npm start`, then call `GET /api/v1/status`.
 
 `npm run db:schema` is a clean-install command. It refuses to run when
@@ -38,7 +40,7 @@ boot. Run the appropriate database command as an explicit deployment step:
 # Brand-new database only
 npm run db:schema
 
-# Future shared/staging database only: apply forward-only migrations
+# Existing canonical database: apply forward-only migrations
 npm run db:migrate
 
 # Then start the API
@@ -76,6 +78,12 @@ descendant, so `GET /locations/search?stateCode=MH` works. The LGD exports do
 not contain PIN-to-location relationships, city/locality curation, or map
 coordinates. Load those through separately verified India Post and geocoding
 data processes; do not infer them from village records.
+
+The locked city/locality endpoint paths remain usable with LGD-only coverage:
+district-to-city returns `CITY` records when curated city data exists, otherwise
+the official `SUBDISTRICT` children; city-to-locality likewise prefers
+`LOCALITY`, otherwise returns `VILLAGE`. The API always returns the real
+`LocationSummary.type`; clients must never relabel the fallback records.
 
 When supplied, the same preparation command also normalizes
 `locations_data/pincode.csv`.
@@ -224,11 +232,12 @@ For every database change:
 3. Test it on a fresh database and staging before production.
 4. Update `src/database/schema.sql` so a new installation has the final state.
 
-Initial development has no migrations: `src/database/schema.sql` is the single
-database baseline. Once a shared/staging environment exists, `npm run db:migrate`
-will apply every forward-only SQL file in `migrations/` and record it in
-`ops.schema_migrations`. Never edit or delete a migration that has been applied
-to a shared environment.
+`src/database/schema.sql` is the clean-install baseline. The retained
+baseline-alignment migrations support existing canonical databases created from
+the earlier schema; run `npm run db:migrate` for those databases before deploying
+new application code. New databases use `npm run db:schema` first, then may run
+`npm run db:migrate` safely to record the current alignment migrations. Never
+edit or delete a migration that has been applied to a shared environment.
 
 ## Media and document uploads
 
@@ -240,8 +249,9 @@ key and metadata. Do not raise the global body limit to accommodate files.
 
 Configure `GCS_BUCKET` and an Application Default Credential that can sign
 URLs and write to that bucket. For local development use
-`GOOGLE_APPLICATION_CREDENTIALS` pointing to a service-account JSON file; do
-not commit that file. Restart the API after changing either variable because
+`GOOGLE_APPLICATION_CREDENTIALS` pointing to a file inside the ignored
+`secrets/` directory; do not commit that file. Restart the API after changing
+either variable because
 the storage client is created during process startup. The bucket must also
 allow the UI origin (for example `http://localhost:5173`) in its **bucket CORS
 policy**. API CORS settings do not control direct browser uploads to GCS.

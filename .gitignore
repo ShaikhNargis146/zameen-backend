@@ -6,6 +6,9 @@ logs
 
 .env
 *-sa-key.json
+*-key.json
+*service-account*.json
+secrets/
 
 # Runtime data
 pids

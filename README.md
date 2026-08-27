@@ -9,9 +9,11 @@ The prior database design has been replaced with the clean-install schema in
 `auth`, `account`, `geo`, `land`, `marketplace`, `commerce`, `content`, `ops`,
 and `ai` PostgreSQL schemas.
 
-During initial development, recreate a development database and run `npm run db:schema` once. The SQL is a clean-install script; it must not be run on an existing database as a migration.
-
-There are intentionally no migration scripts yet. Once a shared/staging database exists, future schema changes will be added as forward-only migrations and applied with `npm run db:migrate`.
+For a new database, run `npm run db:schema` once. The SQL is a clean-install
+script; it must not be run on an existing database as a migration. Existing
+canonical databases created from the earlier baseline must run
+`npm run db:migrate` before this version is deployed. The migrations are
+forward-only and must never be edited after reaching a shared environment.
 
 ## Implemented API modules
 

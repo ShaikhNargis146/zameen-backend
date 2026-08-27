@@ -91,6 +91,41 @@ export const childrenForLocation = (id, type = null) =>
     `SELECT ${locationFields} FROM geo.locations l WHERE l.parent_id = $1 AND l.is_active = true AND ($2::varchar IS NULL OR l.type = $2) ORDER BY l.type, l.name`,
     [id, type]
   );
+// LGD supplies sub-districts and villages, not a complete city/locality
+// hierarchy. Prefer curated CITY/LOCALITY records when present; otherwise
+// return the official LGD level without mislabelling it in the response.
+export const citiesForDistrict = districtId =>
+  run(
+    "any",
+    `SELECT ${locationFields} FROM geo.locations l
+     WHERE l.parent_id = $1 AND l.is_active = true
+       AND (l.type = 'CITY' OR (
+         l.type = 'SUBDISTRICT' AND NOT EXISTS (
+           SELECT 1 FROM geo.locations city
+           WHERE city.parent_id = l.parent_id
+             AND city.type = 'CITY'
+             AND city.is_active = true
+         )
+       ))
+     ORDER BY CASE l.type WHEN 'CITY' THEN 0 ELSE 1 END, l.name`,
+    [districtId]
+  );
+export const localitiesForCity = cityId =>
+  run(
+    "any",
+    `SELECT ${locationFields} FROM geo.locations l
+     WHERE l.parent_id = $1 AND l.is_active = true
+       AND (l.type = 'LOCALITY' OR (
+         l.type = 'VILLAGE' AND NOT EXISTS (
+           SELECT 1 FROM geo.locations locality
+           WHERE locality.parent_id = l.parent_id
+             AND locality.type = 'LOCALITY'
+             AND locality.is_active = true
+         )
+       ))
+     ORDER BY CASE l.type WHEN 'LOCALITY' THEN 0 ELSE 1 END, l.name`,
+    [cityId]
+  );
 export const findLocation = id =>
   run(
     "oneOrNone",

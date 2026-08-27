@@ -29,11 +29,11 @@ router.get(
 );
 router.get(
   "/locations/districts/:districtId/cities",
-  asyncRoute(controller.children("CITY"))
+  asyncRoute(controller.cities)
 );
 router.get(
   "/locations/cities/:cityId/localities",
-  asyncRoute(controller.children("LOCALITY"))
+  asyncRoute(controller.localities)
 );
 router.get(
   "/locations/:locationId/children",
