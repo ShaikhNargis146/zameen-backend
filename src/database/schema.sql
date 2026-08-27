@@ -142,6 +142,7 @@ CREATE INDEX idx_geo_locations_parent_type ON geo.locations(parent_id, type) WHE
 CREATE INDEX idx_geo_locations_type_name ON geo.locations(type, name) WHERE is_active;
 CREATE INDEX idx_geo_locations_slug ON geo.locations(slug);
 CREATE INDEX idx_geo_locations_name_trgm ON geo.locations USING gin (name gin_trgm_ops);
+CREATE INDEX idx_geo_locations_name_prefix ON geo.locations (lower(name) text_pattern_ops) WHERE is_active;
 CREATE INDEX idx_geo_locations_center ON geo.locations USING gist(center);
 
 CREATE TABLE geo.location_aliases (
@@ -153,6 +154,7 @@ CREATE TABLE geo.location_aliases (
   UNIQUE (location_id, alias, language_code)
 );
 CREATE INDEX idx_geo_location_aliases_trgm ON geo.location_aliases USING gin (alias gin_trgm_ops);
+CREATE INDEX idx_geo_location_aliases_prefix ON geo.location_aliases (lower(alias) text_pattern_ops);
 
 CREATE TABLE geo.postal_codes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -743,15 +745,14 @@ CREATE INDEX idx_ops_analytics_events_listing ON ops.analytics_events(listing_id
 -- AI: conversation history is useful for support, quality and cost analysis.
 -- ---------------------------------------------------------------------------
 CREATE TABLE ai.conversations (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   context_type varchar(30) NOT NULL DEFAULT 'GENERAL' CHECK (context_type IN ('GENERAL','SEARCH','PROPERTY')),
   property_id uuid REFERENCES land.properties(id) ON DELETE SET NULL, listing_id uuid REFERENCES marketplace.listings(id) ON DELETE SET NULL,
-  title varchar(255), guest_token_hash char(64), guest_token_expires_at timestamptz,
+  title varchar(255),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_ai_property_context CHECK (context_type <> 'PROPERTY' OR property_id IS NOT NULL OR listing_id IS NOT NULL)
 );
 CREATE INDEX idx_ai_conversations_user ON ai.conversations(user_id, updated_at DESC) WHERE user_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_ai_conversations_guest_token_hash ON ai.conversations(guest_token_hash) WHERE guest_token_hash IS NOT NULL;
 CREATE TABLE ai.messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), conversation_id uuid NOT NULL REFERENCES ai.conversations(id) ON DELETE RESTRICT,
   role varchar(20) NOT NULL CHECK (role IN ('USER','ASSISTANT','SYSTEM')), content text NOT NULL, model varchar(100),

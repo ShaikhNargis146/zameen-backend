@@ -1,23 +1,16 @@
 import { pg, run } from "../../shared/db.js";
 
-const conversationColumns = `id, user_id AS "userId", context_type AS "contextType", listing_id AS "listingId", title, guest_token_expires_at AS "guestTokenExpiresAt", created_at AS "createdAt", updated_at AS "updatedAt"`;
-export const createConversation = ({
-  userId,
-  contextType,
-  listingId,
-  title,
-  guestTokenHash,
-  guestTokenExpiresAt
-}) =>
+const conversationColumns = `id, user_id AS "userId", context_type AS "contextType", listing_id AS "listingId", title, created_at AS "createdAt", updated_at AS "updatedAt"`;
+export const createConversation = ({ userId, contextType, listingId, title }) =>
   pg.one(
-    `INSERT INTO ai.conversations (user_id, context_type, listing_id, title, guest_token_hash, guest_token_expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${conversationColumns}`,
-    [userId, contextType, listingId, title, guestTokenHash, guestTokenExpiresAt]
+    `INSERT INTO ai.conversations (user_id, context_type, listing_id, title)
+     VALUES ($1,$2,$3,$4) RETURNING ${conversationColumns}`,
+    [userId, contextType, listingId, title]
   );
 export const conversation = id =>
   run(
     "oneOrNone",
-    `SELECT ${conversationColumns}, guest_token_hash AS "guestTokenHash" FROM ai.conversations WHERE id = $1`,
+    `SELECT ${conversationColumns} FROM ai.conversations WHERE id = $1`,
     [id]
   );
 export const addMessage = ({

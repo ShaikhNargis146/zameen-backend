@@ -1,6 +1,8 @@
 import { run } from "../../shared/db.js";
 import { masters } from "./catalog.constants.js";
 const locationFields = `l.id, l.name, l.type, l.parent_id AS "parentId", l.state_code AS "stateCode", CASE WHEN l.center IS NULL THEN NULL ELSE ST_Y(l.center::geometry) END AS latitude, CASE WHEN l.center IS NULL THEN NULL ELSE ST_X(l.center::geometry) END AS longitude, COALESCE((WITH RECURSIVE ancestors AS (SELECT id, parent_id, name, 0 AS depth FROM geo.locations WHERE id = l.id UNION ALL SELECT parent.id, parent.parent_id, parent.name, ancestors.depth + 1 FROM geo.locations parent JOIN ancestors ON ancestors.parent_id = parent.id) SELECT string_agg(name, ', ' ORDER BY depth DESC) FROM ancestors), l.name) AS "displayPath"`;
+const escapeLike = value =>
+  String(value).replace(/[\\%_]/g, character => `\\${character}`);
 
 export const listMaster = key =>
   run(
@@ -37,12 +39,41 @@ export const parcelConfiguration = code =>
     `SELECT configuration.notes FROM land.parcel_configurations configuration JOIN geo.locations state ON state.id = configuration.state_location_id WHERE state.type = 'STATE' AND state.state_code = $1`,
     [code]
   );
-export const searchLocations = ({ q, types, stateCode, limit }) =>
-  run(
+export const searchLocations = ({ q, types, stateCode, limit }) => {
+  const prefixSearch = q.length === 2;
+  const pattern = prefixSearch
+    ? `${escapeLike(q).toLowerCase()}%`
+    : `%${escapeLike(q)}%`;
+  const nameMatch = prefixSearch
+    ? "lower(l.name) LIKE $1 ESCAPE E'\\\\'"
+    : "l.name ILIKE $1 ESCAPE E'\\\\'";
+  const aliasMatch = prefixSearch
+    ? "lower(a.alias) LIKE $1 ESCAPE E'\\\\'"
+    : "a.alias ILIKE $1 ESCAPE E'\\\\'";
+  return run(
     "any",
-    `SELECT DISTINCT ${locationFields} FROM geo.locations l LEFT JOIN geo.location_aliases a ON a.location_id = l.id WHERE l.is_active = true AND (l.name ILIKE $1 OR a.alias ILIKE $1) AND ($2::varchar[] IS NULL OR l.type = ANY($2)) AND ($3::varchar IS NULL OR l.state_code = $3) ORDER BY l.type, l.name LIMIT $4`,
-    [`%${q}%`, types, stateCode, limit]
+    `WITH candidates AS MATERIALIZED (
+         SELECT l.id FROM geo.locations l
+         WHERE l.is_active AND ${nameMatch}
+           AND ($2::varchar[] IS NULL OR l.type = ANY($2))
+           AND ($3::varchar IS NULL OR l.state_code = $3)
+         UNION
+         SELECT a.location_id FROM geo.location_aliases a
+         JOIN geo.locations l ON l.id = a.location_id
+         WHERE l.is_active AND ${aliasMatch}
+           AND ($2::varchar[] IS NULL OR l.type = ANY($2))
+           AND ($3::varchar IS NULL OR l.state_code = $3)
+       ), ranked AS (
+         SELECT l.id FROM geo.locations l
+         JOIN candidates ON candidates.id = l.id
+         ORDER BY l.type, l.name LIMIT $4
+       )
+       SELECT ${locationFields} FROM geo.locations l
+       JOIN ranked ON ranked.id = l.id
+       ORDER BY l.type, l.name`,
+    [pattern, types, stateCode, limit]
   );
+};
 export const locationsForPincode = pincode =>
   run(
     "any",

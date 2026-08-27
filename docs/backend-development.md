@@ -130,16 +130,15 @@ module uses the OpenAI Responses API for structured natural-language filter
 extraction, grounded conversation replies, and listing-copy drafts. The service
 resolves every extracted filter against Zameens master data and then uses the
 normal discovery service; the model never queries the database or decides
-authorization. An anonymous AI conversation returns a `guestAccessToken`;
-clients must send it as `X-AI-Conversation-Token` on later message/detail
-requests. Do not put that token in a URL or log it. Chat replies are streamed
-from the existing `POST /ai/conversations/:conversationId/messages` endpoint as
+authorization. AI search remains public/auth-aware, but AI chat is available only to an
+authenticated user and every conversation belongs to that user. Chat replies
+are streamed from the existing `POST /ai/conversations/:conversationId/messages` endpoint as
 SSE: `message.delta` events are transient UI text and `message.completed`
 contains the persisted `AiMessage`; an SSE `error` is not a saved answer. The
 full event contract is in `Zameens_Phase1_UI_API_Integration_Specification.txt`.
-Signed-in users load their retained chat history through paginated `GET
-/ai/conversations`; anonymous conversations remain accessible only with their
-guest conversation token.
+Users load their retained chat history through paginated `GET /ai/conversations`.
+The shared-database migration preserves any old anonymous records for retention,
+but removes their guest credentials so they are no longer accessible.
 
 AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
 API process so it receives the changed environment. `OPENAI_MODEL`

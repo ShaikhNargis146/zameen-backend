@@ -13,7 +13,7 @@ router.use(aiRateLimit);
 router.post("/ai/search", optionalAuth, asyncRoute(controller.search));
 router.post(
   "/ai/conversations",
-  optionalAuth,
+  requireAuth,
   asyncRoute(controller.createConversation)
 );
 router.get(
@@ -23,12 +23,12 @@ router.get(
 );
 router.post(
   "/ai/conversations/:conversationId/messages",
-  optionalAuth,
+  requireAuth,
   asyncRoute(controller.addMessage)
 );
 router.get(
   "/ai/conversations/:conversationId",
-  optionalAuth,
+  requireAuth,
   asyncRoute(controller.getConversation)
 );
 router.post(

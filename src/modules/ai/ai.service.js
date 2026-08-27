@@ -1,15 +1,11 @@
-import { randomBytes } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
 import { paginationMeta, splitCountedRows } from "../../shared/pagination.js";
-import { hashWithPepper, safeEqualHex } from "../../utils/crypto.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import * as discovery from "../discovery/discovery.service.js";
 import { search as validateListingSearch } from "../discovery/discovery.validation.js";
 import * as provider from "./ai.provider.js";
 import * as repository from "./ai.repository.js";
 
-const guestTokenTtlHours = Number(process.env.AI_GUEST_TOKEN_TTL_HOURS || 24);
-const guestHash = token => hashWithPepper(`ai-guest:${token}`);
 const snippet = value =>
   String(value || "")
     .replace(/\s+/g, " ")
@@ -27,7 +23,7 @@ const messageResponse = message => ({
   sources: message.metadata?.sources || []
 });
 
-const requireAccess = async ({ conversationId, actorId, guestToken }) => {
+const requireAccess = async ({ conversationId, actorId }) => {
   const conversation = await repository.conversation(conversationId);
   if (!conversation)
     throw new HttpError(
@@ -35,16 +31,7 @@ const requireAccess = async ({ conversationId, actorId, guestToken }) => {
       "CONVERSATION_NOT_FOUND",
       "Conversation was not found."
     );
-  if (conversation.userId && conversation.userId === actorId)
-    return conversation;
-  if (
-    !conversation.userId &&
-    guestToken &&
-    conversation.guestTokenExpiresAt &&
-    new Date(conversation.guestTokenExpiresAt) > new Date() &&
-    safeEqualHex(guestHash(guestToken), conversation.guestTokenHash)
-  )
-    return conversation;
+  if (conversation.userId === actorId) return conversation;
   throw new HttpError(
     404,
     "CONVERSATION_NOT_FOUND",
@@ -113,20 +100,11 @@ export const search = async ({ input, actorId }) => {
 export const createConversation = async ({ actorId, input }) => {
   if (input.listingId && !(await repository.listingContext(input.listingId)))
     throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
-  const guestAccessToken = actorId
-    ? null
-    : randomBytes(32).toString("base64url");
   const result = await repository.createConversation({
     userId: actorId,
     contextType: input.contextType,
     listingId: input.listingId,
-    title: input.initialQuery
-      ? snippet(input.initialQuery).slice(0, 255)
-      : null,
-    guestTokenHash: guestAccessToken ? guestHash(guestAccessToken) : null,
-    guestTokenExpiresAt: guestAccessToken
-      ? new Date(Date.now() + guestTokenTtlHours * 3600000)
-      : null
+    title: input.initialQuery ? snippet(input.initialQuery).slice(0, 255) : null
   });
   if (!result.ok) throw result.error;
   if (input.initialQuery)
@@ -135,10 +113,7 @@ export const createConversation = async ({ actorId, input }) => {
       role: "USER",
       content: input.initialQuery
     });
-  return {
-    ...publicConversation(result.data),
-    ...(guestAccessToken ? { guestAccessToken } : {})
-  };
+  return publicConversation(result.data);
 };
 export const listConversations = async ({ actorId, pagination }) => {
   const { page, limit, offset } = pagination;
@@ -158,16 +133,10 @@ export const listConversations = async ({ actorId, pagination }) => {
     meta: paginationMeta({ page, limit, total })
   };
 };
-const messageContext = async ({
-  conversationId,
-  actorId,
-  guestToken,
-  input
-}) => {
+const messageContext = async ({ conversationId, actorId, input }) => {
   const conversation = await requireAccess({
     conversationId,
-    actorId,
-    guestToken
+    actorId
   });
   const saved = await repository.addMessage({
     conversationId,
@@ -268,15 +237,10 @@ export const streamMessage = async ({ signal, ...params }) => {
     }
   };
 };
-export const getConversation = async ({
-  conversationId,
-  actorId,
-  guestToken
-}) => {
+export const getConversation = async ({ conversationId, actorId }) => {
   const conversation = await requireAccess({
     conversationId,
-    actorId,
-    guestToken
+    actorId
   });
   return {
     conversation: publicConversation(conversation),

@@ -41,10 +41,6 @@ Header
 	Optional
 	en
 	Supported: en, hi, mr, gu, pa, te, ta.
-	X-AI-Conversation-Token
-	Guest AI conversation follow-up
-	Token returned by POST /ai/conversations
-	Required for a guest to read or add messages to that conversation.
 	X-Request-ID
 	Optional
 	uuid
@@ -413,11 +409,6 @@ Field
 	
 
 	Last successful login.
-	guestAccessToken
-	string|null
-	No
-	Guest only
-	Send as X-AI-Conversation-Token for subsequent guest message/read calls.
 	createdAt
 	datetime
 	Yes
@@ -3088,7 +3079,7 @@ Method
 	AiSearchResult
 	POST
 	/ai/conversations
-	Public/auth
+	Authenticated user
 	CreateAiConversation
 	AiConversation
 	GET
@@ -3098,12 +3089,12 @@ Method
 	AiConversation[] + PaginationMeta
 	POST
 	/ai/conversations/{conversationId}/messages
-	Conversation owner
+	Authenticated conversation owner
 	AiMessageInput
 	SSE: AiMessageDelta + AiMessage
 	GET
 	/ai/conversations/{conversationId}
-	Conversation owner
+	Authenticated conversation owner
 	none
 	AiConversationDetail
 	POST
@@ -3116,7 +3107,7 @@ Method
 AI chat streaming contract
 
 POST /api/v1/ai/conversations/{conversationId}/messages returns `200 text/event-stream`.
-The request body and `X-AI-Conversation-Token` guest authorization remain unchanged.
+An `Authorization: Bearer <access-token>` header is required; the conversation must belong to that user.
 The UI must use `fetch` and read the response stream; EventSource cannot make this POST request.
 Each SSE event has JSON in `data` and is one of:
 
