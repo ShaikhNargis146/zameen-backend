@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   lgdSlug,
   locationTypes,
+  normalizeLocationLabel,
   stateCodeForLgd
 } from "../../src/modules/catalog/location-import.constants.js";
 
@@ -15,4 +16,8 @@ test("LGD state codes map to the API state-code contract", () => {
 test("LGD location identities are deterministic and type-scoped", () => {
   assert.equal(lgdSlug(locationTypes.states, "27"), "lgd-state-27");
   assert.equal(lgdSlug(locationTypes.districts, "27"), "lgd-district-27");
+});
+
+test("postal labels are matched without case, punctuation, or accents", () => {
+  assert.equal(normalizeLocationLabel("Dadra & Nagar Havéli"), "DADRANAGARHAVELI");
 });

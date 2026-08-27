@@ -49,6 +49,12 @@ DATASETS = {
     },
 }
 
+PINCODE_COLUMNS = {
+    "code": "pincode",
+    "state_name": "statename",
+    "district_name": "district",
+}
+
 
 def normalized_value(value):
     if value is None:
@@ -105,6 +111,40 @@ def prepare_dataset(dataset_name, config, input_dir, output_dir):
     return {"sourceFile": source.name, "rows": count}
 
 
+def prepare_pincodes(input_dir, output_dir):
+    source = input_dir / "pincode.csv"
+    if not source.is_file():
+        raise ValueError(f"Expected pincode.csv in {input_dir}.")
+    output_path = output_dir / "pincodes.csv"
+    count = 0
+    with source.open("r", newline="", encoding="utf-8-sig") as input_file, output_path.open(
+        "w", newline="", encoding="utf-8"
+    ) as output_file:
+        reader = csv.DictReader(input_file)
+        headers = reader.fieldnames or []
+        for header in PINCODE_COLUMNS.values():
+            if header not in headers:
+                raise ValueError(f"{source.name} is missing required column: {header}")
+        writer = csv.DictWriter(
+            output_file,
+            fieldnames=PINCODE_COLUMNS.keys(),
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for row_number, row in enumerate(reader, start=2):
+            result = {
+                field: normalized_value(row.get(header))
+                for field, header in PINCODE_COLUMNS.items()
+            }
+            if not result["code"] or not result["state_name"] or not result["district_name"]:
+                raise ValueError(
+                    f"{source.name} row {row_number} is missing PIN, state, or district."
+                )
+            writer.writerow(result)
+            count += 1
+    return {"sourceFile": source.name, "rows": count}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", default="locations_data")
@@ -121,8 +161,10 @@ def main():
         name: prepare_dataset(name, config, input_dir, output_dir)
         for name, config in DATASETS.items()
     }
+    if (input_dir / "pincode.csv").is_file():
+        datasets["pincodes"] = prepare_pincodes(input_dir, output_dir)
     metadata = {
-        "source": "Local Government Directory (LGD)",
+        "sources": ["Local Government Directory (LGD)", "pincode.csv"],
         "preparedAt": datetime.now(timezone.utc).isoformat(),
         "datasets": datasets,
     }

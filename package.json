@@ -15,6 +15,8 @@
 		"locations:prepare": "python3 scripts/prepare-location-data.py --input-dir locations_data --output-dir .location-import",
 		"locations:check": "node scripts/import-locations.js --input-dir .location-import --check",
 		"locations:import": "node scripts/import-locations.js --input-dir .location-import --apply",
+		"pincodes:check": "node scripts/import-locations.js --input-dir .location-import --check --only-pincodes",
+		"pincodes:import": "node scripts/import-locations.js --input-dir .location-import --apply --only-pincodes",
 		"lint": "eslint **/*.js --ignore-path .gitignore --ignore-pattern internals/scripts",
 		"test": "cross-env NODE_ENV=test node --test test/unit/*.test.js",
 		"pack": "rm -rf pkg/*.tgz && npm pack && mkdir -p pkg && mv *.tgz pkg/",

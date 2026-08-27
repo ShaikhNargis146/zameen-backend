@@ -77,6 +77,16 @@ not contain PIN-to-location relationships, city/locality curation, or map
 coordinates. Load those through separately verified India Post and geocoding
 data processes; do not infer them from village records.
 
+When supplied, the same preparation command also normalizes
+`locations_data/pincode.csv`.
+Use `npm run pincodes:check` before `npm run pincodes:import` when only the
+PIN data changes. Each PIN is stored once and linked only to an exact,
+normalized state-and-district match in the LGD hierarchy. A PIN that appears
+under more than one valid state is retained with a null `stateCode`; unmatched
+or incomplete source labels are retained as PINs but are not linked to a
+location. Post-office latitude/longitude is intentionally not assigned to a
+district, because it describes one office rather than the whole district.
+
 ## Source layout
 
 ```text

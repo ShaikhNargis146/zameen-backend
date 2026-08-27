@@ -5,15 +5,15 @@ import { parse } from "csv-parse";
 import {
   lgdSlug,
   locationTypes,
+  normalizeLocationLabel,
   stateCodeForLgd
 } from "../src/modules/catalog/location-import.constants.js";
 
-const expectedFiles = Object.freeze([
+const locationFiles = Object.freeze([
   "states.csv",
   "districts.csv",
   "subdistricts.csv",
-  "villages.csv",
-  "metadata.json"
+  "villages.csv"
 ]);
 // A large enough batch keeps Cloud SQL round-trips practical while each
 // transaction remains bounded and independently restartable.
@@ -26,6 +26,7 @@ const argumentValue = (name, defaultValue = null) => {
 
 const inputDirectory = path.resolve(argumentValue("--input-dir", ".location-import"));
 const shouldApply = process.argv.includes("--apply");
+const onlyPincodes = process.argv.includes("--only-pincodes");
 
 const required = (value, label) => {
   const normalized = String(value || "").trim();
@@ -41,20 +42,43 @@ const readCsv = async function* (filename) {
 };
 
 const validatePreparedFiles = async () => {
+  const expectedFiles = [
+    ...(onlyPincodes ? [] : locationFiles),
+    "metadata.json"
+  ];
   await Promise.all(
     expectedFiles.map(filename => access(path.join(inputDirectory, filename)))
   );
   const metadata = JSON.parse(
     await readFile(path.join(inputDirectory, "metadata.json"), "utf8")
   );
-  if (metadata.source !== "Local Government Directory (LGD)") {
-    throw new Error("metadata.json is not an LGD location-data export.");
+  if (onlyPincodes && !metadata.datasets?.pincodes) {
+    throw new Error("metadata.json does not describe a PIN data export.");
   }
   return metadata;
 };
 
-const validateData = async () => {
-  const summary = { states: 0, districts: 0, subdistricts: 0, villages: 0 };
+const validateData = async metadata => {
+  const summary = {};
+  const pincodes = new Set();
+  if (metadata.datasets?.pincodes) {
+    await access(path.join(inputDirectory, "pincodes.csv"));
+    summary.pincodes = 0;
+    for await (const row of readCsv("pincodes.csv")) {
+      const code = required(row.code, "PIN code");
+      if (!/^\d{6}$/.test(code)) {
+        throw new Error(`PIN code ${code} must contain exactly six digits.`);
+      }
+      required(row.state_name, `PIN ${code} state name`);
+      required(row.district_name, `PIN ${code} district name`);
+      pincodes.add(code);
+      summary.pincodes += 1;
+    }
+    summary.uniquePincodes = pincodes.size;
+  }
+  if (onlyPincodes) return summary;
+
+  Object.assign(summary, { states: 0, districts: 0, subdistricts: 0, villages: 0 });
   const states = new Set();
   const districts = new Set();
   const subdistricts = new Set();
@@ -193,7 +217,120 @@ const importDataset = async ({ db, filename, type, parentIdForRow }) => {
   return processed;
 };
 
-const applyData = async () => {
+const districtReference = async db => {
+  const rows = await db.any(
+    `SELECT district.id AS district_id,
+            district.name AS district_name,
+            state.id AS state_id,
+            state.name AS state_name,
+            state.state_code
+     FROM geo.locations district
+     JOIN geo.locations state ON state.id = district.parent_id
+     WHERE district.type = 'DISTRICT' AND district.is_active = true`
+  );
+  const states = new Map();
+  const districts = new Map();
+  for (const row of rows) {
+    const stateName = normalizeLocationLabel(row.state_name);
+    states.set(stateName, { id: row.state_id, code: row.state_code });
+    districts.set(
+      `${row.state_id}|${normalizeLocationLabel(row.district_name)}`,
+      row.district_id
+    );
+  }
+  return { states, districts };
+};
+
+const collectPincodes = async db => {
+  const { states, districts } = await districtReference(db);
+  const postalCodes = new Map();
+  const links = new Map();
+  const unmatchedStateLabels = new Set();
+  const unmatchedDistrictLabels = new Set();
+  let rows = 0;
+
+  for await (const row of readCsv("pincodes.csv")) {
+    const code = required(row.code, "PIN code");
+    const stateName = required(row.state_name, `PIN ${code} state name`);
+    const districtName = required(row.district_name, `PIN ${code} district name`);
+    const postalCode = postalCodes.get(code) || { code, stateCodes: new Set() };
+    postalCodes.set(code, postalCode);
+    const state = states.get(normalizeLocationLabel(stateName));
+    if (!state) {
+      unmatchedStateLabels.add(stateName);
+      rows += 1;
+      continue;
+    }
+    postalCode.stateCodes.add(state.code);
+    const districtId = districts.get(
+      `${state.id}|${normalizeLocationLabel(districtName)}`
+    );
+    if (!districtId) {
+      unmatchedDistrictLabels.add(`${stateName}|${districtName}`);
+      rows += 1;
+      continue;
+    }
+    links.set(`${code}|${districtId}`, { code, location_id: districtId });
+    rows += 1;
+  }
+
+  return {
+    postalCodes: [...postalCodes.values()].map(postalCode => ({
+      code: postalCode.code,
+      state_code:
+        postalCode.stateCodes.size === 1
+          ? [...postalCode.stateCodes][0]
+          : null
+    })),
+    links: [...links.values()],
+    diagnostics: {
+      rows,
+      uniquePincodes: postalCodes.size,
+      verifiedDistrictLinks: links.size,
+      pincodesWithAmbiguousStates: [...postalCodes.values()].filter(
+        postalCode => postalCode.stateCodes.size > 1
+      ).length,
+      unmatchedStateLabels: unmatchedStateLabels.size,
+      unmatchedDistrictLabels: unmatchedDistrictLabels.size
+    }
+  };
+};
+
+const chunks = (items, size) => {
+  const result = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
+};
+
+const importPincodes = async db => {
+  const collected = await collectPincodes(db);
+  for (const rows of chunks(collected.postalCodes, batchSize)) {
+    await db.none(
+      `INSERT INTO geo.postal_codes (code, state_code)
+       SELECT source.code, source.state_code
+       FROM jsonb_to_recordset($1::jsonb)
+         AS source(code varchar, state_code varchar)
+       ON CONFLICT (code) DO UPDATE SET state_code = EXCLUDED.state_code`,
+      [JSON.stringify(rows)]
+    );
+  }
+  for (const rows of chunks(collected.links, batchSize)) {
+    await db.none(
+      `INSERT INTO geo.postal_code_locations (postal_code_id, location_id)
+       SELECT postal_code.id, source.location_id
+       FROM jsonb_to_recordset($1::jsonb)
+         AS source(code varchar, location_id uuid)
+       JOIN geo.postal_codes postal_code ON postal_code.code = source.code
+       ON CONFLICT (postal_code_id, location_id) DO NOTHING`,
+      [JSON.stringify(rows)]
+    );
+  }
+  return collected.diagnostics;
+};
+
+const applyData = async metadata => {
   await import("../src/config/env.js");
   const { default: db } = await import("../src/config/postgres.config.js");
   try {
@@ -203,52 +340,64 @@ const applyData = async () => {
     if (!schema.exists) {
       throw new Error("Canonical schema is missing. Run npm run db:schema on a new database first.");
     }
-    const india = await ensureIndia(db);
-    const states = await importDataset({
-      db,
-      filename: "states.csv",
-      type: locationTypes.states,
-      parentIdForRow: () => india.id
-    });
-    const stateIds = await locationIdsBySlug(db, locationTypes.states);
-    const districts = await importDataset({
-      db,
-      filename: "districts.csv",
-      type: locationTypes.districts,
-      parentIdForRow: row => {
-        const id = stateIds.get(lgdSlug(locationTypes.states, row.state_code));
-        if (!id) throw new Error(`State ${row.state_code} was not imported.`);
-        return id;
-      }
-    });
-    const districtIds = await locationIdsBySlug(db, locationTypes.districts);
-    const subdistricts = await importDataset({
-      db,
-      filename: "subdistricts.csv",
-      type: locationTypes.subdistricts,
-      parentIdForRow: row => {
-        const id = districtIds.get(lgdSlug(locationTypes.districts, row.district_code));
-        if (!id) throw new Error(`District ${row.district_code} was not imported.`);
-        return id;
-      }
-    });
-    const subdistrictIds = await locationIdsBySlug(db, locationTypes.subdistricts);
-    const villages = await importDataset({
-      db,
-      filename: "villages.csv",
-      type: locationTypes.villages,
-      parentIdForRow: row => {
-        const id = subdistrictIds.get(lgdSlug(locationTypes.subdistricts, row.subdistrict_code));
-        if (!id) throw new Error(`Sub-district ${row.subdistrict_code} was not imported.`);
-        return id;
-      }
-    });
+    let locations = null;
+    if (!onlyPincodes) {
+      const india = await ensureIndia(db);
+      const states = await importDataset({
+        db,
+        filename: "states.csv",
+        type: locationTypes.states,
+        parentIdForRow: () => india.id
+      });
+      const stateIds = await locationIdsBySlug(db, locationTypes.states);
+      const districts = await importDataset({
+        db,
+        filename: "districts.csv",
+        type: locationTypes.districts,
+        parentIdForRow: row => {
+          const id = stateIds.get(lgdSlug(locationTypes.states, row.state_code));
+          if (!id) throw new Error(`State ${row.state_code} was not imported.`);
+          return id;
+        }
+      });
+      const districtIds = await locationIdsBySlug(db, locationTypes.districts);
+      const subdistricts = await importDataset({
+        db,
+        filename: "subdistricts.csv",
+        type: locationTypes.subdistricts,
+        parentIdForRow: row => {
+          const id = districtIds.get(lgdSlug(locationTypes.districts, row.district_code));
+          if (!id) throw new Error(`District ${row.district_code} was not imported.`);
+          return id;
+        }
+      });
+      const subdistrictIds = await locationIdsBySlug(db, locationTypes.subdistricts);
+      const villages = await importDataset({
+        db,
+        filename: "villages.csv",
+        type: locationTypes.villages,
+        parentIdForRow: row => {
+          const id = subdistrictIds.get(
+            lgdSlug(locationTypes.subdistricts, row.subdistrict_code)
+          );
+          if (!id) throw new Error(`Sub-district ${row.subdistrict_code} was not imported.`);
+          return id;
+        }
+      });
+      locations = { states, districts, subdistricts, villages };
+    }
+    const pincodes = metadata.datasets?.pincodes
+      ? await importPincodes(db)
+      : null;
     const totals = await db.any(
       `SELECT type, count(*)::int AS count FROM geo.locations
        WHERE type = ANY($1::varchar[]) GROUP BY type ORDER BY type`,
       [["COUNTRY", "STATE", "DISTRICT", "SUBDISTRICT", "VILLAGE"]]
     );
-    return { imported: { states, districts, subdistricts, villages }, totals };
+    const postalCodeTotal = metadata.datasets?.pincodes
+      ? await db.one("SELECT count(*)::int AS count FROM geo.postal_codes")
+      : null;
+    return { imported: { locations, pincodes }, totals, postalCodeTotal };
   } finally {
     await db.$pool.end();
   }
@@ -256,8 +405,8 @@ const applyData = async () => {
 
 try {
   const metadata = await validatePreparedFiles();
-  const checked = await validateData();
-  const result = shouldApply ? await applyData() : { checked };
+  const checked = await validateData(metadata);
+  const result = shouldApply ? await applyData(metadata) : { checked };
   console.log(JSON.stringify({ metadata, ...result }, null, 2));
 } catch (error) {
   console.error(`Location import failed: ${error.message}`);

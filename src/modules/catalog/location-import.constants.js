@@ -51,6 +51,13 @@ const stateCodeByLgdCode = Object.freeze({
 
 export const stateCodeForLgd = value => stateCodeByLgdCode[String(value)];
 
+export const normalizeLocationLabel = value =>
+  String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+
 // geo.locations has no separate external-reference table in the initial
 // baseline. These reserved, code-based slugs are stable LGD import identities;
 // they are not exposed by the location API.
