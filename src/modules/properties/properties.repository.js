@@ -302,6 +302,86 @@ export const hasActiveDocumentAccessGrant = (documentId, userId) =>
        AND (expires_at IS NULL OR expires_at > now())`,
     [documentId, userId]
   );
+const documentAccessGrantColumns = `grant.id, grant.expires_at AS "expiresAt", grant.created_at AS "createdAt",
+  user_account.id AS "granteeUserId", user_account.display_name AS "granteeDisplayName"`;
+export const documentAccessGrants = documentId =>
+  run(
+    "any",
+    `SELECT ${documentAccessGrantColumns}
+     FROM land.property_document_access_grants grant
+     JOIN auth.users user_account ON user_account.id = grant.grantee_user_id
+     WHERE grant.property_document_id = $1
+       AND grant.revoked_at IS NULL
+       AND (grant.expires_at IS NULL OR grant.expires_at > now())
+     ORDER BY grant.created_at DESC, grant.id DESC`,
+    [documentId]
+  );
+export const eligibleDocumentGrantee = userId =>
+  run(
+    "oneOrNone",
+    `SELECT user_account.id
+     FROM auth.users user_account
+     WHERE user_account.id = $1
+       AND user_account.status = 'ACTIVE'
+       AND user_account.deleted_at IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM auth.user_roles user_role
+         JOIN auth.roles role ON role.id = user_role.role_id
+         WHERE user_role.user_id = user_account.id AND role.code = 'BUYER'
+       )`,
+    [userId]
+  );
+export const upsertDocumentAccessGrant = ({
+  documentId,
+  granteeUserId,
+  grantedByUserId,
+  expiresAt
+}) =>
+  run(
+    "one",
+    `INSERT INTO land.property_document_access_grants
+       (property_document_id, grantee_user_id, granted_by_user_id, expires_at)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (property_document_id, grantee_user_id) WHERE revoked_at IS NULL
+     DO UPDATE SET granted_by_user_id = EXCLUDED.granted_by_user_id,
+                   expires_at = EXCLUDED.expires_at
+     RETURNING id`,
+    [documentId, granteeUserId, grantedByUserId, expiresAt]
+  );
+export const documentAccessGrant = (documentId, grantId) =>
+  run(
+    "oneOrNone",
+    `SELECT ${documentAccessGrantColumns}
+     FROM land.property_document_access_grants grant
+     JOIN auth.users user_account ON user_account.id = grant.grantee_user_id
+     WHERE grant.id = $1
+       AND grant.property_document_id = $2
+       AND grant.revoked_at IS NULL`,
+    [grantId, documentId]
+  );
+export const revokeDocumentAccessGrant = grantId =>
+  run(
+    "oneOrNone",
+    `UPDATE land.property_document_access_grants
+     SET revoked_at = now()
+     WHERE id = $1 AND revoked_at IS NULL
+     RETURNING id`,
+    [grantId]
+  );
+export const auditDocumentAccessGrant = ({
+  actorId,
+  action,
+  documentId,
+  data
+}) =>
+  run(
+    "none",
+    `INSERT INTO ops.audit_logs
+       (actor_user_id, action, entity_type, entity_id, after_data)
+     VALUES ($1,$2,'land.property_documents',$3,$4::jsonb)`,
+    [actorId, action, documentId, JSON.stringify(data)]
+  );
 export const auditAdminDocumentRead = ({ actorId, documentId, propertyId }) =>
   run(
     "none",

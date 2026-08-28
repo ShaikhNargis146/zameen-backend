@@ -159,7 +159,6 @@ const applyLocationBatch = async (db, type, rows) => {
       `UPDATE geo.locations location
        SET name = source.name,
            state_code = source.state_code,
-           is_active = true,
            updated_at = now()
        FROM jsonb_to_recordset($1::jsonb)
          AS source(parent_id uuid, name varchar, slug varchar, state_code varchar)

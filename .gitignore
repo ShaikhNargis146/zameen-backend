@@ -30,3 +30,4 @@ node_modules
 # Test reports
 coverage
 .nyc_output
+zameen-key.json

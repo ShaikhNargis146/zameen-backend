@@ -21,6 +21,8 @@
     { "key": "documentTypeId", "value": "" },
     { "key": "mediaId", "value": "" },
     { "key": "documentId", "value": "" },
+    { "key": "grantId", "value": "" },
+    { "key": "granteeUserId", "value": "" },
     { "key": "storageKey", "value": "" },
     { "key": "verificationId", "value": "" },
     { "key": "conversationId", "value": "" }
@@ -105,9 +107,12 @@
         { "name": "Set media cover", "request": { "method": "PUT", "url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}/cover" } },
         { "name": "Delete media", "request": { "method": "DELETE", "url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}" } },
         { "name": "Create document upload ticket", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('storageKey', body.data.storageKey);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/upload-url" } },
-        { "name": "Complete document upload", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('documentId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"documentTypeId\": \"{{documentTypeId}}\",\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000,\n  \"visibility\": \"PRIVATE\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/complete" } },
+        { "name": "Complete document upload", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('documentId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"documentTypeId\": \"{{documentTypeId}}\",\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000,\n  \"visibility\": \"APPROVED_BUYERS\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/complete" } },
         { "name": "List documents", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents" } },
         { "name": "Document detail", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}" } },
+        { "name": "List document access grants", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}/access-grants" } },
+        { "name": "Grant document access", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('grantId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"granteeUserId\": \"{{granteeUserId}}\",\n  \"expiresAt\": \"2027-01-01T00:00:00.000Z\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}/access-grants" } },
+        { "name": "Revoke document access", "request": { "method": "DELETE", "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}/access-grants/{{grantId}}" } },
         { "name": "Delete document", "request": { "method": "DELETE", "url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}" } }
       ]
     },

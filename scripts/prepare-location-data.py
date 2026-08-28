@@ -149,6 +149,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", default="locations_data")
     parser.add_argument("--output-dir", default=".location-import")
+    parser.add_argument(
+        "--only-pincodes",
+        action="store_true",
+        help="Prepare pincode.csv without requiring LGD workbooks.",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir).resolve()
@@ -157,14 +162,21 @@ def main():
         raise ValueError(f"Input directory does not exist: {input_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    datasets = {
-        name: prepare_dataset(name, config, input_dir, output_dir)
-        for name, config in DATASETS.items()
-    }
-    if (input_dir / "pincode.csv").is_file():
+    datasets = {}
+    if not args.only_pincodes:
+        datasets.update(
+            {
+                name: prepare_dataset(name, config, input_dir, output_dir)
+                for name, config in DATASETS.items()
+            }
+        )
+    if args.only_pincodes or (input_dir / "pincode.csv").is_file():
         datasets["pincodes"] = prepare_pincodes(input_dir, output_dir)
     metadata = {
-        "sources": ["Local Government Directory (LGD)", "pincode.csv"],
+        "sources": [
+            *(["Local Government Directory (LGD)"] if not args.only_pincodes else []),
+            *( ["pincode.csv"] if "pincodes" in datasets else []),
+        ],
         "preparedAt": datetime.now(timezone.utc).isoformat(),
         "datasets": datasets,
     }

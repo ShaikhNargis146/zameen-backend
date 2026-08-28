@@ -406,3 +406,26 @@ export const documentComplete = body => {
     visibility
   };
 };
+export const documentAccessGrant = body => {
+  const granteeUserId = String(body.granteeUserId || "").trim();
+  if (!isUuid(granteeUserId))
+    throw new HttpError(
+      400,
+      "INVALID_ID",
+      "granteeUserId must be a valid UUID."
+    );
+  if (
+    body.expiresAt === undefined ||
+    body.expiresAt === null ||
+    body.expiresAt === ""
+  )
+    return { granteeUserId, expiresAt: null };
+  const expiresAt = new Date(body.expiresAt);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= new Date())
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "expiresAt must be a future ISO-8601 timestamp."
+    );
+  return { granteeUserId, expiresAt: expiresAt.toISOString() };
+};

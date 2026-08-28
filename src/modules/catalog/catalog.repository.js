@@ -40,16 +40,11 @@ export const parcelConfiguration = code =>
     [code]
   );
 export const searchLocations = ({ q, types, stateCode, limit }) => {
-  const prefixSearch = q.length === 2;
-  const pattern = prefixSearch
-    ? `${escapeLike(q).toLowerCase()}%`
-    : `%${escapeLike(q)}%`;
-  const nameMatch = prefixSearch
-    ? "lower(l.name) LIKE $1 ESCAPE E'\\\\'"
-    : "l.name ILIKE $1 ESCAPE E'\\\\'";
-  const aliasMatch = prefixSearch
-    ? "lower(a.alias) LIKE $1 ESCAPE E'\\\\'"
-    : "a.alias ILIKE $1 ESCAPE E'\\\\'";
+  // Type-ahead has one predictable, index-backed rule at every length:
+  // a query matches the start of a canonical location name or alias.
+  const pattern = `${escapeLike(q).toLowerCase()}%`;
+  const nameMatch = "lower(l.name) LIKE $1 ESCAPE E'\\\\'";
+  const aliasMatch = "lower(a.alias) LIKE $1 ESCAPE E'\\\\'";
   return run(
     "any",
     `WITH candidates AS MATERIALIZED (

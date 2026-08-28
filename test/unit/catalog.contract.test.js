@@ -22,6 +22,8 @@ test("location search uses indexable name and alias candidate queries", async ()
   ]);
   assert.match(repository, /WITH candidates AS MATERIALIZED/);
   assert.match(repository, /lower\(l\.name\) LIKE/);
+  assert.doesNotMatch(repository, /q\.length === 2/);
+  assert.doesNotMatch(repository, /ILIKE \$1 ESCAPE/);
   assert.match(schema, /idx_geo_locations_name_prefix/);
 });
 

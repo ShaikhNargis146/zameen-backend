@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   documentComplete,
+  documentAccessGrant,
   landDetails,
   mediaUpload,
   propertyList,
@@ -140,5 +141,30 @@ test("property upload inputs accept only the documented MIME policy", () => {
       mimeType: "application/pdf",
       fileSizeBytes: 1
     })
+  );
+});
+
+test("document access grants require an active-buyer identifier and future expiry", () => {
+  assert.deepEqual(
+    documentAccessGrant({
+      granteeUserId: "123e4567-e89b-12d3-a456-426614174000",
+      expiresAt: "2030-01-01T00:00:00.000Z"
+    }),
+    {
+      granteeUserId: "123e4567-e89b-12d3-a456-426614174000",
+      expiresAt: "2030-01-01T00:00:00.000Z"
+    }
+  );
+  assert.throws(
+    () => documentAccessGrant({ granteeUserId: "not-a-uuid" }),
+    error => error.code === "INVALID_ID"
+  );
+  assert.throws(
+    () =>
+      documentAccessGrant({
+        granteeUserId: "123e4567-e89b-12d3-a456-426614174000",
+        expiresAt: "2020-01-01T00:00:00.000Z"
+      }),
+    error => error.code === "VALIDATION_ERROR"
   );
 });

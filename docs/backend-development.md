@@ -32,6 +32,13 @@ TypeScript, or another server framework without an approved migration plan.
 `auth.users` already exists, so it cannot overwrite an existing canonical
 database. Never use it as a migration command.
 
+The current development upgrade deliberately retains pre-authentication AI
+conversation rows with a null owner so no existing data is silently destroyed.
+Before a shared staging or production schema is frozen, make an explicit
+retention decision for those rows, remove or archive them as appropriate, then
+apply a forward-only migration that makes `ai.conversations.user_id` `NOT NULL`
+and removes the now-redundant partial index predicate.
+
 `npm start` never creates or migrates database objects. This is intentional:
 application instances must not race to mutate a shared production database at
 boot. Run the appropriate database command as an explicit deployment step:
@@ -69,8 +76,11 @@ reference and makes no database change. `locations:import` repeats that
 preflight and writes only when given its explicit `--apply` flag. It is
 idempotent: LGD code-based reserved slugs preserve the import identity, and a
 new LGD download updates the matching names instead of duplicating locations.
-Install the one data-tool dependency with `python3 -m pip install openpyxl` if
-it is not already available on the machine that runs `locations:prepare`.
+Install the pinned data-tool dependency with
+`python3 -m pip install -r scripts/requirements-location-import.txt` on the
+machine that runs `locations:prepare`. Location batches are independently
+committed so an interrupted import can be safely re-run; it resumes through the
+same idempotent identity rules.
 
 The API contract uses two-letter state/UT codes such as `MH`; the loader maps
 the numeric LGD state code to that value and propagates it to every imported
@@ -87,13 +97,19 @@ the official `SUBDISTRICT` children; city-to-locality likewise prefers
 
 When supplied, the same preparation command also normalizes
 `locations_data/pincode.csv`.
-Use `npm run pincodes:check` before `npm run pincodes:import` when only the
-PIN data changes. Each PIN is stored once and linked only to an exact,
+When only the PIN data changes, run `npm run pincodes:prepare`, then
+`npm run pincodes:check` and `npm run pincodes:import`; this mode requires only
+`locations_data/pincode.csv`, not the four LGD workbooks. Each PIN is stored once and linked only to an exact,
 normalized state-and-district match in the LGD hierarchy. A PIN that appears
 under more than one valid state is retained with a null `stateCode`; unmatched
 or incomplete source labels are retained as PINs but are not linked to a
 location. Post-office latitude/longitude is intentionally not assigned to a
 district, because it describes one office rather than the whole district.
+
+LGD imports create missing records and update names or state codes for records
+with the same reserved LGD identity. They never reactivate a location that
+operations deliberately disabled, and they do not automatically retire entries
+absent from a new export; lifecycle changes remain an explicit operations task.
 
 ## Source layout
 
@@ -142,7 +158,9 @@ authorization. AI search remains public/auth-aware, but AI chat is available onl
 authenticated user and every conversation belongs to that user. Chat replies
 are streamed from the existing `POST /ai/conversations/:conversationId/messages` endpoint as
 SSE: `message.delta` events are transient UI text and `message.completed`
-contains the persisted `AiMessage`; an SSE `error` is not a saved answer. The
+contains the persisted `AiMessage`; an SSE `error` is not a saved answer.
+Context and provider failures are also returned as SSE `error` events (never as
+a JSON body after the client has started a chat request). The
 full event contract is in `Zameens_Phase1_UI_API_Integration_Specification.txt`.
 Users load their retained chat history through paginated `GET /ai/conversations`.
 The shared-database migration preserves any old anonymous records for retention,

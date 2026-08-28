@@ -18,6 +18,7 @@ const router = Router();
 router.param("propertyId", requireUuidParam);
 router.param("mediaId", requireUuidParam);
 router.param("documentId", requireUuidParam);
+router.param("grantId", requireUuidParam);
 const requirePropertyContributor = requireAnyRole(
   "SELLER",
   "BROKER",
@@ -203,6 +204,24 @@ router.get(
   "/properties/:propertyId/documents/:documentId",
   requireAuth,
   asyncRoute(controller.document)
+);
+router.get(
+  "/properties/:propertyId/documents/:documentId/access-grants",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.documentAccessGrants)
+);
+router.post(
+  "/properties/:propertyId/documents/:documentId/access-grants",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.grantDocumentAccess)
+);
+router.delete(
+  "/properties/:propertyId/documents/:documentId/access-grants/:grantId",
+  requireAuth,
+  requireOwnedProperty,
+  asyncRoute(controller.revokeDocumentAccess)
 );
 router.delete(
   "/properties/:propertyId/documents/:documentId",

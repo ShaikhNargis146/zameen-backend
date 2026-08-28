@@ -1084,6 +1084,7 @@ Field
 	Yes
 	2-100 chars
 	Search text.
+	Location suggestions use a case-insensitive prefix match against canonical names and aliases for every query length.
 	types
 	string[]|null
 	No
@@ -2000,6 +2001,17 @@ For `GET /properties/{propertyId}/documents/{documentId}`, “Authorized” mean
 the property owner, an administrator (audited), or a user with an active,
 unrevoked, non-expired access grant when visibility is `APPROVED_BUYERS`.
 The signed `downloadUrl` is issued only after this authorization check.
+
+Owners and administrators manage APPROVED_BUYERS grants through:
+
+	GET /properties/{propertyId}/documents/{documentId}/access-grants
+	POST /properties/{propertyId}/documents/{documentId}/access-grants
+	DELETE /properties/{propertyId}/documents/{documentId}/access-grants/{grantId}
+
+`POST` accepts `{ "granteeUserId": "uuid", "expiresAt": "ISO-8601 timestamp | null" }`.
+The grantee must be an active `BUYER`; `expiresAt` is optional and must be in the future when supplied.
+All grant-management endpoints are Owner/Admin only and apply only when the document visibility is `APPROVED_BUYERS`.
+Unauthorized document reads deliberately return `404 DOCUMENT_NOT_FOUND`, so they do not disclose whether another user's document exists.
 
 4.12 Listing Creation & Management
 Owner: Backend Dev 1   |   UI surfaces: Seller listing wizard, seller inventory
