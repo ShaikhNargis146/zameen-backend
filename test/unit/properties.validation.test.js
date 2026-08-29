@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   documentComplete,
   documentAccessGrant,
+  identifiers,
   landDetails,
   mediaUpload,
   propertyList,
@@ -20,6 +21,38 @@ test("property boolean fields do not treat the string false as true", () => {
   });
   assert.equal(details.isCornerPlot, false);
   assert.equal(details.hasBoundaryWall, false);
+});
+
+test("parcel identifiers enforce the documented value limit and uniqueness", () => {
+  assert.deepEqual(
+    identifiers({
+      identifiers: [
+        { type: "survey_number", value: "123/4" },
+        { type: "PLOT_NUMBER", value: "12" }
+      ]
+    }),
+    [
+      { type: "SURVEY_NUMBER", value: "123/4" },
+      { type: "PLOT_NUMBER", value: "12" }
+    ]
+  );
+  assert.throws(
+    () =>
+      identifiers({
+        identifiers: [
+          { type: "SURVEY_NUMBER", value: "123/4" },
+          { type: "survey_number", value: "123/4" }
+        ]
+      }),
+    error => error.code === "INVALID_IDENTIFIERS"
+  );
+  assert.throws(
+    () =>
+      identifiers({
+        identifiers: [{ type: "SURVEY_NUMBER", value: "x".repeat(256) }]
+      }),
+    error => error.code === "INVALID_IDENTIFIERS"
+  );
 });
 
 test("land details accept the compact facing values from the UI contract", () => {

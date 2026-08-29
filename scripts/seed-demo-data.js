@@ -82,6 +82,63 @@ const ensureLocation = async (transaction, input) => {
   return result.id;
 };
 
+// The LGD importer is the source of truth for state records. Older demo seeds
+// created a second MH state before LGD data was loaded; reconcile only that
+// known, demo-owned branch so its sample listings remain usable.
+const maharashtraStateId = async transaction => {
+  const canonical = await transaction.oneOrNone(
+    `SELECT id FROM geo.locations
+     WHERE type = 'STATE' AND state_code = 'MH'
+     ORDER BY CASE WHEN slug LIKE 'lgd-state-%' THEN 0 ELSE 1 END, id
+     LIMIT 1`
+  );
+  if (!canonical) {
+    const indiaId = await ensureLocation(transaction, {
+      type: "COUNTRY",
+      name: "India",
+      slug: "india"
+    });
+    return ensureLocation(transaction, {
+      parentId: indiaId,
+      type: "STATE",
+      name: "Maharashtra",
+      slug: "maharashtra",
+      stateCode: "MH"
+    });
+  }
+
+  const legacyDemoState = await transaction.oneOrNone(
+    `SELECT id FROM geo.locations
+     WHERE type = 'STATE' AND state_code = 'MH' AND slug = 'maharashtra'
+       AND id <> $1`,
+    [canonical.id]
+  );
+  if (!legacyDemoState) return canonical.id;
+
+  const children = await transaction.any(
+    `SELECT type, slug FROM geo.locations WHERE parent_id = $1`,
+    [legacyDemoState.id]
+  );
+  const demoCitySlugs = new Set(["mumbai", "navi-mumbai"]);
+  if (
+    children.some(
+      child => child.type !== "CITY" || !demoCitySlugs.has(child.slug)
+    )
+  )
+    throw new Error(
+      "The legacy demo Maharashtra state has non-demo children and requires manual reconciliation."
+    );
+
+  await transaction.none(
+    `UPDATE geo.locations SET parent_id = $2 WHERE parent_id = $1`,
+    [legacyDemoState.id, canonical.id]
+  );
+  await transaction.none(`DELETE FROM geo.locations WHERE id = $1`, [
+    legacyDemoState.id
+  ]);
+  return canonical.id;
+};
+
 const masterId = (transaction, table, code) =>
   transaction.one(`SELECT id FROM ${table} WHERE code = $1 AND is_active`, [code]);
 
@@ -130,18 +187,7 @@ try {
       [user.id]
     );
 
-    const indiaId = await ensureLocation(transaction, {
-      type: "COUNTRY",
-      name: "India",
-      slug: "india"
-    });
-    const maharashtraId = await ensureLocation(transaction, {
-      parentId: indiaId,
-      type: "STATE",
-      name: "Maharashtra",
-      slug: "maharashtra",
-      stateCode: "MH"
-    });
+    const maharashtraId = await maharashtraStateId(transaction);
     const cityIds = {
       Mumbai: await ensureLocation(transaction, {
         parentId: maharashtraId,

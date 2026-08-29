@@ -135,13 +135,29 @@ export const saveAmenities = async ({ propertyId, amenities }) => {
 };
 export const getIdentifiers = repository.identifiers;
 export const saveIdentifiers = async ({ propertyId, identifiers }) => {
-  try {
-    await repository.replaceIdentifiers(propertyId, identifiers);
-  } catch (error) {
-    if (error?.message?.includes("Parcel identifier type"))
-      throw new HttpError(400, "INVALID_IDENTIFIERS", error.message);
-    throw error;
-  }
+  const configuredTypes = await repository.identifierTypesForProperty(
+    propertyId
+  );
+  if (!configuredTypes.length)
+    throw new HttpError(
+      409,
+      "PARCEL_CONFIG_UNAVAILABLE",
+      "Parcel identifiers are not configured for this property's state."
+    );
+  const configuredTypesByCode = new Map(
+    configuredTypes.map(type => [type.code, type])
+  );
+  const resolvedIdentifiers = identifiers.map(identifier => ({
+    ...identifier,
+    identifierTypeId: configuredTypesByCode.get(identifier.type)?.id
+  }));
+  if (resolvedIdentifiers.some(identifier => !identifier.identifierTypeId))
+    throw new HttpError(
+      400,
+      "INVALID_IDENTIFIERS",
+      "One or more identifier types are not configured for this property's state."
+    );
+  await repository.replaceIdentifiers(propertyId, resolvedIdentifiers);
   return repository.identifiers(propertyId);
 };
 export const requestVerification = async ({

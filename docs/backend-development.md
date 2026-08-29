@@ -68,6 +68,7 @@ into the ignored `locations_data/` directory, then run:
 npm run locations:prepare
 npm run locations:check
 npm run locations:import
+npm run masters:seed
 ```
 
 `locations:prepare` uses Python 3 with `openpyxl` to stream the LGD `.xlsx`
@@ -110,6 +111,23 @@ LGD imports create missing records and update names or state codes for records
 with the same reserved LGD identity. They never reactivate a location that
 operations deliberately disabled, and they do not automatically retire entries
 absent from a new export; lifecycle changes remain an explicit operations task.
+
+`npm run masters:seed` loads curated state-level master data after the location
+hierarchy. It currently configures Maharashtra (`MH`) parcel identifiers:
+Survey Number, Gat Number, CTS Number and Plot Number. These are configuration
+records, not API hard-coded values; each property resolves valid identifier
+types through its own location's state. The command refuses to choose between
+duplicate state records, so reconcile duplicate state data before rerunning it.
+
+### Development listing demo data
+
+For UI and API testing only, `npm run demo:seed` creates or refreshes six
+clearly labelled, published sample listings in Mumbai and Navi Mumbai. It is
+idempotent, uses the `ZMN-DEMO-*` codes, creates a non-login demo seller, and
+refuses to run when `NODE_ENV=production`. It deliberately does not create fake
+media objects; attach images through the normal signed-upload flow when testing
+media. The command prints the sample listing IDs, which can be used to create a
+property-context AI conversation and test the streamed chat flow.
 
 ## Source layout
 
@@ -176,6 +194,10 @@ and published investment-opportunity questions from published listing, master,
 content and trend data. Do not add private property documents or account data;
 financial, legal and valuation guidance must remain clearly general and direct
 the user to a qualified professional.
+
+Chat uses the Responses API stream with low output verbosity, a 500-token output
+ceiling, and a 45-second provider timeout by default. `OPENAI_TIMEOUT_MS` may
+be set between 1000 and 60000 when an environment needs a different limit.
 
 ## API contract
 

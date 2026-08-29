@@ -261,17 +261,27 @@ export const identifiers = body => {
       "INVALID_IDENTIFIERS",
       "identifiers must be an array."
     );
-  return body.identifiers.map(item => {
+  const result = body.identifiers.map(item => {
     const type = String(item.type || "").toUpperCase();
     const value = String(item.value || "").trim();
-    if (!type || !value)
+    if (!type || !value || value.length > 255)
       throw new HttpError(
         400,
         "INVALID_IDENTIFIERS",
-        "Each identifier requires type and value."
+        "Each identifier requires a type and a value of at most 255 characters."
       );
     return { type, value };
   });
+  if (
+    new Set(result.map(item => `${item.type}|${item.value}`)).size !==
+    result.length
+  )
+    throw new HttpError(
+      400,
+      "INVALID_IDENTIFIERS",
+      "Each identifier type and value combination must be unique."
+    );
+  return result;
 };
 export const verificationRequest = body => {
   const note = body.note == null ? null : String(body.note).trim();

@@ -49,3 +49,32 @@ test("my-properties pagination orders unique property rows without DISTINCT", as
   assert.match(ownedIds, /EXISTS \(SELECT 1 FROM land\.property_locations/);
   assert.match(ownedIds, /ORDER BY p\.updated_at DESC, p\.id DESC/);
 });
+
+test("parcel identifiers are resolved from the property's state configuration", async () => {
+  const [service, repository] = await Promise.all([
+    readFile(
+      new URL("../../src/modules/properties/properties.service.js", import.meta.url),
+      "utf8"
+    ),
+    readFile(
+      new URL(
+        "../../src/modules/properties/properties.repository.js",
+        import.meta.url
+      ),
+      "utf8"
+    )
+  ]);
+  const identifierTypes = repository.slice(
+    repository.indexOf("export const identifierTypesForProperty"),
+    repository.indexOf("export const replaceIdentifiers")
+  );
+  const replaceIdentifiers = repository.slice(
+    repository.indexOf("export const replaceIdentifiers"),
+    repository.indexOf("export const requestVerification")
+  );
+  assert.match(identifierTypes, /WITH RECURSIVE ancestors/);
+  assert.match(identifierTypes, /state_location_id = state\.id/);
+  assert.doesNotMatch(replaceIdentifiers, /WHERE code = \$1/);
+  assert.match(service, /identifierTypesForProperty\(propertyId\)/);
+  assert.match(service, /PARCEL_CONFIG_UNAVAILABLE/);
+});

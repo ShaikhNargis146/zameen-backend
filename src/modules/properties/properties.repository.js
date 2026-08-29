@@ -156,6 +156,27 @@ export const identifiers = propertyId =>
     `SELECT pi.id, pit.code AS type, pit.name AS label, pi.identifier_value AS value FROM land.property_parcel_identifiers pi JOIN land.parcel_identifier_types pit ON pit.id = pi.identifier_type_id WHERE pi.property_id = $1 ORDER BY pit.sort_order, pit.name`,
     [propertyId]
   );
+export const identifierTypesForProperty = propertyId =>
+  run(
+    "any",
+    `WITH RECURSIVE ancestors AS (
+       SELECT location.id, location.parent_id, location.type
+       FROM land.property_locations property_location
+       JOIN geo.locations location ON location.id = property_location.location_id
+       WHERE property_location.property_id = $1
+       UNION ALL
+       SELECT parent.id, parent.parent_id, parent.type
+       FROM geo.locations parent
+       JOIN ancestors ON ancestors.parent_id = parent.id
+     )
+     SELECT identifier_type.id, identifier_type.code
+     FROM ancestors state
+     JOIN land.parcel_identifier_types identifier_type
+       ON identifier_type.state_location_id = state.id
+     WHERE state.type = 'STATE' AND identifier_type.is_active = true
+     ORDER BY identifier_type.sort_order, identifier_type.name`,
+    [propertyId]
+  );
 export const replaceIdentifiers = async (propertyId, identifiers) => {
   const result = await pg.tx(async transaction => {
     await transaction.none(
@@ -163,17 +184,9 @@ export const replaceIdentifiers = async (propertyId, identifiers) => {
       [propertyId]
     );
     for (const item of identifiers) {
-      const type = await transaction.oneOrNone(
-        `SELECT id FROM land.parcel_identifier_types WHERE code = $1 AND is_active = true`,
-        [item.type]
-      );
-      if (!type)
-        throw new Error(
-          `Parcel identifier type ${item.type} is not configured.`
-        );
       await transaction.none(
         `INSERT INTO land.property_parcel_identifiers (property_id, identifier_type_id, identifier_value) VALUES ($1,$2,$3)`,
-        [propertyId, type.id, item.value]
+        [propertyId, item.identifierTypeId, item.value]
       );
     }
   });
