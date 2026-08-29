@@ -38,6 +38,18 @@ export const ownedByUser = async (notificationId, actorId) => {
 
 export const markRead = async notification => toNotification(await repository.markRead(notification.id));
 
+export const notifyUser = async (userId, { type, title, body, data }) => {
+  if (!userId) return;
+  await repository.create({ userId, type, title, body, data });
+};
+
+export const notifySeller = async (listingId, { type, title, body, data }) => {
+  const recipients = await repository.sellerRecipientsForListing(listingId);
+  await Promise.all(
+    recipients.map(({ userId }) => repository.create({ userId, type, title, body, data }))
+  );
+};
+
 export const markAllRead = async actorId => {
   await repository.markAllRead(actorId);
 };

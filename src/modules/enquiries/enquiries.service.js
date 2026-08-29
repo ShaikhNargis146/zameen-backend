@@ -3,6 +3,7 @@ import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
+import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./enquiries.repository.js";
 import { uuid } from "./enquiries.validation.js";
 
@@ -80,6 +81,12 @@ export const create = async ({ actorId, listingId, input }) => {
     message: input.message
   });
   if (!result.ok) throw mapDbError(result.error);
+  await notifications.notifySeller(listingId, {
+    type: "ENQUIRY_NEW",
+    title: "New enquiry received",
+    body: "A buyer submitted a new enquiry for your listing.",
+    data: { enquiryId: result.data.id, listingId }
+  });
   return toEnquiry(result.data);
 };
 
@@ -116,6 +123,12 @@ export const detailForSeller = row => buildDetail(row, { includeNotes: true });
 export const updateStatus = async ({ enquiry, status }) => {
   const result = await repository.updateStatus(enquiry.id, status);
   if (!result.ok) throw result.error;
+  await notifications.notifyUser(enquiry.buyerUserId, {
+    type: "ENQUIRY_STATUS_UPDATED",
+    title: "Your enquiry was updated",
+    body: `Your enquiry status changed to ${status}.`,
+    data: { enquiryId: enquiry.id, listingId: enquiry.listingId, status }
+  });
   return toEnquiry(result.data);
 };
 
@@ -144,6 +157,12 @@ export const contactReveal = async ({ actorId, listingId, preferredChannel }) =>
     });
     if (!result.ok) throw mapDbError(result.error);
     leadCreated = true;
+    await notifications.notifySeller(listingId, {
+      type: "ENQUIRY_NEW",
+      title: "New enquiry received",
+      body: "A buyer revealed your contact details and a new enquiry was created.",
+      data: { enquiryId: result.data.id, listingId }
+    });
   }
 
   await repository.recordContactRevealEvent({ listingId, userId: actorId, preferredChannel });

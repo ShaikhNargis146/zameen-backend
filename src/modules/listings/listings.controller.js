@@ -112,3 +112,12 @@ export const suspend = async (req, res) =>
       actorId: req.actor.id
     })
   );
+export const reinstate = async (req, res) =>
+  ok(
+    res,
+    await service.reinstate({
+      id: req.params.listingId,
+      reason: validation.optionalReason(req.body || {}),
+      actorId: req.actor.id
+    })
+  );

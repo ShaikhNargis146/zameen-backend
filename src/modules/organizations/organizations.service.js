@@ -142,7 +142,7 @@ export const removeMember = async ({ organizationId, actorId, userId }) => {
   await requireOrganization(organizationId);
   const actorMembership = await requireManager(organizationId, actorId);
   const target = await repository.findMembership(organizationId, userId);
-  if (!target || target.status === "INACTIVE")
+  if (!target || target.status === "REMOVED")
     throw new HttpError(
       404,
       "MEMBER_NOT_FOUND",

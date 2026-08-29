@@ -37,6 +37,30 @@ export const markAllRead = userId =>
     [userId]
   );
 
+export const create = ({ userId, type, title, body, data }) =>
+  run(
+    "one",
+    `INSERT INTO ops.notifications (user_id, type, title, body, data)
+     VALUES ($1,$2,$3,$4,$5::jsonb)
+     RETURNING ${notificationColumns}`,
+    [userId, type, title, body, JSON.stringify(data ?? null)]
+  );
+
+export const sellerRecipientsForListing = listingId =>
+  run(
+    "any",
+    `SELECT user_id AS "userId" FROM (
+       SELECT l.seller_user_id AS user_id FROM marketplace.listings l
+       WHERE l.id = $1 AND l.seller_user_id IS NOT NULL
+       UNION
+       SELECT om.user_id FROM marketplace.listings l
+       JOIN account.organization_members om
+         ON om.organization_id = l.seller_organization_id AND om.status = 'ACTIVE' AND om.role IN ('OWNER','ADMIN')
+       WHERE l.id = $1 AND l.seller_user_id IS NULL
+     ) recipients`,
+    [listingId]
+  );
+
 export const findPreferences = userId =>
   run(
     "oneOrNone",

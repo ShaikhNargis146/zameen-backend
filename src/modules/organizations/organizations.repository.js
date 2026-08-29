@@ -134,7 +134,7 @@ export const listMembers = organizationId =>
             m.role, m.status, m.joined_at AS "joinedAt"
      FROM account.organization_members m
      JOIN auth.users u ON u.id = m.user_id
-     WHERE m.organization_id = $1 AND m.status <> 'INACTIVE'
+     WHERE m.organization_id = $1 AND m.status <> 'REMOVED'
      ORDER BY m.joined_at NULLS LAST, u.display_name`,
     [organizationId]
   );
@@ -161,8 +161,8 @@ export const addMember = (organizationId, userId, role) =>
 export const removeMember = (organizationId, userId) =>
   run(
     "oneOrNone",
-    `UPDATE account.organization_members SET status = 'INACTIVE'
-     WHERE organization_id = $1 AND user_id = $2 AND status <> 'INACTIVE'
+    `UPDATE account.organization_members SET status = 'REMOVED'
+     WHERE organization_id = $1 AND user_id = $2 AND status <> 'REMOVED'
      RETURNING user_id AS "userId"`,
     [organizationId, userId]
   );

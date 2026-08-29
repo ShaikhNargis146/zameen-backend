@@ -1,5 +1,6 @@
 import httpStatus from "http-status";
 import { ValidationError } from "express-validation";
+import { isNonProductionEnv } from "../config/env.js";
 import APIError from "../utils/APIError.js";
 import { isPublicServiceError } from "../shared/serviceErrors.js";
 
@@ -42,9 +43,7 @@ const handler = (err, req, res, next) => {
             ? "INTERNAL_ERROR"
             : err?.code || "REQUEST_ERROR",
         message:
-          isServerError &&
-          !isPublicError &&
-          process.env.NODE_ENV === "production"
+          isServerError && !isPublicError && !isNonProductionEnv
             ? "Internal Server Error"
             : err?.message || "Internal Server Error"
       }

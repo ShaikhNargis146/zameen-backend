@@ -267,6 +267,19 @@ export const capturePayment = ({ id, providerPaymentId, providerPayload }) =>
     jsonbCols: ["provider_payload"]
   });
 
+export const capturePaymentAndMarkOrderPaid = ({ id, orderId, providerPaymentId, providerPayload }) =>
+  runTx(async t => {
+    const payment = await t.one(
+      `UPDATE commerce.payments
+       SET status = 'CAPTURED', paid_at = now(), provider_payment_id = $2, provider_payload = $3::jsonb
+       WHERE id = $1
+       RETURNING ${paymentInsertColumns}`,
+      [id, providerPaymentId, JSON.stringify(providerPayload || {})]
+    );
+    await t.none(`UPDATE commerce.orders SET status = 'PAID' WHERE id = $1`, [orderId]);
+    return payment;
+  });
+
 export const failPayment = ({ id, providerPayload }) =>
   pg.updateWhere({
     table: "commerce.payments",
@@ -279,11 +292,11 @@ export const failPayment = ({ id, providerPayload }) =>
 
 export const insertWebhookEvent = ({ provider, eventId, eventType, payload }) =>
   run(
-    "oneOrNone",
+    "one",
     `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload)
      VALUES ($1,$2,$3,$4::jsonb)
-     ON CONFLICT (provider, event_id) DO NOTHING
-     RETURNING id`,
+     ON CONFLICT (provider, event_id) DO UPDATE SET event_type = EXCLUDED.event_type
+     RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
     [provider, eventId, eventType, JSON.stringify(payload || {})]
   );
 

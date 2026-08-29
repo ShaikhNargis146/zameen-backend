@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { hmacSha256Hex, randomToken, safeEqualHex, sha256 } from "../../utils/crypto.js";
@@ -14,7 +15,7 @@ import * as repository from "./commerce.repository.js";
 const razorpayKeyId = process.env.RAZORPAY_KEY_ID || null;
 const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
 const razorpayWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || razorpayKeySecret;
-if (process.env.NODE_ENV === "production" && !process.env.RAZORPAY_KEY_SECRET)
+if (!isNonProductionEnv && !process.env.RAZORPAY_KEY_SECRET)
   throw new Error("RAZORPAY_KEY_SECRET is required in production");
 
 const orderNumber = () =>
@@ -277,8 +278,9 @@ export const verifyPayment = async ({ actorId, input }) => {
     );
   }
 
-  const captured = await repository.capturePayment({
+  const captured = await repository.capturePaymentAndMarkOrderPaid({
     id: payment.id,
+    orderId: payment.orderId,
     providerPaymentId: input.providerPaymentId,
     providerPayload: {
       providerOrderId: input.providerOrderId,
@@ -286,9 +288,7 @@ export const verifyPayment = async ({ actorId, input }) => {
       signature: input.signature
     }
   });
-  if (!captured.ok) throw captured.error;
-  await repository.setOrderStatus(payment.orderId, "PAID");
-  return toPayment(captured.data);
+  return toPayment(captured);
 };
 
 export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
@@ -303,8 +303,8 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
 
   const eventType = body?.event || "UNKNOWN";
   const eventId = body?.id || sha256(rawBody?.length ? rawBody : JSON.stringify(body || {}));
-  const inserted = await repository.insertWebhookEvent({ provider, eventId, eventType, payload: body });
-  if (!inserted) return { received: true, duplicate: true };
+  const event = await repository.insertWebhookEvent({ provider, eventId, eventType, payload: body });
+  if (event.processedAt && !event.processingError) return { received: true, duplicate: true };
 
   try {
     const paymentEntity = body?.payload?.payment?.entity;
@@ -312,22 +312,21 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
       const payment = await repository.findPaymentByProviderOrderId(provider, paymentEntity.order_id);
       if (payment && payment.status !== "CAPTURED") {
         if (eventType === "payment.captured") {
-          const captured = await repository.capturePayment({
+          await repository.capturePaymentAndMarkOrderPaid({
             id: payment.id,
+            orderId: payment.orderId,
             providerPaymentId: paymentEntity.id,
             providerPayload: body
           });
-          if (!captured.ok) throw captured.error;
-          await repository.setOrderStatus(payment.orderId, "PAID");
         } else if (eventType === "payment.failed") {
           const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
           if (!failed.ok) throw failed.error;
         }
       }
     }
-    await repository.markWebhookProcessed(inserted.id);
+    await repository.markWebhookProcessed(event.id);
   } catch (error) {
-    await repository.markWebhookProcessed(inserted.id, error.message);
+    await repository.markWebhookProcessed(event.id, error.message);
     throw error;
   }
 

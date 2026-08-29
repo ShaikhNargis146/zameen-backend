@@ -234,6 +234,24 @@ export const reject = (id, reason) =>
 export const suspend = id =>
   run(
     "oneOrNone",
-    `UPDATE marketplace.listings SET status = 'SUSPENDED' WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+    `UPDATE marketplace.listings SET status = 'SUSPENDED'
+     WHERE id = $1 AND deleted_at IS NULL AND status = ANY('{INACTIVE,PUBLISHED,PAUSED}'::varchar[])
+     RETURNING id`,
     [id]
+  );
+export const reinstate = id =>
+  run(
+    "oneOrNone",
+    `UPDATE marketplace.listings SET status = 'INACTIVE'
+     WHERE id = $1 AND deleted_at IS NULL AND status = 'SUSPENDED'
+     RETURNING id`,
+    [id]
+  );
+export const expirePublished = () =>
+  run(
+    "any",
+    `UPDATE marketplace.listings SET status = 'EXPIRED'
+     WHERE status = 'PUBLISHED' AND expires_at IS NOT NULL AND expires_at <= now()
+     RETURNING id`,
+    []
   );

@@ -59,6 +59,12 @@ export const profileChanges = body => {
 export const selfRole = body => {
   // `roleCode` is the integration-contract name. Keep `role` temporarily for
   // clients built against the earlier implementation.
+  // KNOWN GAP: BROKER/DEVELOPER/CORPORATE are self-assignable here with no
+  // verification check, and auth.user_verification_checks (the table other
+  // code reads as the "verified seller" gate, e.g. properties.repository.js)
+  // is never written by any code path in this codebase. Closing this needs a
+  // real verification submission/review pipeline, not a validation tweak -
+  // left as-is pending that larger piece of work.
   const role = String(body.roleCode || body.role || "").toUpperCase();
   if (!["BUYER", "SELLER", "BROKER", "DEVELOPER", "CORPORATE"].includes(role))
     throw new HttpError(

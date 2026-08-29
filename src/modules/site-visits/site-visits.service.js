@@ -4,6 +4,7 @@ import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
 import * as enquiriesRepository from "../enquiries/enquiries.repository.js";
+import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./site-visits.repository.js";
 import { uuid } from "./site-visits.validation.js";
 
@@ -40,6 +41,11 @@ const toSiteVisit = async row => (await toSiteVisits([row]))[0];
 const noteColumnFor = (visit, actorId) =>
   visit.buyerUserId === actorId ? "buyer_note" : "seller_note";
 
+const notifyCounterpart = (visit, actorId, payload) =>
+  visit.buyerUserId === actorId
+    ? notifications.notifySeller(visit.listingId, payload)
+    : notifications.notifyUser(visit.buyerUserId, payload);
+
 const confirmableStates = ["REQUESTED", "RESCHEDULED"];
 const rescheduleableStates = ["REQUESTED", "CONFIRMED", "RESCHEDULED"];
 const cancellableStates = ["REQUESTED", "CONFIRMED", "RESCHEDULED"];
@@ -74,6 +80,12 @@ export const create = async ({ actorId, listingId, input }) => {
     buyerNote: input.note
   });
   if (!result.ok) throw mapDbError(result.error);
+  await notifications.notifySeller(listingId, {
+    type: "SITE_VISIT_REQUESTED",
+    title: "New site visit requested",
+    body: "A buyer requested a site visit for your listing.",
+    data: { visitId: result.data.id, listingId }
+  });
   return toSiteVisit(result.data);
 };
 
@@ -100,6 +112,12 @@ export const confirm = async ({ visit, scheduledAt, sellerNote }) => {
     );
   const result = await repository.confirm({ id: visit.id, scheduledAt, sellerNote });
   if (!result.ok) throw result.error;
+  await notifications.notifyUser(visit.buyerUserId, {
+    type: "SITE_VISIT_CONFIRMED",
+    title: "Site visit confirmed",
+    body: "Your site visit request was confirmed.",
+    data: { visitId: visit.id, listingId: visit.listingId, scheduledAt }
+  });
   return toSiteVisit(result.data);
 };
 
@@ -117,6 +135,12 @@ export const reschedule = async ({ visit, actorId, scheduledAt, note }) => {
     note
   });
   if (!result.ok) throw result.error;
+  await notifyCounterpart(visit, actorId, {
+    type: "SITE_VISIT_RESCHEDULED",
+    title: "Site visit rescheduled",
+    body: "A site visit was rescheduled to a new time.",
+    data: { visitId: visit.id, listingId: visit.listingId, scheduledAt }
+  });
   return toSiteVisit(result.data);
 };
 
@@ -133,6 +157,12 @@ export const cancel = async ({ visit, actorId, reason }) => {
     note: reason
   });
   if (!result.ok) throw result.error;
+  await notifyCounterpart(visit, actorId, {
+    type: "SITE_VISIT_CANCELLED",
+    title: "Site visit cancelled",
+    body: "A site visit was cancelled.",
+    data: { visitId: visit.id, listingId: visit.listingId, reason: reason || null }
+  });
   return toSiteVisit(result.data);
 };
 
