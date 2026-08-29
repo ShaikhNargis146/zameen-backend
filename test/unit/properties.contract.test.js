@@ -32,3 +32,20 @@ test("document access grants are owner-managed and downloads do not disclose exi
   assert.match(routes, /documents\/:documentId\/access-grants/);
   assert.match(routes, /documents\/:documentId\/access-grants\/:grantId/);
 });
+
+test("my-properties pagination orders unique property rows without DISTINCT", async () => {
+  const repository = await readFile(
+    new URL(
+      "../../src/modules/properties/properties.repository.js",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const ownedIds = repository.slice(
+    repository.indexOf("export const ownedIds"),
+    repository.indexOf("export const countOwned")
+  );
+  assert.doesNotMatch(ownedIds, /SELECT DISTINCT/);
+  assert.match(ownedIds, /EXISTS \(SELECT 1 FROM land\.property_locations/);
+  assert.match(ownedIds, /ORDER BY p\.updated_at DESC, p\.id DESC/);
+});

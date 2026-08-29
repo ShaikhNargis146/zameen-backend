@@ -49,13 +49,13 @@ export const summaries = propertyIds =>
 export const ownedIds = ({ userId, status, search, limit, offset }) =>
   run(
     "any",
-    `SELECT DISTINCT p.id FROM land.properties p LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations l ON l.id = pl.location_id WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR l.name ILIKE $3) ORDER BY p.updated_at DESC LIMIT $4 OFFSET $5`,
+    `SELECT p.id FROM land.properties p WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR EXISTS (SELECT 1 FROM land.property_locations pl JOIN geo.locations l ON l.id = pl.location_id WHERE pl.property_id = p.id AND l.name ILIKE $3)) ORDER BY p.updated_at DESC, p.id DESC LIMIT $4 OFFSET $5`,
     [userId, status, search, limit, offset]
   );
 export const countOwned = ({ userId, status, search }) =>
   run(
     "one",
-    `SELECT count(DISTINCT p.id)::int AS total FROM land.properties p LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations l ON l.id = pl.location_id WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR l.name ILIKE $3)`,
+    `SELECT count(*)::int AS total FROM land.properties p WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR EXISTS (SELECT 1 FROM land.property_locations pl JOIN geo.locations l ON l.id = pl.location_id WHERE pl.property_id = p.id AND l.name ILIKE $3))`,
     [userId, status, search]
   );
 export const archive = propertyId =>
