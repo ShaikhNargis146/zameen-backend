@@ -1,6 +1,5 @@
 import httpStatus from "http-status";
 import { ValidationError } from "express-validation";
-import { isNonProductionEnv } from "../config/env.js";
 import APIError from "../utils/APIError.js";
 import { isPublicServiceError } from "../shared/serviceErrors.js";
 
@@ -8,6 +7,15 @@ import { isPublicServiceError } from "../shared/serviceErrors.js";
  * Error handler. Send stacktrace only during development
  * @public
  */
+
+// Read NODE_ENV live rather than a module-load-time constant: this handler
+// runs per-request, and config/env.js's isNonProductionEnv is only computed
+// once at import, so it can't reflect an env change (as the tests simulate)
+// or an env read before config finished initializing.
+const isNonProductionEnv = () =>
+  ["development", "test"].includes(
+    String(process.env.NODE_ENV || "").toLowerCase()
+  );
 
 const handler = (err, req, res, next) => {
   try {
@@ -43,7 +51,7 @@ const handler = (err, req, res, next) => {
             ? "INTERNAL_ERROR"
             : err?.code || "REQUEST_ERROR",
         message:
-          isServerError && !isPublicError && !isNonProductionEnv
+          isServerError && !isPublicError && !isNonProductionEnv()
             ? "Internal Server Error"
             : err?.message || "Internal Server Error"
       }

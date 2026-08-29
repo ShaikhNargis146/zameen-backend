@@ -291,22 +291,25 @@ export const failPayment = ({ id, providerPayload }) =>
   });
 
 // The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)
-// for a genuinely new event or a previously failed one ready for retry. A
-// duplicate delivery that arrives while the first delivery is still
-// in-flight (processed_at and processing_error both still null) fails the
-// WHERE clause, so it gets no row back and is treated as a duplicate instead
-// of racing the in-flight attempt to run capture/fail side effects twice.
-// Postgres holds the row lock for the conflicting key while evaluating this,
-// so concurrent deliveries for the same event serialize on it.
+// for a genuinely new event or a previously failed one ready for retry.
+// markWebhookProcessed always sets processed_at, on both success and
+// failure, so a failed event is only distinguishable by processing_error
+// being non-null; the DO UPDATE claims the retry by clearing processed_at
+// and processing_error in the same statement, so a duplicate delivery that
+// arrives while this retry is in-flight sees processing_error already NULL
+// and fails the WHERE clause instead of racing it to run capture/fail side
+// effects twice. Postgres holds the row lock for the conflicting key while
+// evaluating this, so concurrent deliveries for the same event serialize on it.
 export const insertWebhookEvent = ({ provider, eventId, eventType, payload }) =>
   run(
     "oneOrNone",
     `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload)
      VALUES ($1,$2,$3,$4::jsonb)
      ON CONFLICT (provider, event_id) DO UPDATE
-       SET event_type = EXCLUDED.event_type
-       WHERE commerce.payment_webhook_events.processed_at IS NULL
-         AND commerce.payment_webhook_events.processing_error IS NOT NULL
+       SET event_type = EXCLUDED.event_type,
+           processed_at = NULL,
+           processing_error = NULL
+       WHERE commerce.payment_webhook_events.processing_error IS NOT NULL
      RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
     [provider, eventId, eventType, JSON.stringify(payload || {})]
   );
