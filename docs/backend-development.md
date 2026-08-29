@@ -273,6 +273,30 @@ either variable because
 the storage client is created during process startup. The bucket must also
 allow the UI origin (for example `http://localhost:5173`) in its **bucket CORS
 policy**. API CORS settings do not control direct browser uploads to GCS.
+The tracked [`cors.json`](../cors.json) permits the local React development
+origins on ports `3000` and `5173`; add the exact production HTTPS UI origin
+before release. Apply the file to the configured bucket after changing it:
+
+```bash
+gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json
+```
+
+Confirm the active policy with:
+
+```bash
+gcloud storage buckets describe gs://YOUR_BUCKET --format="default(cors_config)"
+```
+
+For a GCP VM or Cloud Run deployment, do not copy a JSON key to the server.
+Set `GCS_BUCKET`, attach a dedicated runtime service account, and grant that
+service account `roles/storage.objectCreator` on the upload bucket. V4 signed
+URLs also need permission to sign blobs: grant
+`roles/iam.serviceAccountTokenCreator` to the runtime service account for the
+service account used to sign. Restart the process after updating its
+environment or service account. A failed `upload-url` request is logged as
+`Cloud Storage signed URL request failed` with safe provider diagnostics; use
+that server-side log to distinguish a missing bucket, missing signer role, and
+an unavailable GCP service. Do not expose the provider message to the client.
 
 ## Testing and verification
 
