@@ -1,20 +1,13 @@
 import { created, ok } from "../../shared/http.js";
+import { isPublicServiceError } from "../../shared/serviceErrors.js";
 import * as service from "./ai.service.js";
 import * as validation from "./ai.validation.js";
 
-const publicServiceErrorCodes = new Set([
-  "AI_PROVIDER_UNCONFIGURED",
-  "AI_PROVIDER_UNAVAILABLE",
-  "AI_CONTEXT_UNAVAILABLE",
-  "AI_PROVIDER_INVALID_RESPONSE",
-  "AI_PROVIDER_INCOMPLETE",
-  "AI_CONVERSATION_UNAVAILABLE"
-]);
 const sse = (res, event, data) =>
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 const streamError = error => {
   const clientError = Number(error?.status) < 500;
-  const publicServiceError = publicServiceErrorCodes.has(error?.code);
+  const publicServiceError = isPublicServiceError(error?.code);
   return {
     code:
       clientError || publicServiceError

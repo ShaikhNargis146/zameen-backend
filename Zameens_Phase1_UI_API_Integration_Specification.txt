@@ -918,6 +918,7 @@ Method
 	path stateCode
 	ParcelConfig
 	
+	Parcel configuration is curated operational data and must be loaded after the location hierarchy. If a property’s state has no configured identifier types, `PUT /properties/{propertyId}/parcel-identifiers` returns `409 PARCEL_CONFIG_UNAVAILABLE`; do not submit that listing until operations configures the state.
 
 MasterOption
 Field
@@ -2011,6 +2012,7 @@ Owners and administrators manage APPROVED_BUYERS grants through:
 `POST` accepts `{ "granteeUserId": "uuid", "expiresAt": "ISO-8601 timestamp | null" }`.
 The grantee must be an active `BUYER`; `expiresAt` is optional and must be in the future when supplied.
 All grant-management endpoints are Owner/Admin only and apply only when the document visibility is `APPROVED_BUYERS`.
+`POST` is idempotent per document and grantee: it creates or refreshes the active grant and returns the current grant with `200 OK`.
 Unauthorized document reads deliberately return `404 DOCUMENT_NOT_FOUND`, so they do not disclose whether another user's document exists.
 
 4.12 Listing Creation & Management

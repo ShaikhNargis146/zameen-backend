@@ -92,3 +92,15 @@ export const signedReadUrl = async storageKey => {
     throw storageUnavailable(error);
   }
 };
+
+// Discovery and listing-card media are optional presentation data. A transient
+// signing failure must not make otherwise valid listings disappear from a page.
+export const optionalSignedReadUrl = async storageKey => {
+  try {
+    return await signedReadUrl(storageKey);
+  } catch (error) {
+    if (["STORAGE_UNCONFIGURED", "STORAGE_UNAVAILABLE"].includes(error?.code))
+      return null;
+    throw error;
+  }
+};

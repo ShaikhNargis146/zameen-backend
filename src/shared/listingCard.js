@@ -1,5 +1,5 @@
 import { run } from "./db.js";
-import { signedReadUrl } from "../utils/storage.js";
+import { optionalSignedReadUrl } from "../utils/storage.js";
 
 const cardSql = `
 SELECT listing.id AS "listingId", listing.listing_code AS "listingCode", listing.property_id AS "propertyId", listing.title,
@@ -86,7 +86,7 @@ const toCard = async row => ({
         displayPath: row.locationName
       }
     : null,
-  thumbnailUrl: await signedReadUrl(row.thumbnailStorageKey),
+  thumbnailUrl: await optionalSignedReadUrl(row.thumbnailStorageKey),
   isPremium: row.isPremium,
   verificationLabel: row.verificationLabel,
   publishedAt: row.publishedAt,

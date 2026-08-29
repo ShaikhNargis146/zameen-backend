@@ -418,21 +418,11 @@ export const grantDocumentAccess = async ({
       "INVALID_DOCUMENT_GRANTEE",
       "granteeUserId must identify an active buyer."
     );
-  const saved = await repository.upsertDocumentAccessGrant({
+  const grant = await repository.grantDocumentAccess({
     documentId,
     grantedByUserId: actorId,
+    propertyId,
     ...input
-  });
-  const grant = await repository.documentAccessGrant(documentId, saved.id);
-  await repository.auditDocumentAccessGrant({
-    actorId,
-    action: "DOCUMENT_ACCESS_GRANTED",
-    documentId,
-    data: {
-      propertyId,
-      granteeUserId: input.granteeUserId,
-      expiresAt: input.expiresAt
-    }
   });
   return documentGrantResponse(grant);
 };

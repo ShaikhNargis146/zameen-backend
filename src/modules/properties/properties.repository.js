@@ -315,18 +315,18 @@ export const hasActiveDocumentAccessGrant = (documentId, userId) =>
        AND (expires_at IS NULL OR expires_at > now())`,
     [documentId, userId]
   );
-const documentAccessGrantColumns = `grant.id, grant.expires_at AS "expiresAt", grant.created_at AS "createdAt",
+const documentAccessGrantColumns = `access_grant.id, access_grant.expires_at AS "expiresAt", access_grant.created_at AS "createdAt",
   user_account.id AS "granteeUserId", user_account.display_name AS "granteeDisplayName"`;
 export const documentAccessGrants = documentId =>
   run(
     "any",
     `SELECT ${documentAccessGrantColumns}
-     FROM land.property_document_access_grants grant
-     JOIN auth.users user_account ON user_account.id = grant.grantee_user_id
-     WHERE grant.property_document_id = $1
-       AND grant.revoked_at IS NULL
-       AND (grant.expires_at IS NULL OR grant.expires_at > now())
-     ORDER BY grant.created_at DESC, grant.id DESC`,
+     FROM land.property_document_access_grants access_grant
+     JOIN auth.users user_account ON user_account.id = access_grant.grantee_user_id
+     WHERE access_grant.property_document_id = $1
+       AND access_grant.revoked_at IS NULL
+       AND (access_grant.expires_at IS NULL OR access_grant.expires_at > now())
+     ORDER BY access_grant.created_at DESC, access_grant.id DESC`,
     [documentId]
   );
 export const eligibleDocumentGrantee = userId =>
@@ -345,32 +345,57 @@ export const eligibleDocumentGrantee = userId =>
        )`,
     [userId]
   );
-export const upsertDocumentAccessGrant = ({
+export const grantDocumentAccess = async ({
   documentId,
   granteeUserId,
   grantedByUserId,
-  expiresAt
-}) =>
-  run(
-    "one",
-    `INSERT INTO land.property_document_access_grants
-       (property_document_id, grantee_user_id, granted_by_user_id, expires_at)
-     VALUES ($1,$2,$3,$4)
-     ON CONFLICT (property_document_id, grantee_user_id) WHERE revoked_at IS NULL
-     DO UPDATE SET granted_by_user_id = EXCLUDED.granted_by_user_id,
-                   expires_at = EXCLUDED.expires_at
-     RETURNING id`,
-    [documentId, granteeUserId, grantedByUserId, expiresAt]
-  );
+  expiresAt,
+  propertyId
+}) => {
+  const result = await pg.tx(async transaction => {
+    const saved = await transaction.one(
+      `INSERT INTO land.property_document_access_grants
+         (property_document_id, grantee_user_id, granted_by_user_id, expires_at)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (property_document_id, grantee_user_id) WHERE revoked_at IS NULL
+       DO UPDATE SET granted_by_user_id = EXCLUDED.granted_by_user_id,
+                     expires_at = EXCLUDED.expires_at
+       RETURNING id`,
+      [documentId, granteeUserId, grantedByUserId, expiresAt]
+    );
+    const grant = await transaction.one(
+      `SELECT ${documentAccessGrantColumns}
+       FROM land.property_document_access_grants access_grant
+       JOIN auth.users user_account ON user_account.id = access_grant.grantee_user_id
+       WHERE access_grant.id = $1
+         AND access_grant.property_document_id = $2
+         AND access_grant.revoked_at IS NULL`,
+      [saved.id, documentId]
+    );
+    await transaction.none(
+      `INSERT INTO ops.audit_logs
+         (actor_user_id, action, entity_type, entity_id, after_data)
+       VALUES ($1,'DOCUMENT_ACCESS_GRANTED','land.property_documents',$2,$3::jsonb)`,
+      [
+        grantedByUserId,
+        documentId,
+        JSON.stringify({ propertyId, granteeUserId, expiresAt })
+      ]
+    );
+    return grant;
+  });
+  if (!result.ok) throw result.error;
+  return result.data;
+};
 export const documentAccessGrant = (documentId, grantId) =>
   run(
     "oneOrNone",
     `SELECT ${documentAccessGrantColumns}
-     FROM land.property_document_access_grants grant
-     JOIN auth.users user_account ON user_account.id = grant.grantee_user_id
-     WHERE grant.id = $1
-       AND grant.property_document_id = $2
-       AND grant.revoked_at IS NULL`,
+     FROM land.property_document_access_grants access_grant
+     JOIN auth.users user_account ON user_account.id = access_grant.grantee_user_id
+     WHERE access_grant.id = $1
+       AND access_grant.property_document_id = $2
+       AND access_grant.revoked_at IS NULL`,
     [grantId, documentId]
   );
 export const revokeDocumentAccessGrant = grantId =>

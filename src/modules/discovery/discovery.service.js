@@ -1,5 +1,5 @@
 import { HttpError } from "../../shared/http.js";
-import { signedReadUrl } from "../../utils/storage.js";
+import { optionalSignedReadUrl } from "../../utils/storage.js";
 import {
   listingCardsByIds,
   formatPriceDisplay
@@ -39,7 +39,7 @@ export const map = async filters =>
           ? "Area unavailable"
           : `${Number(pin.areaValue)} ${pin.areaUnitCode || ""}`.trim(),
       propertyTypeName: pin.propertyTypeName,
-      thumbnailUrl: await signedReadUrl(pin.thumbnailStorageKey),
+      thumbnailUrl: await optionalSignedReadUrl(pin.thumbnailStorageKey),
       isPremium: pin.isPremium
     }))
   );

@@ -23,7 +23,7 @@ test("document access grants are owner-managed and downloads do not disclose exi
   assert.match(service, /document\.visibility === "APPROVED_BUYERS" && hasGrant/);
   assert.match(service, /DOCUMENT_NOT_FOUND/);
   assert.match(repository, /expires_at IS NULL OR expires_at > now\(\)/);
-  assert.match(repository, /upsertDocumentAccessGrant/);
+  assert.match(repository, /grantDocumentAccess/);
   assert.match(repository, /eligibleDocumentGrantee/);
   assert.match(
     routes,
@@ -75,6 +75,19 @@ test("parcel identifiers are resolved from the property's state configuration", 
   assert.match(identifierTypes, /WITH RECURSIVE ancestors/);
   assert.match(identifierTypes, /state_location_id = state\.id/);
   assert.doesNotMatch(replaceIdentifiers, /WHERE code = \$1/);
-  assert.match(service, /identifierTypesForProperty\(propertyId\)/);
+  assert.match(service, /identifierTypesForProperty\s*\(\s*propertyId\s*\)/);
   assert.match(service, /PARCEL_CONFIG_UNAVAILABLE/);
+});
+
+test("document access grants use a PostgreSQL-safe table alias", async () => {
+  const repository = await readFile(
+    new URL(
+      "../../src/modules/properties/properties.repository.js",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(repository, /property_document_access_grants access_grant/);
+  assert.doesNotMatch(repository, /property_document_access_grants grant\b/);
+  assert.match(repository, /const result = await pg\.tx/);
 });

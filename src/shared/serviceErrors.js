@@ -1,0 +1,13 @@
+export const publicServiceErrorCodes = new Set([
+  "OTP_PROVIDER_UNCONFIGURED",
+  "AI_PROVIDER_UNCONFIGURED",
+  "AI_PROVIDER_UNAVAILABLE",
+  "AI_CONTEXT_UNAVAILABLE",
+  "AI_PROVIDER_INVALID_RESPONSE",
+  "AI_PROVIDER_INCOMPLETE",
+  "AI_CONVERSATION_UNAVAILABLE",
+  "STORAGE_UNCONFIGURED",
+  "STORAGE_UNAVAILABLE"
+]);
+
+export const isPublicServiceError = code => publicServiceErrorCodes.has(code);

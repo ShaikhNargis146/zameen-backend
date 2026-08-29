@@ -180,7 +180,7 @@ export const documentAccessGrants = async (req, res) =>
     })
   );
 export const grantDocumentAccess = async (req, res) =>
-  created(
+  ok(
     res,
     await service.grantDocumentAccess({
       propertyId: req.property.id,

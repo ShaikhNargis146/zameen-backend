@@ -25,9 +25,10 @@ test("conversation history query qualifies columns from its latest-message join"
 });
 
 test("chat establishes SSE before preparing database context", async () => {
-  const [controller, service] = await Promise.all([
+  const [controller, service, serviceErrors] = await Promise.all([
     readFile(new URL("../../src/modules/ai/ai.controller.js", import.meta.url), "utf8"),
-    readFile(new URL("../../src/modules/ai/ai.service.js", import.meta.url), "utf8")
+    readFile(new URL("../../src/modules/ai/ai.service.js", import.meta.url), "utf8"),
+    readFile(new URL("../../src/shared/serviceErrors.js", import.meta.url), "utf8")
   ]);
   const headerPosition = controller.indexOf('"Content-Type": "text/event-stream');
   const iterationPosition = controller.indexOf("for await (const event of stream)");
@@ -36,10 +37,11 @@ test("chat establishes SSE before preparing database context", async () => {
 
   assert.ok(headerPosition >= 0 && headerPosition < iterationPosition);
   assert.ok(iteratorPosition >= 0 && iteratorPosition < contextPosition);
-  assert.match(controller, /"AI_CONTEXT_UNAVAILABLE"/);
-  assert.match(controller, /"AI_PROVIDER_INVALID_RESPONSE"/);
-  assert.match(controller, /"AI_PROVIDER_INCOMPLETE"/);
-  assert.match(controller, /"AI_CONVERSATION_UNAVAILABLE"/);
+  assert.match(controller, /isPublicServiceError/);
+  assert.match(serviceErrors, /"AI_CONTEXT_UNAVAILABLE"/);
+  assert.match(serviceErrors, /"AI_PROVIDER_INVALID_RESPONSE"/);
+  assert.match(serviceErrors, /"AI_PROVIDER_INCOMPLETE"/);
+  assert.match(serviceErrors, /"AI_CONVERSATION_UNAVAILABLE"/);
 });
 
 test("GPT-5 chat uses a concise response budget", async () => {

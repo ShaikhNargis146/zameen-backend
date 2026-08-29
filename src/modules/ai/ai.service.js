@@ -255,21 +255,15 @@ export const streamMessage = async ({ signal, ...params }) => {
       // Keep the persisted message byte-for-byte aligned with rendered deltas,
       // except for inconsequential leading/trailing whitespace.
       const response = content.trim();
-      if (!response)
-        logChatFailure(
-          "provider-stream-empty",
-          new HttpError(
-            502,
-            "AI_PROVIDER_INVALID_RESPONSE",
-            "AI service returned an unusable response."
-          )
-        );
-      if (!response)
-        throw new HttpError(
+      if (!response) {
+        const error = new HttpError(
           502,
           "AI_PROVIDER_INVALID_RESPONSE",
           "AI service returned an unusable response."
         );
+        logChatFailure("provider-stream-empty", error);
+        throw error;
+      }
       const answer = await repository.addMessage({
         conversationId: params.conversationId,
         role: "ASSISTANT",
