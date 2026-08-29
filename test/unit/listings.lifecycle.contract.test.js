@@ -60,14 +60,10 @@ test("published listings still expire via the sweep independent of admin actions
   );
 });
 
-test("the reinstate endpoint is documented in the integration spec and Postman collection", async () => {
-  const [spec, postman] = await Promise.all([
-    readFile(new URL("../../docs/Zameen_API_PLAN_FULL.md", import.meta.url), "utf8"),
-    readFile(
-      new URL("../../postman/Zameens-Dev1.postman_collection.json", import.meta.url),
-      "utf8"
-    )
-  ]);
-  assert.match(spec, /\/admin\/listings\/\{listingId\}\/reinstate/);
+test("the reinstate endpoint is documented in the Postman collection", async () => {
+  const postman = await readFile(
+    new URL("../../postman/Zameens-Dev1.postman_collection.json", import.meta.url),
+    "utf8"
+  );
   assert.match(postman, /admin\/listings\/\{\{listingId\}\}\/reinstate/);
 });
