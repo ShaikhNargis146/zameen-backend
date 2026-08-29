@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import error from "../../src/middlewares/error.js";
+import { HttpError } from "../../src/shared/http.js";
 
 const response = () => ({
   headersSent: false,
@@ -71,6 +72,30 @@ test("safe storage availability errors remain actionable in production", () => {
       code: "STORAGE_UNAVAILABLE",
       message: "File storage is temporarily unavailable."
     },
+    {},
+    res
+  );
+  process.env.NODE_ENV = original;
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.body, {
+    success: false,
+    error: {
+      code: "STORAGE_UNAVAILABLE",
+      message: "File storage is temporarily unavailable."
+    }
+  });
+});
+
+test("converter retains reviewed service-error messages", () => {
+  const original = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  const res = response();
+  error.converter(
+    new HttpError(
+      503,
+      "STORAGE_UNAVAILABLE",
+      "File storage is temporarily unavailable."
+    ),
     {},
     res
   );

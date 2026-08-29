@@ -86,9 +86,15 @@ const converter = (err, req, res, next) => {
       stack: err.stack
     });
   } else if (!(err instanceof APIError)) {
+    // HttpError is intentionally a lightweight domain error rather than an
+    // APIError. Preserve messages only for the small, explicitly reviewed set
+    // of operational provider errors; all other 5xx errors remain opaque.
+    const isPublicServiceError = publicServiceErrorCodes.has(err?.code);
     convertedError = new APIError({
       message:
-        err.status && err.status < 500 ? err.message : "Internal Server Error",
+        err.status && (err.status < 500 || isPublicServiceError)
+          ? err.message
+          : "Internal Server Error",
       code: err.code || "INTERNAL_ERROR",
       errors: {
         details: err.status && err.status < 500 ? err.details : undefined
