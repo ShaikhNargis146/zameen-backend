@@ -49,6 +49,7 @@ test("GPT-5 chat uses a concise response budget", async () => {
   );
   assert.match(provider, /reasoning: \{ effort: "minimal" \}/);
   assert.match(provider, /max_output_tokens: 500/);
+  assert.match(provider, /text: \{ verbosity: "low" \}/);
   assert.match(provider, /no more than 120 words/);
   assert.match(provider, /event\?\.type === "response\.incomplete"/);
 });

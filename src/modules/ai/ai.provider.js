@@ -7,10 +7,13 @@ const snippet = value =>
   String(value || "")
     .replace(/\s+/g, " ")
     .trim();
-const configuredTimeout = Number(process.env.OPENAI_TIMEOUT_MS || 15000);
+const defaultTimeout = 45000;
+const configuredTimeout = Number(
+  process.env.OPENAI_TIMEOUT_MS || defaultTimeout
+);
 const timeout = Number.isFinite(configuredTimeout)
   ? Math.min(Math.max(configuredTimeout, 1000), 60000)
-  : 15000;
+  : defaultTimeout;
 const model = () => process.env.OPENAI_MODEL || defaultModel;
 const responseReasoning = () =>
   /^gpt-5(?:[.-]|$)/.test(model()) ? { reasoning: { effort: "minimal" } } : {};
@@ -228,6 +231,7 @@ const conversationRequest = ({
   // Grounding is assembled server-side, so use the lowest supported GPT-5
   // reasoning level and reserve most of the response budget for the answer.
   max_output_tokens: 500,
+  text: { verbosity: "low" },
   instructions: conversationInstructions,
   input: JSON.stringify({
     language,
