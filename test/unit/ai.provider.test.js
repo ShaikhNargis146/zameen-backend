@@ -3,8 +3,14 @@ import test from "node:test";
 import {
   normalizeListingDraft,
   providerErrorMetadata,
-  streamedTextDelta
+  streamedTextDelta,
+  streamedTextDone
 } from "../../src/modules/ai/ai.provider.js";
+import {
+  storageErrorMetadata,
+  storageUnavailable
+} from "../../src/utils/storage.js";
+import { HttpError } from "../../src/shared/http.js";
 
 test("listing drafts are normalized to the UI contract limits", () => {
   const result = normalizeListingDraft({
@@ -46,6 +52,23 @@ test("provider diagnostics exclude provider messages and sanitize log fields", (
   );
 });
 
+test("storage diagnostics exclude provider messages and sanitize log fields", () => {
+  assert.deepEqual(
+    storageErrorMetadata({
+      name: "FetchError",
+      code: "ECONNRESET",
+      message: "This must never be logged"
+    }),
+    { name: "FetchError", code: "ECONNRESET", status: "none" }
+  );
+  const original = new HttpError(
+    503,
+    "STORAGE_UNAVAILABLE",
+    "File storage is temporarily unavailable."
+  );
+  assert.equal(storageUnavailable(original), original);
+});
+
 test("only supported OpenAI text events become chat stream deltas", () => {
   assert.equal(
     streamedTextDelta({ type: "response.output_text.delta", delta: "Hello" }),
@@ -57,6 +80,17 @@ test("only supported OpenAI text events become chat stream deltas", () => {
   );
   assert.equal(
     streamedTextDelta({ type: "response.completed", delta: "ignored" }),
+    null
+  );
+});
+
+test("completed OpenAI text is available only as a stream fallback", () => {
+  assert.equal(
+    streamedTextDone({ type: "response.output_text.done", text: "Hello" }),
+    "Hello"
+  );
+  assert.equal(
+    streamedTextDone({ type: "response.completed", text: "ignored" }),
     null
   );
 });

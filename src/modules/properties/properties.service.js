@@ -135,13 +135,29 @@ export const saveAmenities = async ({ propertyId, amenities }) => {
 };
 export const getIdentifiers = repository.identifiers;
 export const saveIdentifiers = async ({ propertyId, identifiers }) => {
-  try {
-    await repository.replaceIdentifiers(propertyId, identifiers);
-  } catch (error) {
-    if (error?.message?.includes("Parcel identifier type"))
-      throw new HttpError(400, "INVALID_IDENTIFIERS", error.message);
-    throw error;
-  }
+  const configuredTypes = await repository.identifierTypesForProperty(
+    propertyId
+  );
+  if (!configuredTypes.length)
+    throw new HttpError(
+      409,
+      "PARCEL_CONFIG_UNAVAILABLE",
+      "Parcel identifiers are not configured for this property's state."
+    );
+  const configuredTypesByCode = new Map(
+    configuredTypes.map(type => [type.code, type])
+  );
+  const resolvedIdentifiers = identifiers.map(identifier => ({
+    ...identifier,
+    identifierTypeId: configuredTypesByCode.get(identifier.type)?.id
+  }));
+  if (resolvedIdentifiers.some(identifier => !identifier.identifierTypeId))
+    throw new HttpError(
+      400,
+      "INVALID_IDENTIFIERS",
+      "One or more identifier types are not configured for this property's state."
+    );
+  await repository.replaceIdentifiers(propertyId, resolvedIdentifiers);
   return repository.identifiers(propertyId);
 };
 export const requestVerification = async ({
@@ -336,11 +352,106 @@ export const listDocuments = async propertyId =>
       documentResponse(item, true)
     )
   );
-export const getDocument = async ({ propertyId, documentId }) => {
+export const canReadDocument = ({ document, isOwner, isAdmin, hasGrant }) =>
+  isAdmin || isOwner || (document.visibility === "APPROVED_BUYERS" && hasGrant);
+export const getDocument = async ({ propertyId, documentId, actor }) => {
   const item = await repository.document(propertyId, documentId);
   if (!item)
     throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document was not found.");
+  const isAdmin = actor.roles?.includes("ADMIN") || false;
+  const isOwner = isAdmin
+    ? false
+    : Boolean(await repository.findOwned(propertyId, actor.id));
+  const hasGrant =
+    !isAdmin && !isOwner && item.visibility === "APPROVED_BUYERS"
+      ? Boolean(
+          await repository.hasActiveDocumentAccessGrant(documentId, actor.id)
+        )
+      : false;
+  if (!canReadDocument({ document: item, isOwner, isAdmin, hasGrant }))
+    throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document was not found.");
+  if (isAdmin)
+    await repository.auditAdminDocumentRead({
+      actorId: actor.id,
+      documentId,
+      propertyId
+    });
   return documentResponse(item, true);
+};
+const documentGrantResponse = grant => ({
+  id: grant.id,
+  grantee: {
+    id: grant.granteeUserId,
+    displayName: grant.granteeDisplayName
+  },
+  expiresAt: grant.expiresAt,
+  createdAt: grant.createdAt
+});
+const requireGrantableDocument = async ({ propertyId, documentId }) => {
+  const item = await repository.document(propertyId, documentId);
+  if (!item)
+    throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document was not found.");
+  if (item.visibility !== "APPROVED_BUYERS")
+    throw new HttpError(
+      409,
+      "DOCUMENT_GRANT_NOT_APPLICABLE",
+      "Access grants are available only for APPROVED_BUYERS documents."
+    );
+  return item;
+};
+export const listDocumentAccessGrants = async ({ propertyId, documentId }) => {
+  await requireGrantableDocument({ propertyId, documentId });
+  return (await repository.documentAccessGrants(documentId)).map(
+    documentGrantResponse
+  );
+};
+export const grantDocumentAccess = async ({
+  propertyId,
+  documentId,
+  actorId,
+  input
+}) => {
+  await requireGrantableDocument({ propertyId, documentId });
+  if (!(await repository.eligibleDocumentGrantee(input.granteeUserId)))
+    throw new HttpError(
+      400,
+      "INVALID_DOCUMENT_GRANTEE",
+      "granteeUserId must identify an active buyer."
+    );
+  const grant = await repository.grantDocumentAccess({
+    documentId,
+    grantedByUserId: actorId,
+    propertyId,
+    ...input
+  });
+  return documentGrantResponse(grant);
+};
+export const revokeDocumentAccess = async ({
+  propertyId,
+  documentId,
+  grantId,
+  actorId
+}) => {
+  await requireGrantableDocument({ propertyId, documentId });
+  const grant = await repository.documentAccessGrant(documentId, grantId);
+  if (!grant)
+    throw new HttpError(
+      404,
+      "DOCUMENT_ACCESS_GRANT_NOT_FOUND",
+      "Document access grant was not found."
+    );
+  if (!(await repository.revokeDocumentAccessGrant(grantId)))
+    throw new HttpError(
+      404,
+      "DOCUMENT_ACCESS_GRANT_NOT_FOUND",
+      "Document access grant was not found."
+    );
+  await repository.auditDocumentAccessGrant({
+    actorId,
+    action: "DOCUMENT_ACCESS_REVOKED",
+    documentId,
+    data: { propertyId, granteeUserId: grant.granteeUserId }
+  });
 };
 export const deleteDocument = async ({ propertyId, documentId }) => {
   if (!(await repository.document(propertyId, documentId)))

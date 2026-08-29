@@ -1,12 +1,7 @@
 import httpStatus from "http-status";
 import { ValidationError } from "express-validation";
 import APIError from "../utils/APIError.js";
-
-const publicServiceErrorCodes = new Set([
-  "OTP_PROVIDER_UNCONFIGURED",
-  "AI_PROVIDER_UNCONFIGURED",
-  "AI_PROVIDER_UNAVAILABLE"
-]);
+import { isPublicServiceError } from "../shared/serviceErrors.js";
 
 /**
  * Error handler. Send stacktrace only during development
@@ -38,17 +33,17 @@ const handler = (err, req, res, next) => {
       err?.status || err?.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
 
     const isServerError = status >= httpStatus.INTERNAL_SERVER_ERROR;
-    const isPublicServiceError = publicServiceErrorCodes.has(err?.code);
+    const isPublicError = isPublicServiceError(err?.code);
     const payload = {
       success: false,
       error: {
         code:
-          isServerError && !isPublicServiceError
+          isServerError && !isPublicError
             ? "INTERNAL_ERROR"
             : err?.code || "REQUEST_ERROR",
         message:
           isServerError &&
-          !isPublicServiceError &&
+          !isPublicError &&
           process.env.NODE_ENV === "production"
             ? "Internal Server Error"
             : err?.message || "Internal Server Error"
@@ -84,9 +79,15 @@ const converter = (err, req, res, next) => {
       stack: err.stack
     });
   } else if (!(err instanceof APIError)) {
+    // HttpError is intentionally a lightweight domain error rather than an
+    // APIError. Preserve messages only for the small, explicitly reviewed set
+    // of operational provider errors; all other 5xx errors remain opaque.
+    const isPublicError = isPublicServiceError(err?.code);
     convertedError = new APIError({
       message:
-        err.status && err.status < 500 ? err.message : "Internal Server Error",
+        err.status && (err.status < 500 || isPublicError)
+          ? err.message
+          : "Internal Server Error",
       code: err.code || "INTERNAL_ERROR",
       errors: {
         details: err.status && err.status < 500 ? err.details : undefined

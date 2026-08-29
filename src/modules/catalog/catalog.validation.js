@@ -1,5 +1,15 @@
 import { HttpError } from "../../shared/http.js";
 
+const locationTypes = new Set([
+  "COUNTRY",
+  "STATE",
+  "DISTRICT",
+  "SUBDISTRICT",
+  "CITY",
+  "LOCALITY",
+  "VILLAGE"
+]);
+
 export const searchQuery = query => {
   const value = String(query.q || "").trim();
   if (value.length < 2 || value.length > 100)
@@ -22,12 +32,38 @@ export const locationSearch = query => {
         .map(value => value.trim().toUpperCase())
         .filter(Boolean)
     : null;
+  if (types?.some(type => !locationTypes.has(type)))
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "types contains an unsupported location type."
+    );
+  const limit = Number(query.limit || 10);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 25)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "limit must be an integer from 1 to 25."
+    );
   return {
     q: searchQuery(query),
     types: types?.length ? types : null,
     stateCode: query.stateCode ? stateCode(query.stateCode) : null,
-    limit: Math.min(Math.max(Number(query.limit || 10), 1), 25)
+    limit
   };
+};
+export const locationType = query => {
+  if (!query.type) return null;
+  const type = String(query.type)
+    .trim()
+    .toUpperCase();
+  if (!locationTypes.has(type))
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "type is an unsupported location type."
+    );
+  return type;
 };
 export const coordinates = query => {
   const latitude = Number(query.lat);

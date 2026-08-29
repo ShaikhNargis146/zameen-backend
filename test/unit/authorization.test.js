@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { requireOwnedResource } from "../../src/shared/authorization.js";
+import { requireUuidParam } from "../../src/shared/request-validation.js";
 
 test("resource middleware supports optional-auth viewers", async () => {
   const middleware = requireOwnedResource({
@@ -32,4 +33,11 @@ test("resource middleware gives administrators the explicit admin loader", async
     middleware(request, {}, error => (error ? reject(error) : resolve()))
   );
   assert.deepEqual(request.listing, { listingId: "listing-1", access: "admin" });
+});
+
+test("UUID route middleware rejects malformed resource identifiers", async () => {
+  const error = await new Promise(resolve =>
+    requireUuidParam({}, {}, resolve, "not-a-uuid", "propertyId")
+  );
+  assert.equal(error.code, "INVALID_ID");
 });

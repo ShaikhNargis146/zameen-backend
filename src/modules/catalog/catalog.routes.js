@@ -1,10 +1,15 @@
 import { Router } from "express";
 import { asyncRoute } from "../../shared/http.js";
+import { requireUuidParam } from "../../shared/request-validation.js";
 import { requireAuth } from "../auth/auth.routes.js";
 import * as controller from "./catalog.controller.js";
 import { masters } from "./catalog.constants.js";
 
 const router = Router();
+router.param("locationId", requireUuidParam);
+router.param("stateId", requireUuidParam);
+router.param("districtId", requireUuidParam);
+router.param("cityId", requireUuidParam);
 for (const key of Object.keys(masters)) {
   if (key === "document-types")
     router.get(`/${key}`, requireAuth, asyncRoute(controller.documentTypes));
@@ -29,11 +34,11 @@ router.get(
 );
 router.get(
   "/locations/districts/:districtId/cities",
-  asyncRoute(controller.children("CITY"))
+  asyncRoute(controller.cities)
 );
 router.get(
   "/locations/cities/:cityId/localities",
-  asyncRoute(controller.children("LOCALITY"))
+  asyncRoute(controller.localities)
 );
 router.get(
   "/locations/:locationId/children",

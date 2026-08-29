@@ -41,10 +41,6 @@ Header
 	Optional
 	en
 	Supported: en, hi, mr, gu, pa, te, ta.
-	X-AI-Conversation-Token
-	Guest AI conversation follow-up
-	Token returned by POST /ai/conversations
-	Required for a guest to read or add messages to that conversation.
 	X-Request-ID
 	Optional
 	uuid
@@ -413,11 +409,6 @@ Field
 	
 
 	Last successful login.
-	guestAccessToken
-	string|null
-	No
-	Guest only
-	Send as X-AI-Conversation-Token for subsequent guest message/read calls.
 	createdAt
 	datetime
 	Yes
@@ -927,6 +918,7 @@ Method
 	path stateCode
 	ParcelConfig
 	
+	Parcel configuration is curated operational data and must be loaded after the location hierarchy. If a property’s state has no configured identifier types, `PUT /properties/{propertyId}/parcel-identifiers` returns `409 PARCEL_CONFIG_UNAVAILABLE`; do not submit that listing until operations configures the state.
 
 MasterOption
 Field
@@ -1069,7 +1061,18 @@ Method
 	Authenticated
 	lat,lng
 	GeoResult
-	
+
+
+Location hierarchy data note
+
+`/locations/districts/{districtId}/cities` prefers `CITY` children and falls back
+to the official LGD `SUBDISTRICT` children only when curated city data is not
+available. `/locations/cities/{cityId}/localities` similarly prefers `LOCALITY`
+and falls back to LGD `VILLAGE` children. The returned `LocationSummary.type` is
+always authoritative; UI must use that value and must not relabel a sub-district
+or village as a city/locality. This keeps the locked endpoint paths useful while
+preserving the source-data meaning.
+
 
 LocationSearchQuery
 Field
@@ -1082,6 +1085,7 @@ Field
 	Yes
 	2-100 chars
 	Search text.
+	Location suggestions use a case-insensitive prefix match against canonical names and aliases for every query length.
 	types
 	string[]|null
 	No
@@ -1703,7 +1707,10 @@ Field
 	Conditional
 	IMAGE/VIDEO/DRONE_VIDEO/SITE_PLAN
 	Required for media upload, omitted for document upload.
-	
+MIME policy: `IMAGE` accepts JPEG, PNG, and WebP; `VIDEO` and `DRONE_VIDEO`
+accept MP4 and WebM; `SITE_PLAN` accepts PDF, JPEG, PNG, and WebP. Property
+documents initially accept PDF, JPEG, and PNG. The API rejects every other
+MIME type before issuing an upload URL.
 
 UploadTicket
 Field
@@ -1991,7 +1998,22 @@ Field
 	Yes
 	Read-only
 	Upload time.
-	
+For `GET /properties/{propertyId}/documents/{documentId}`, “Authorized” means
+the property owner, an administrator (audited), or a user with an active,
+unrevoked, non-expired access grant when visibility is `APPROVED_BUYERS`.
+The signed `downloadUrl` is issued only after this authorization check.
+
+Owners and administrators manage APPROVED_BUYERS grants through:
+
+	GET /properties/{propertyId}/documents/{documentId}/access-grants
+	POST /properties/{propertyId}/documents/{documentId}/access-grants
+	DELETE /properties/{propertyId}/documents/{documentId}/access-grants/{grantId}
+
+`POST` accepts `{ "granteeUserId": "uuid", "expiresAt": "ISO-8601 timestamp | null" }`.
+The grantee must be an active `BUYER`; `expiresAt` is optional and must be in the future when supplied.
+All grant-management endpoints are Owner/Admin only and apply only when the document visibility is `APPROVED_BUYERS`.
+`POST` is idempotent per document and grantee: it creates or refreshes the active grant and returns the current grant with `200 OK`.
+Unauthorized document reads deliberately return `404 DOCUMENT_NOT_FOUND`, so they do not disclose whether another user's document exists.
 
 4.12 Listing Creation & Management
 Owner: Backend Dev 1   |   UI surfaces: Seller listing wizard, seller inventory
@@ -3088,7 +3110,7 @@ Method
 	AiSearchResult
 	POST
 	/ai/conversations
-	Public/auth
+	Authenticated user
 	CreateAiConversation
 	AiConversation
 	GET
@@ -3098,12 +3120,12 @@ Method
 	AiConversation[] + PaginationMeta
 	POST
 	/ai/conversations/{conversationId}/messages
-	Conversation owner
+	Authenticated conversation owner
 	AiMessageInput
 	SSE: AiMessageDelta + AiMessage
 	GET
 	/ai/conversations/{conversationId}
-	Conversation owner
+	Authenticated conversation owner
 	none
 	AiConversationDetail
 	POST
@@ -3116,7 +3138,7 @@ Method
 AI chat streaming contract
 
 POST /api/v1/ai/conversations/{conversationId}/messages returns `200 text/event-stream`.
-The request body and `X-AI-Conversation-Token` guest authorization remain unchanged.
+An `Authorization: Bearer <access-token>` header is required; the conversation must belong to that user.
 The UI must use `fetch` and read the response stream; EventSource cannot make this POST request.
 Each SSE event has JSON in `data` and is one of:
 

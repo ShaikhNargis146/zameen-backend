@@ -166,10 +166,38 @@ export const document = async (req, res) =>
   ok(
     res,
     await service.getDocument({
+      propertyId: req.params.propertyId,
+      documentId: req.params.documentId,
+      actor: req.actor
+    })
+  );
+export const documentAccessGrants = async (req, res) =>
+  ok(
+    res,
+    await service.listDocumentAccessGrants({
       propertyId: req.property.id,
       documentId: req.params.documentId
     })
   );
+export const grantDocumentAccess = async (req, res) =>
+  ok(
+    res,
+    await service.grantDocumentAccess({
+      propertyId: req.property.id,
+      documentId: req.params.documentId,
+      actorId: req.actor.id,
+      input: validation.documentAccessGrant(req.body || {})
+    })
+  );
+export const revokeDocumentAccess = async (req, res) => {
+  await service.revokeDocumentAccess({
+    propertyId: req.property.id,
+    documentId: req.params.documentId,
+    grantId: req.params.grantId,
+    actorId: req.actor.id
+  });
+  return res.status(204).send();
+};
 export const deleteDocument = async (req, res) => {
   await service.deleteDocument({
     propertyId: req.property.id,

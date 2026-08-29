@@ -20,6 +20,8 @@ export const searchLocations = repository.searchLocations;
 export const pincodeLocations = repository.locationsForPincode;
 export const states = repository.listStates;
 export const children = repository.childrenForLocation;
+export const cities = repository.citiesForDistrict;
+export const localities = repository.localitiesForCity;
 export const location = async id => {
   const result = await repository.findLocation(id);
   if (!result)

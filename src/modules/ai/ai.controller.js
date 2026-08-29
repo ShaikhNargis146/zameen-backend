@@ -1,17 +1,13 @@
 import { created, ok } from "../../shared/http.js";
+import { isPublicServiceError } from "../../shared/serviceErrors.js";
 import * as service from "./ai.service.js";
 import * as validation from "./ai.validation.js";
 
-const guestToken = req => req.headers["x-ai-conversation-token"] || null;
-const publicServiceErrorCodes = new Set([
-  "AI_PROVIDER_UNCONFIGURED",
-  "AI_PROVIDER_UNAVAILABLE"
-]);
 const sse = (res, event, data) =>
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 const streamError = error => {
   const clientError = Number(error?.status) < 500;
-  const publicServiceError = publicServiceErrorCodes.has(error?.code);
+  const publicServiceError = isPublicServiceError(error?.code);
   return {
     code:
       clientError || publicServiceError
@@ -35,7 +31,7 @@ export const createConversation = async (req, res) =>
   created(
     res,
     await service.createConversation({
-      actorId: req.actor?.id || null,
+      actorId: req.actor.id,
       input: validation.conversation(req.body || {})
     })
   );
@@ -50,8 +46,7 @@ export const addMessage = async (req, res) => {
   const abortController = new AbortController();
   const stream = await service.streamMessage({
     conversationId: validation.conversationId(req.params.conversationId),
-    actorId: req.actor?.id || null,
-    guestToken: guestToken(req),
+    actorId: req.actor.id,
     input: validation.message(req.body || {}),
     signal: abortController.signal
   });
@@ -87,8 +82,7 @@ export const getConversation = async (req, res) =>
     res,
     await service.getConversation({
       conversationId: validation.conversationId(req.params.conversationId),
-      actorId: req.actor?.id || null,
-      guestToken: guestToken(req)
+      actorId: req.actor.id
     })
   );
 export const generateListing = async (req, res) =>

@@ -49,13 +49,13 @@ export const summaries = propertyIds =>
 export const ownedIds = ({ userId, status, search, limit, offset }) =>
   run(
     "any",
-    `SELECT DISTINCT p.id FROM land.properties p LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations l ON l.id = pl.location_id WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR l.name ILIKE $3) ORDER BY p.updated_at DESC LIMIT $4 OFFSET $5`,
+    `SELECT p.id FROM land.properties p WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR EXISTS (SELECT 1 FROM land.property_locations pl JOIN geo.locations l ON l.id = pl.location_id WHERE pl.property_id = p.id AND l.name ILIKE $3)) ORDER BY p.updated_at DESC, p.id DESC LIMIT $4 OFFSET $5`,
     [userId, status, search, limit, offset]
   );
 export const countOwned = ({ userId, status, search }) =>
   run(
     "one",
-    `SELECT count(DISTINCT p.id)::int AS total FROM land.properties p LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations l ON l.id = pl.location_id WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR l.name ILIKE $3)`,
+    `SELECT count(*)::int AS total FROM land.properties p WHERE p.deleted_at IS NULL AND (p.created_by_user_id = $1 OR EXISTS (SELECT 1 FROM account.organization_members om WHERE om.organization_id = p.owner_organization_id AND om.user_id = $1 AND om.status = 'ACTIVE')) AND ($2::varchar IS NULL OR p.status = $2) AND ($3::varchar IS NULL OR p.public_code ILIKE $3 OR EXISTS (SELECT 1 FROM land.property_locations pl JOIN geo.locations l ON l.id = pl.location_id WHERE pl.property_id = p.id AND l.name ILIKE $3))`,
     [userId, status, search]
   );
 export const archive = propertyId =>
@@ -156,6 +156,27 @@ export const identifiers = propertyId =>
     `SELECT pi.id, pit.code AS type, pit.name AS label, pi.identifier_value AS value FROM land.property_parcel_identifiers pi JOIN land.parcel_identifier_types pit ON pit.id = pi.identifier_type_id WHERE pi.property_id = $1 ORDER BY pit.sort_order, pit.name`,
     [propertyId]
   );
+export const identifierTypesForProperty = propertyId =>
+  run(
+    "any",
+    `WITH RECURSIVE ancestors AS (
+       SELECT location.id, location.parent_id, location.type
+       FROM land.property_locations property_location
+       JOIN geo.locations location ON location.id = property_location.location_id
+       WHERE property_location.property_id = $1
+       UNION ALL
+       SELECT parent.id, parent.parent_id, parent.type
+       FROM geo.locations parent
+       JOIN ancestors ON ancestors.parent_id = parent.id
+     )
+     SELECT identifier_type.id, identifier_type.code
+     FROM ancestors state
+     JOIN land.parcel_identifier_types identifier_type
+       ON identifier_type.state_location_id = state.id
+     WHERE state.type = 'STATE' AND identifier_type.is_active = true
+     ORDER BY identifier_type.sort_order, identifier_type.name`,
+    [propertyId]
+  );
 export const replaceIdentifiers = async (propertyId, identifiers) => {
   const result = await pg.tx(async transaction => {
     await transaction.none(
@@ -163,17 +184,9 @@ export const replaceIdentifiers = async (propertyId, identifiers) => {
       [propertyId]
     );
     for (const item of identifiers) {
-      const type = await transaction.oneOrNone(
-        `SELECT id FROM land.parcel_identifier_types WHERE code = $1 AND is_active = true`,
-        [item.type]
-      );
-      if (!type)
-        throw new Error(
-          `Parcel identifier type ${item.type} is not configured.`
-        );
       await transaction.none(
         `INSERT INTO land.property_parcel_identifiers (property_id, identifier_type_id, identifier_value) VALUES ($1,$2,$3)`,
-        [propertyId, type.id, item.value]
+        [propertyId, item.identifierTypeId, item.value]
       );
     }
   });
@@ -290,6 +303,130 @@ export const document = (propertyId, documentId) =>
     "oneOrNone",
     `SELECT d.id, d.storage_key AS "storageKey", d.file_name AS "fileName", d.mime_type AS "mimeType", d.file_size_bytes AS "fileSizeBytes", d.visibility, d.verification_status AS "verificationStatus", d.created_at AS "createdAt", jsonb_build_object('id', dt.id, 'code', dt.code, 'name', dt.name, 'sortOrder', dt.sort_order) AS "documentType" FROM land.property_documents d JOIN land.document_types dt ON dt.id = d.document_type_id WHERE d.id = $1 AND d.property_id = $2 AND d.deleted_at IS NULL`,
     [documentId, propertyId]
+  );
+export const hasActiveDocumentAccessGrant = (documentId, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT 1
+     FROM land.property_document_access_grants
+     WHERE property_document_id = $1
+       AND grantee_user_id = $2
+       AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > now())`,
+    [documentId, userId]
+  );
+const documentAccessGrantColumns = `access_grant.id, access_grant.expires_at AS "expiresAt", access_grant.created_at AS "createdAt",
+  user_account.id AS "granteeUserId", user_account.display_name AS "granteeDisplayName"`;
+export const documentAccessGrants = documentId =>
+  run(
+    "any",
+    `SELECT ${documentAccessGrantColumns}
+     FROM land.property_document_access_grants access_grant
+     JOIN auth.users user_account ON user_account.id = access_grant.grantee_user_id
+     WHERE access_grant.property_document_id = $1
+       AND access_grant.revoked_at IS NULL
+       AND (access_grant.expires_at IS NULL OR access_grant.expires_at > now())
+     ORDER BY access_grant.created_at DESC, access_grant.id DESC`,
+    [documentId]
+  );
+export const eligibleDocumentGrantee = userId =>
+  run(
+    "oneOrNone",
+    `SELECT user_account.id
+     FROM auth.users user_account
+     WHERE user_account.id = $1
+       AND user_account.status = 'ACTIVE'
+       AND user_account.deleted_at IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM auth.user_roles user_role
+         JOIN auth.roles role ON role.id = user_role.role_id
+         WHERE user_role.user_id = user_account.id AND role.code = 'BUYER'
+       )`,
+    [userId]
+  );
+export const grantDocumentAccess = async ({
+  documentId,
+  granteeUserId,
+  grantedByUserId,
+  expiresAt,
+  propertyId
+}) => {
+  const result = await pg.tx(async transaction => {
+    const saved = await transaction.one(
+      `INSERT INTO land.property_document_access_grants
+         (property_document_id, grantee_user_id, granted_by_user_id, expires_at)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (property_document_id, grantee_user_id) WHERE revoked_at IS NULL
+       DO UPDATE SET granted_by_user_id = EXCLUDED.granted_by_user_id,
+                     expires_at = EXCLUDED.expires_at
+       RETURNING id`,
+      [documentId, granteeUserId, grantedByUserId, expiresAt]
+    );
+    const grant = await transaction.one(
+      `SELECT ${documentAccessGrantColumns}
+       FROM land.property_document_access_grants access_grant
+       JOIN auth.users user_account ON user_account.id = access_grant.grantee_user_id
+       WHERE access_grant.id = $1
+         AND access_grant.property_document_id = $2
+         AND access_grant.revoked_at IS NULL`,
+      [saved.id, documentId]
+    );
+    await transaction.none(
+      `INSERT INTO ops.audit_logs
+         (actor_user_id, action, entity_type, entity_id, after_data)
+       VALUES ($1,'DOCUMENT_ACCESS_GRANTED','land.property_documents',$2,$3::jsonb)`,
+      [
+        grantedByUserId,
+        documentId,
+        JSON.stringify({ propertyId, granteeUserId, expiresAt })
+      ]
+    );
+    return grant;
+  });
+  if (!result.ok) throw result.error;
+  return result.data;
+};
+export const documentAccessGrant = (documentId, grantId) =>
+  run(
+    "oneOrNone",
+    `SELECT ${documentAccessGrantColumns}
+     FROM land.property_document_access_grants access_grant
+     JOIN auth.users user_account ON user_account.id = access_grant.grantee_user_id
+     WHERE access_grant.id = $1
+       AND access_grant.property_document_id = $2
+       AND access_grant.revoked_at IS NULL`,
+    [grantId, documentId]
+  );
+export const revokeDocumentAccessGrant = grantId =>
+  run(
+    "oneOrNone",
+    `UPDATE land.property_document_access_grants
+     SET revoked_at = now()
+     WHERE id = $1 AND revoked_at IS NULL
+     RETURNING id`,
+    [grantId]
+  );
+export const auditDocumentAccessGrant = ({
+  actorId,
+  action,
+  documentId,
+  data
+}) =>
+  run(
+    "none",
+    `INSERT INTO ops.audit_logs
+       (actor_user_id, action, entity_type, entity_id, after_data)
+     VALUES ($1,$2,'land.property_documents',$3,$4::jsonb)`,
+    [actorId, action, documentId, JSON.stringify(data)]
+  );
+export const auditAdminDocumentRead = ({ actorId, documentId, propertyId }) =>
+  run(
+    "none",
+    `INSERT INTO ops.audit_logs
+       (actor_user_id, action, entity_type, entity_id, after_data)
+     VALUES ($1,'DOCUMENT_ADMIN_READ','land.property_documents',$2,$3::jsonb)`,
+    [actorId, documentId, JSON.stringify({ propertyId })]
   );
 export const createDocument = input =>
   run(
