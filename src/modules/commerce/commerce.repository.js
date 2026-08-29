@@ -290,12 +290,23 @@ export const failPayment = ({ id, providerPayload }) =>
     jsonbCols: ["provider_payload"]
   });
 
+// The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)
+// for a genuinely new event or a previously failed one ready for retry. A
+// duplicate delivery that arrives while the first delivery is still
+// in-flight (processed_at and processing_error both still null) fails the
+// WHERE clause, so it gets no row back and is treated as a duplicate instead
+// of racing the in-flight attempt to run capture/fail side effects twice.
+// Postgres holds the row lock for the conflicting key while evaluating this,
+// so concurrent deliveries for the same event serialize on it.
 export const insertWebhookEvent = ({ provider, eventId, eventType, payload }) =>
   run(
-    "one",
+    "oneOrNone",
     `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload)
      VALUES ($1,$2,$3,$4::jsonb)
-     ON CONFLICT (provider, event_id) DO UPDATE SET event_type = EXCLUDED.event_type
+     ON CONFLICT (provider, event_id) DO UPDATE
+       SET event_type = EXCLUDED.event_type
+       WHERE commerce.payment_webhook_events.processed_at IS NULL
+         AND commerce.payment_webhook_events.processing_error IS NOT NULL
      RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
     [provider, eventId, eventType, JSON.stringify(payload || {})]
   );

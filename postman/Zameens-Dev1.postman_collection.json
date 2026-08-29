@@ -134,7 +134,8 @@
         { "name": "Admin — listing detail", "request": { "method": "GET", "url": "{{baseUrl}}/admin/listings/{{listingId}}" } },
         { "name": "Admin — approve listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"note\": \"Listing approved after review\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve" } },
         { "name": "Admin — reject listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Please provide clearer property documents.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/reject" } },
-        { "name": "Admin — suspend listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Listing requires compliance review.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/suspend" } }
+        { "name": "Admin — suspend listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Listing requires compliance review.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/suspend" } },
+        { "name": "Admin — reinstate listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Compliance review complete, listing reinstated.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/reinstate" } }
       ]
     },
     {
