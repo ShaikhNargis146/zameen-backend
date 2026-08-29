@@ -42,13 +42,14 @@ test("chat establishes SSE before preparing database context", async () => {
   assert.match(controller, /"AI_CONVERSATION_UNAVAILABLE"/);
 });
 
-test("GPT-5 chat reserves output capacity for its visible reply", async () => {
+test("GPT-5 chat uses a concise response budget", async () => {
   const provider = await readFile(
     new URL("../../src/modules/ai/ai.provider.js", import.meta.url),
     "utf8"
   );
   assert.match(provider, /reasoning: \{ effort: "minimal" \}/);
-  assert.match(provider, /max_output_tokens: 1200/);
+  assert.match(provider, /max_output_tokens: 500/);
+  assert.match(provider, /no more than 120 words/);
   assert.match(provider, /event\?\.type === "response\.incomplete"/);
 });
 

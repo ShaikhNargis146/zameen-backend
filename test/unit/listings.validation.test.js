@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   adminList,
@@ -63,4 +64,12 @@ test("admin listing filters validate property and location identifiers", () => {
     () => adminList({ propertyTypeId: "not-a-uuid" }),
     error => error.code === "INVALID_ID"
   );
+});
+
+test("listing cards preserve the active verification badge", async () => {
+  const card = await readFile(
+    new URL("../../src/shared/listingCard.js", import.meta.url),
+    "utf8"
+  );
+  assert.match(card, /verificationLabel: row\.verificationLabel/);
 });

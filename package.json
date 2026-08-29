@@ -12,6 +12,7 @@
 		"start": "node src/index.js",
 		"db:schema": "node scripts/apply-schema.js",
 		"db:migrate": "node scripts/migrate.js",
+		"demo:seed": "cross-env DEMO_DATA=true node scripts/seed-demo-data.js",
 		"locations:prepare": "python3 scripts/prepare-location-data.py --input-dir locations_data --output-dir .location-import",
 		"locations:check": "node scripts/import-locations.js --input-dir .location-import --check",
 		"locations:import": "node scripts/import-locations.js --input-dir .location-import --apply",

@@ -88,7 +88,7 @@ const toCard = async row => ({
     : null,
   thumbnailUrl: await signedReadUrl(row.thumbnailStorageKey),
   isPremium: row.isPremium,
-  verificationLabel: null,
+  verificationLabel: row.verificationLabel,
   publishedAt: row.publishedAt,
   isFavorite: row.isFavorite
 });
