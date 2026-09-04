@@ -1,0 +1,766 @@
+{
+  "info": {
+    "name": "Zameens \u2014 Admin APIs",
+    "description": "Consolidated collection of every admin-only endpoint (Backend Dev 1 + Backend Dev 2 domains) per the Phase 1 API Contract and UI Integration Specification. All requests require an ADMIN-role bearer token set as {{adminAccessToken}}. All responses use the standard { success, data, meta } / { success, error } envelope.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/api/v1"
+    },
+    {
+      "key": "adminAccessToken",
+      "value": "",
+      "description": "Bearer token for a user with the ADMIN role. Obtain via /auth/otp/verify with an admin account."
+    },
+    {
+      "key": "adId",
+      "value": ""
+    },
+    {
+      "key": "auctionId",
+      "value": ""
+    },
+    {
+      "key": "contentId",
+      "value": ""
+    },
+    {
+      "key": "listingId",
+      "value": ""
+    },
+    {
+      "key": "locationId",
+      "value": ""
+    },
+    {
+      "key": "opportunityId",
+      "value": ""
+    },
+    {
+      "key": "organizationId",
+      "value": ""
+    },
+    {
+      "key": "partnerId",
+      "value": ""
+    },
+    {
+      "key": "planId",
+      "value": ""
+    },
+    {
+      "key": "pointId",
+      "value": ""
+    },
+    {
+      "key": "propertyTypeId",
+      "value": ""
+    },
+    {
+      "key": "seriesId",
+      "value": ""
+    },
+    {
+      "key": "serviceRequestId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "verificationId",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{adminAccessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "User Administration",
+      "item": [
+        {
+          "name": "Admin \u2014 list users",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/users?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin \u2014 user detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/users/{{userId}}"
+          }
+        },
+        {
+          "name": "Admin \u2014 change user status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ACTIVE\",\n  \"reason\": \"Account reviewed\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/users/{{userId}}/status"
+          }
+        },
+        {
+          "name": "Admin \u2014 replace user roles",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roles\": [\"BUYER\", \"SELLER\"],\n  \"reason\": \"Account role update\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/users/{{userId}}/roles"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Listing Moderation",
+      "item": [
+        {
+          "name": "Admin \u2014 list listings",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/listings?reviewStatus=PENDING&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin \u2014 listing detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/listings/{{listingId}}"
+          }
+        },
+        {
+          "name": "Admin \u2014 approve listing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Listing approved after review\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve"
+          }
+        },
+        {
+          "name": "Admin \u2014 reject listing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Please provide clearer property documents.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/listings/{{listingId}}/reject"
+          }
+        },
+        {
+          "name": "Admin \u2014 suspend listing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Listing requires compliance review.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/listings/{{listingId}}/suspend"
+          }
+        },
+        {
+          "name": "Admin \u2014 reinstate listing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Compliance review complete, listing reinstated.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/listings/{{listingId}}/reinstate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verification",
+      "item": [
+        {
+          "name": "Admin \u2014 verification queue",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/verifications?status=PENDING&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin \u2014 verification detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/verifications/{{verificationId}}"
+          }
+        },
+        {
+          "name": "Admin \u2014 update verification",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkType\": \"LOCATION\",\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/verifications/{{verificationId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Plans",
+      "item": [
+        {
+          "name": "Admin: Create plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"PREMIUM_30\",\n  \"name\": \"Premium 30 Days\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"30-day premium listing boost.\",\n  \"amountMinor\": 99900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 7,\n  \"verificationIncluded\": true,\n  \"features\": { \"badge\": \"PREMIUM\" },\n  \"isActive\": true\n}"
+            },
+            "url": "{{baseUrl}}/admin/plans"
+          }
+        },
+        {
+          "name": "Admin: Update plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Premium 30 Days (Updated)\",\n  \"amountMinor\": 129900\n}"
+            },
+            "url": "{{baseUrl}}/admin/plans/{{planId}}"
+          }
+        },
+        {
+          "name": "Admin: Activate plan",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/plans/{{planId}}/activate"
+          }
+        },
+        {
+          "name": "Admin: Deactivate plan",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/plans/{{planId}}/deactivate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Requests",
+      "item": [
+        {
+          "name": "Admin: List service requests",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/service-requests?status=REQUESTED&serviceType=LEGAL_REVIEW&search=deed"
+          }
+        },
+        {
+          "name": "Admin: Service request details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}"
+          }
+        },
+        {
+          "name": "Admin: Update service request status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IN_PROGRESS\",\n  \"internalNote\": \"Assigned to legal team for review.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}/status"
+          }
+        },
+        {
+          "name": "Admin: Submit service report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storageKey\": \"service-requests/{{serviceRequestId}}/report.pdf\",\n  \"summary\": \"Title verified, no encumbrances found.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}/report"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Content CMS",
+      "item": [
+        {
+          "name": "Admin: Create content",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"NEWS\",\n  \"locationId\": \"{{locationId}}\",\n  \"coverStorageKey\": null,\n  \"sourceName\": \"Economic Times\",\n  \"sourceUrl\": \"https://example.com/article\",\n  \"translations\": [\n    {\n      \"language\": \"en\",\n      \"slug\": \"land-prices-rise-in-panvel\",\n      \"title\": \"Land prices rise in Panvel\",\n      \"summary\": \"A short summary of the article.\",\n      \"body\": \"Full article body goes here.\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/admin/content"
+          }
+        },
+        {
+          "name": "Admin: Update content",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceName\": \"Updated Source\",\n  \"translations\": [\n    {\n      \"language\": \"en\",\n      \"slug\": \"land-prices-rise-in-panvel\",\n      \"title\": \"Land prices rise in Panvel (updated)\",\n      \"summary\": \"Updated summary.\",\n      \"body\": \"Updated article body.\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/admin/content/{{contentId}}"
+          }
+        },
+        {
+          "name": "Admin: Publish content",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/content/{{contentId}}/publish"
+          }
+        },
+        {
+          "name": "Admin: Archive content",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/content/{{contentId}}/archive"
+          }
+        },
+        {
+          "name": "Admin: Delete content",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/admin/content/{{contentId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Market Trends",
+      "item": [
+        {
+          "name": "Admin: Create market trend series",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"locationId\": \"{{locationId}}\",\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"metric\": \"ASKING_PRICE\",\n  \"unit\": \"INR_PER_SQFT\",\n  \"sourceName\": \"Registrar Office\",\n  \"sourceUrl\": \"https://example.com/rates\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/market-trends"
+          }
+        },
+        {
+          "name": "Admin: Update market trend series",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceName\": \"Updated Registrar Office\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/market-trends/{{seriesId}}"
+          }
+        },
+        {
+          "name": "Admin: Delete market trend series",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/admin/market-trends/{{seriesId}}"
+          }
+        },
+        {
+          "name": "Admin: Add market trend point",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"periodDate\": \"2026-01-01\",\n  \"value\": 5500\n}"
+            },
+            "url": "{{baseUrl}}/admin/market-trends/{{seriesId}}/points"
+          }
+        },
+        {
+          "name": "Admin: Update market trend point",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"periodDate\": \"2026-01-01\",\n  \"value\": 5750\n}"
+            },
+            "url": "{{baseUrl}}/admin/market-trends/{{seriesId}}/points/{{pointId}}"
+          }
+        },
+        {
+          "name": "Admin: Delete market trend point",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/admin/market-trends/{{seriesId}}/points/{{pointId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Channel Partners",
+      "item": [
+        {
+          "name": "Admin: List channel partners",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/channel-partners?status=PENDING&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin: Channel partner details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}"
+          }
+        },
+        {
+          "name": "Admin: Approve channel partner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Documents verified.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}/approve"
+          }
+        },
+        {
+          "name": "Admin: Reject channel partner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"RERA number could not be verified.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}/reject"
+          }
+        },
+        {
+          "name": "Admin: Suspend channel partner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Compliance issue flagged.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}/suspend"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Investment Opportunities",
+      "item": [
+        {
+          "name": "Admin: Create investment opportunity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Prime Farmland Investment\",\n  \"locationId\": \"{{locationId}}\",\n  \"investmentType\": \"REIT\",\n  \"minimumInvestmentMinor\": 5000000,\n  \"description\": \"A great opportunity to invest in prime farmland near the highway corridor.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/investment-opportunities"
+          }
+        },
+        {
+          "name": "Admin: Update investment opportunity",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minimumInvestmentMinor\": 7500000\n}"
+            },
+            "url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}"
+          }
+        },
+        {
+          "name": "Admin: Publish investment opportunity",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/publish"
+          }
+        },
+        {
+          "name": "Admin: Close investment opportunity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Fully subscribed.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/close"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auctions",
+      "item": [
+        {
+          "name": "Admin: Create auction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Bank Auction - Prime Plot\",\n  \"institutionName\": \"State Bank of India\",\n  \"locationId\": \"{{locationId}}\",\n  \"reservePriceMinor\": 50000000,\n  \"emdAmountMinor\": 500000,\n  \"auctionAt\": \"2026-09-15T10:00:00.000Z\",\n  \"officialUrl\": \"https://example.com/auction/1\",\n  \"description\": \"Prime residential plot e-auction.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/auctions"
+          }
+        },
+        {
+          "name": "Admin: Update auction",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reservePriceMinor\": 60000000,\n  \"status\": \"CLOSED\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/auctions/{{auctionId}}"
+          }
+        },
+        {
+          "name": "Admin: Delete auction",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/admin/auctions/{{auctionId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Advertisements",
+      "item": [
+        {
+          "name": "Admin: Create ad",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Homepage Banner\",\n  \"placement\": \"HOME_TOP\",\n  \"imageStorageKey\": \"ads/homepage-banner.png\",\n  \"targetUrl\": \"https://example.com/promo\",\n  \"startsAt\": \"2026-01-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-12-31T00:00:00.000Z\",\n  \"status\": \"ACTIVE\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads"
+          }
+        },
+        {
+          "name": "Admin: Update ad",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"INACTIVE\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/{{adId}}"
+          }
+        },
+        {
+          "name": "Admin: Delete ad",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/admin/ads/{{adId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Organizations (extra)",
+      "item": [
+        {
+          "name": "Change organization status (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SUSPENDED\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/status"
+          }
+        }
+      ]
+    }
+  ]
+}

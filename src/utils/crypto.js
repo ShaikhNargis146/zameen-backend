@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
+import { isNonProductionEnv } from "../config/env.js";
 
 const PEPPER = process.env.TOKEN_PEPPER || "dev-pepper-change-me";
 
-if (process.env.NODE_ENV === "production" && !process.env.TOKEN_PEPPER) {
+if (!isNonProductionEnv && !process.env.TOKEN_PEPPER) {
   throw new Error("TOKEN_PEPPER is required in production");
 }
 

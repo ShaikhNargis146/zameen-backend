@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { randomInt } from "node:crypto";
+import { isNonProductionEnv } from "../../config/env.js";
 import {
   hashWithPepper,
   randomToken,
@@ -23,7 +24,7 @@ const otpPurposes = new Set([
   "VERIFY_EMAIL"
 ]);
 const jwtSecret = process.env.JWT_SECRET || "development-only-change-me";
-if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET)
+if (!isNonProductionEnv && !process.env.JWT_SECRET)
   throw new Error("JWT_SECRET is required in production");
 
 export const phoneE164 = input => {

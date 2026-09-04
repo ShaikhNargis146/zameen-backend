@@ -1,5 +1,6 @@
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
+import logger from "../../utils/logger.js";
 import * as repository from "./notifications.repository.js";
 import { uuid } from "./notifications.validation.js";
 
@@ -37,6 +38,29 @@ export const ownedByUser = async (notificationId, actorId) => {
 };
 
 export const markRead = async notification => toNotification(await repository.markRead(notification.id));
+
+// Best-effort: notification delivery must never fail the request that
+// triggered it (e.g. creating an enquiry/site-visit already committed).
+// Errors are logged, not thrown, until these go through a durable outbox.
+export const notifyUser = async (userId, { type, title, body, data }) => {
+  if (!userId) return;
+  try {
+    await repository.create({ userId, type, title, body, data });
+  } catch (error) {
+    logger.error(`notifyUser failed [userId=${userId}, type=${type}]: ${error.message}`);
+  }
+};
+
+export const notifySeller = async (listingId, { type, title, body, data }) => {
+  try {
+    const recipients = await repository.sellerRecipientsForListing(listingId);
+    await Promise.all(
+      recipients.map(({ userId }) => repository.create({ userId, type, title, body, data }))
+    );
+  } catch (error) {
+    logger.error(`notifySeller failed [listingId=${listingId}, type=${type}]: ${error.message}`);
+  }
+};
 
 export const markAllRead = async actorId => {
   await repository.markAllRead(actorId);

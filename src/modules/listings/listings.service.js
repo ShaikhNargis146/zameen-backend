@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
+import logger from "../../utils/logger.js";
 import { signedReadUrl } from "../../utils/storage.js";
 import {
   ownedProperty,
@@ -427,9 +428,15 @@ export const reject = async ({ id, reason, actorId }) => {
 };
 export const suspend = async ({ id, reason, actorId }) => {
   const before = await repository.summary(id);
+  if (!before)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
   const result = await repository.suspend(id);
   if (!result)
-    throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
+    throw new HttpError(
+      409,
+      "INVALID_TRANSITION",
+      "Listing cannot be suspended from its current state."
+    );
   const listing = await repository.summary(result.id);
   await repository.audit({
     actorId,
@@ -440,4 +447,32 @@ export const suspend = async ({ id, reason, actorId }) => {
     note: reason
   });
   return listing;
+};
+export const reinstate = async ({ id, reason, actorId }) => {
+  const before = await repository.summary(id);
+  if (!before)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
+  const result = await repository.reinstate(id);
+  if (!result)
+    throw new HttpError(
+      409,
+      "INVALID_TRANSITION",
+      "Listing cannot be reinstated from its current state."
+    );
+  const listing = await repository.summary(result.id);
+  await repository.audit({
+    actorId,
+    action: "LISTING_REINSTATED",
+    listingId: result.id,
+    before,
+    after: listing,
+    note: reason
+  });
+  return listing;
+};
+export const expirePublishedListings = async () => {
+  const expired = await repository.expirePublished();
+  if (expired.length)
+    logger.info(`Expired ${expired.length} published listing(s) past their expiresAt.`);
+  return expired.length;
 };

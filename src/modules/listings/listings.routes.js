@@ -113,4 +113,9 @@ router.post(
   requireAdmin,
   asyncRoute(controller.suspend)
 );
+router.post(
+  "/admin/listings/:listingId/reinstate",
+  requireAdmin,
+  asyncRoute(controller.reinstate)
+);
 export default router;

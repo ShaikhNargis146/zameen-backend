@@ -35,7 +35,8 @@ LEFT JOIN land.property_locations ploc ON ploc.property_id = property.id
 LEFT JOIN geo.locations loc ON loc.id = ploc.location_id
 LEFT JOIN land.property_media media ON media.property_id = property.id AND media.is_cover = true AND media.deleted_at IS NULL
 WHERE listing.id = ANY($1::uuid[]) AND listing.deleted_at IS NULL
-  AND ($3::boolean IS NOT TRUE OR (listing.status = 'PUBLISHED' AND listing.review_status = 'APPROVED'))
+  AND ($3::boolean IS NOT TRUE OR (listing.status = 'PUBLISHED' AND listing.review_status = 'APPROVED'
+    AND (listing.expires_at IS NULL OR listing.expires_at > now())))
 `;
 
 const roundTo = (value, digits) => {

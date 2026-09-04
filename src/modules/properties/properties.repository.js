@@ -12,7 +12,7 @@ export const findPublic = propertyId =>
   run(
     "oneOrNone",
     `SELECT p.* FROM land.properties p WHERE p.id = $1 AND p.deleted_at IS NULL
-     AND EXISTS (SELECT 1 FROM marketplace.listings l WHERE l.property_id = p.id AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED')`,
+     AND EXISTS (SELECT 1 FROM marketplace.listings l WHERE l.property_id = p.id AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED' AND (l.expires_at IS NULL OR l.expires_at > now()))`,
     [propertyId]
   );
 export const activeOrganizationMembership = (organizationId, userId) =>

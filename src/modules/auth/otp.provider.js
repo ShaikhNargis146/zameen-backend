@@ -1,9 +1,10 @@
+import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
 import logger from "../../utils/logger.js";
 
 const mode = String(process.env.OTP_DELIVERY_MODE || "").toLowerCase();
 const webhookUrl = process.env.OTP_PROVIDER_WEBHOOK_URL || null;
-const nonProduction = process.env.NODE_ENV !== "production";
+const nonProduction = isNonProductionEnv;
 
 export const otpDeliveryConfigured = () =>
   (mode === "console" && nonProduction) ||

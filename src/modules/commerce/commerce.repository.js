@@ -267,6 +267,19 @@ export const capturePayment = ({ id, providerPaymentId, providerPayload }) =>
     jsonbCols: ["provider_payload"]
   });
 
+export const capturePaymentAndMarkOrderPaid = ({ id, orderId, providerPaymentId, providerPayload }) =>
+  runTx(async t => {
+    const payment = await t.one(
+      `UPDATE commerce.payments
+       SET status = 'CAPTURED', paid_at = now(), provider_payment_id = $2, provider_payload = $3::jsonb
+       WHERE id = $1
+       RETURNING ${paymentInsertColumns}`,
+      [id, providerPaymentId, JSON.stringify(providerPayload || {})]
+    );
+    await t.none(`UPDATE commerce.orders SET status = 'PAID' WHERE id = $1`, [orderId]);
+    return payment;
+  });
+
 export const failPayment = ({ id, providerPayload }) =>
   pg.updateWhere({
     table: "commerce.payments",
@@ -277,13 +290,27 @@ export const failPayment = ({ id, providerPayload }) =>
     jsonbCols: ["provider_payload"]
   });
 
+// The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)
+// for a genuinely new event or a previously failed one ready for retry.
+// markWebhookProcessed always sets processed_at, on both success and
+// failure, so a failed event is only distinguishable by processing_error
+// being non-null; the DO UPDATE claims the retry by clearing processed_at
+// and processing_error in the same statement, so a duplicate delivery that
+// arrives while this retry is in-flight sees processing_error already NULL
+// and fails the WHERE clause instead of racing it to run capture/fail side
+// effects twice. Postgres holds the row lock for the conflicting key while
+// evaluating this, so concurrent deliveries for the same event serialize on it.
 export const insertWebhookEvent = ({ provider, eventId, eventType, payload }) =>
   run(
     "oneOrNone",
     `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload)
      VALUES ($1,$2,$3,$4::jsonb)
-     ON CONFLICT (provider, event_id) DO NOTHING
-     RETURNING id`,
+     ON CONFLICT (provider, event_id) DO UPDATE
+       SET event_type = EXCLUDED.event_type,
+           processed_at = NULL,
+           processing_error = NULL
+       WHERE commerce.payment_webhook_events.processing_error IS NOT NULL
+     RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
     [provider, eventId, eventType, JSON.stringify(payload || {})]
   );
 
