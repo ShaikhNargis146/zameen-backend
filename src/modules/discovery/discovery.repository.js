@@ -11,6 +11,7 @@ const orderBy = Object.freeze({
 
 const filteredListingWhere = `
   WHERE l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED'
+    AND (l.expires_at IS NULL OR l.expires_at > now())
     AND (cardinality($1::uuid[]) = 0 OR pl.location_id = ANY($1::uuid[]))
     AND (cardinality($2::uuid[]) = 0 OR p.property_type_id = ANY($2::uuid[]))
     AND (cardinality($3::varchar[]) = 0 OR l.transaction_type = ANY($3::varchar[]))
@@ -125,9 +126,9 @@ export const similarIds = (listingId, limit) =>
     "any",
     `SELECT candidate.id AS "listingId" FROM marketplace.listings target
      JOIN land.properties target_property ON target_property.id = target.property_id
-     JOIN marketplace.listings candidate ON candidate.id <> target.id AND candidate.status = 'PUBLISHED' AND candidate.review_status = 'APPROVED' AND candidate.deleted_at IS NULL
+     JOIN marketplace.listings candidate ON candidate.id <> target.id AND candidate.status = 'PUBLISHED' AND candidate.review_status = 'APPROVED' AND candidate.deleted_at IS NULL AND (candidate.expires_at IS NULL OR candidate.expires_at > now())
      JOIN land.properties candidate_property ON candidate_property.id = candidate.property_id AND candidate_property.deleted_at IS NULL
-     WHERE target.id = $1 AND target.status = 'PUBLISHED' AND target.review_status = 'APPROVED' AND target.deleted_at IS NULL
+     WHERE target.id = $1 AND target.status = 'PUBLISHED' AND target.review_status = 'APPROVED' AND target.deleted_at IS NULL AND (target.expires_at IS NULL OR target.expires_at > now())
        AND candidate_property.property_type_id = target_property.property_type_id
      ORDER BY ABS(COALESCE(candidate.price_amount_minor, 0) - COALESCE(target.price_amount_minor, 0)), candidate.published_at DESC
      LIMIT $2`,

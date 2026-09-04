@@ -304,7 +304,7 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   const eventType = body?.event || "UNKNOWN";
   const eventId = body?.id || sha256(rawBody?.length ? rawBody : JSON.stringify(body || {}));
   const event = await repository.insertWebhookEvent({ provider, eventId, eventType, payload: body });
-  if (event.processedAt && !event.processingError) return { received: true, duplicate: true };
+  if (!event) return { received: true, duplicate: true };
 
   try {
     const paymentEntity = body?.payload?.payment?.entity;

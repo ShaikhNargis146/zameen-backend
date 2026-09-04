@@ -71,7 +71,8 @@ export const listingContext = id =>
      LEFT JOIN land.area_units au ON au.id = d.area_unit_id
      LEFT JOIN land.property_locations pl ON pl.property_id = p.id
      LEFT JOIN geo.locations loc ON loc.id = pl.location_id
-     WHERE l.id = $1 AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED'`,
+     WHERE l.id = $1 AND l.deleted_at IS NULL AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED'
+       AND (l.expires_at IS NULL OR l.expires_at > now())`,
     [id]
   );
 
