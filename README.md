@@ -2,6 +2,44 @@
 
 Start with [the backend development guide](docs/backend-development.md). It is the practical source of truth for contributors; [the architecture](docs/architecture.md) contains the wider platform plan.
 
+## First run after cloning or pulling
+
+Use this sequence when setting up the backend on a machine for the first time.
+It deliberately keeps database changes out of `npm start`.
+
+```bash
+# 1. Install the locked Node dependencies.
+npm ci
+
+# 2. Create your private environment file; never commit it.
+cp .env.example .env
+
+# 3. Edit .env with a reachable PostgreSQL database and unique local secrets.
+#    At minimum set DB_HOST, DB_PORT, DB, DB_USER, DB_PASSWORD,
+#    JWT_SECRET, and TOKEN_PEPPER. DATABASE_URL may be used instead of DB_*.
+
+# 4a. Brand-new, empty database only.
+npm run db:schema
+
+# 4b. Existing canonical Zameens database only. Do not run both 4a and 4b.
+# npm run db:migrate
+
+# 5. Start the API and verify it in another terminal.
+npm start
+curl http://localhost:8080/api/v1/status
+```
+
+`db:schema` creates PostGIS and the application schemas, so the database user
+must be the database owner or otherwise be permitted to create the required
+extensions. If that is not possible, have a database administrator provision an
+empty PostgreSQL 14+ database with `pgcrypto`, `citext`, `postgis`, and
+`pg_trgm` enabled, then run `npm run db:schema` again.
+
+For a local UI, `OTP_DELIVERY_MODE=console` in `.env` prints development OTPs
+to the API log. AI and direct file uploads need their respective OpenAI and
+Google Cloud Storage settings; the rest of the API can be developed without
+them. See the [first-run troubleshooting guide](docs/backend-development.md#first-run-database-troubleshooting).
+
 ## Database
 
 The prior database design has been replaced with the clean-install schema in

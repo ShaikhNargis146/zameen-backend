@@ -14,6 +14,39 @@ platform plan.
 The current implementation is Express and JavaScript. Do not introduce NestJS,
 TypeScript, or another server framework without an approved migration plan.
 
+### First-run database troubleshooting
+
+Follow this decision before running any database command:
+
+| Database state | Command | Do not run |
+| --- | --- | --- |
+| New and empty | `npm run db:schema` | `npm run db:migrate` first |
+| Existing canonical Zameens database | `npm run db:migrate` | `npm run db:schema` |
+
+Run `npm ci`, copy `.env.example` to `.env`, and configure the database and
+secrets before either command. `npm start` is never a substitute for a database
+command: it starts only the HTTP server.
+
+Common first-run failures:
+
+| Error | Meaning and action |
+| --- | --- |
+| `MissingEnvVarsError` | Copy `.env.example` to `.env`, then add every required variable. Keep optional provider variables commented out rather than adding blank values. |
+| `database ... does not exist` | Create the database named by `DB` (or correct `DATABASE_URL`) before running `db:schema`. |
+| `password authentication failed` or `ECONNREFUSED` | Check the host, port, username, password, and that PostgreSQL is reachable from the developer machine. |
+| `permission denied` while creating `postgis`, `pgcrypto`, `citext`, or `pg_trgm` | Ask the database owner/administrator to enable those extensions in the target empty database, then rerun `db:schema`. |
+| `Canonical schema already exists` | This database is not empty. Run `npm run db:migrate`; never use `db:schema` to upgrade it. |
+| `pg_hba.conf rejects connection ... no encryption` | The server requires TLS. Set `DB_SSL=true`; use a valid CA in shared environments. `DB_SSL_REJECT_UNAUTHORIZED=false` is only a temporary local-development diagnostic fallback. |
+
+After `npm start`, verify the process independently with:
+
+```bash
+curl http://localhost:8080/api/v1/status
+```
+
+The expected response includes `"message":"OK"`. For local UI testing, keep
+`OTP_DELIVERY_MODE=console`; the generated OTP is written only to the API log.
+
 1. Create `.env` from `.env.example` and set database credentials, `JWT_SECRET`,
    and a different `TOKEN_PEPPER`. Set either the individual `DB_HOST`, `DB_PORT`,
    `DB`, `DB_USER`, and `DB_PASSWORD` values, or use `DATABASE_URL` for Cloud SQL;
