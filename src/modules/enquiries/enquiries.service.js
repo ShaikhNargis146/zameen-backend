@@ -74,6 +74,10 @@ export const ownedBySeller = async (enquiryId, actorId) => {
 
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
+
+  const existing = await repository.findOpenEnquiryForBuyer(listingId, actorId);
+  if (existing) return toEnquiry(await repository.findOwnedByBuyer(existing.id, actorId));
+
   const result = await repository.insert({
     listingId,
     buyerUserId: actorId,
@@ -108,7 +112,7 @@ const buildDetail = async (row, { includeNotes }) => {
   const [enquiry, noteRows, siteVisitRows] = await Promise.all([
     toEnquiry(row),
     includeNotes ? repository.notesForEnquiry(row.id) : Promise.resolve([]),
-    repository.siteVisitsForListingBuyer(row.listingId, row.buyerUserId)
+    repository.siteVisitsForEnquiry(row.id, row.listingId, row.buyerUserId)
   ]);
   const notes = await toEnquiryNotes(noteRows);
   const siteVisits = siteVisitRows.map(visit =>

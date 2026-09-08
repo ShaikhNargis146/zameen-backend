@@ -69,11 +69,42 @@ export const ownedByParticipant = async (visitId, actorId) => {
   return row;
 };
 
+const findOrCreateActiveEnquiry = async ({ listingId, buyerUserId }) => {
+  const existing = await enquiriesRepository.findOpenEnquiryForBuyer(listingId, buyerUserId);
+  if (existing) return existing.id;
+  const result = await enquiriesRepository.insert({
+    listingId,
+    buyerUserId,
+    enquiryType: "GENERAL",
+    message: null
+  });
+  if (!result.ok) throw mapDbError(result.error);
+  return result.data.id;
+};
+
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
+
+  const duplicate = await repository.findActiveDuplicate({
+    listingId,
+    buyerUserId: actorId,
+    preferredDate: input.preferredDate,
+    preferredTimeSlot: input.preferredTimeSlot
+  });
+  if (duplicate)
+    throw new HttpError(
+      409,
+      "SITE_VISIT_DUPLICATE",
+      "A site visit is already requested for this listing at that date and time slot."
+    );
+
+  const enquiryId = await findOrCreateActiveEnquiry({ listingId, buyerUserId: actorId });
+  await enquiriesRepository.updateStatus(enquiryId, "SITE_VISIT");
+
   const result = await repository.insert({
     listingId,
     buyerUserId: actorId,
+    enquiryId,
     preferredDate: input.preferredDate,
     preferredTimeSlot: input.preferredTimeSlot,
     visitorCount: input.visitorCount,
@@ -176,12 +207,12 @@ export const complete = async ({ visit, sellerNote, enquiryStatus }) => {
   const result = await repository.complete({ id: visit.id, sellerNote });
   if (!result.ok) throw result.error;
 
-  if (enquiryStatus && visit.buyerUserId) {
-    const openEnquiry = await enquiriesRepository.findOpenEnquiryForBuyer(
-      visit.listingId,
-      visit.buyerUserId
-    );
-    if (openEnquiry) await enquiriesRepository.updateStatus(openEnquiry.id, enquiryStatus);
+  if (enquiryStatus) {
+    const enquiryId =
+      visit.enquiryId ||
+      (visit.buyerUserId &&
+        (await enquiriesRepository.findOpenEnquiryForBuyer(visit.listingId, visit.buyerUserId))?.id);
+    if (enquiryId) await enquiriesRepository.updateStatus(enquiryId, enquiryStatus);
   }
 
   return toSiteVisit(result.data);

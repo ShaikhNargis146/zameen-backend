@@ -1,7 +1,7 @@
 import { pg, run } from "../../shared/db.js";
 
 const selectColumns = `
-  sv.id, sv.listing_id AS "listingId", sv.buyer_user_id AS "buyerUserId",
+  sv.id, sv.listing_id AS "listingId", sv.buyer_user_id AS "buyerUserId", sv.enquiry_id AS "enquiryId",
   to_char(sv.preferred_date, 'YYYY-MM-DD') AS "preferredDate", sv.preferred_time_slot AS "preferredTimeSlot",
   sv.visitor_count AS "visitorCount", sv.requested_at AS "requestedAt", sv.scheduled_at AS "scheduledAt",
   sv.status, sv.buyer_note AS "buyerNote", sv.seller_note AS "sellerNote",
@@ -18,12 +18,30 @@ const sellerOwnsListing = paramIndex => `EXISTS (
     ))
 )`;
 
-export const insert = ({ listingId, buyerUserId, preferredDate, preferredTimeSlot, visitorCount, buyerNote }) =>
+export const insert = ({
+  listingId,
+  buyerUserId,
+  enquiryId,
+  preferredDate,
+  preferredTimeSlot,
+  visitorCount,
+  buyerNote
+}) =>
   pg.one(
-    `INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
-     VALUES ($1,$2,$3,$4,$5,$6)
+    `INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, enquiry_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING ${insertColumns}`,
-    [listingId, buyerUserId, preferredDate, preferredTimeSlot, visitorCount, buyerNote]
+    [listingId, buyerUserId, enquiryId, preferredDate, preferredTimeSlot, visitorCount, buyerNote]
+  );
+
+export const findActiveDuplicate = ({ listingId, buyerUserId, preferredDate, preferredTimeSlot }) =>
+  run(
+    "oneOrNone",
+    `SELECT ${selectColumns} FROM marketplace.site_visits sv
+     WHERE sv.listing_id = $1 AND sv.buyer_user_id = $2
+       AND sv.preferred_date = $3 AND sv.preferred_time_slot = $4
+       AND sv.status <> 'CANCELLED'`,
+    [listingId, buyerUserId, preferredDate, preferredTimeSlot]
   );
 
 export const findOwnedByBuyer = (id, buyerId) =>

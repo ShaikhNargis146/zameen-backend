@@ -91,17 +91,18 @@ export const notesForEnquiry = enquiryId =>
     [enquiryId]
   );
 
-export const siteVisitsForListingBuyer = (listingId, buyerUserId) =>
+export const siteVisitsForEnquiry = (enquiryId, listingId, buyerUserId) =>
   run(
     "any",
-    `SELECT id, listing_id AS "listingId", buyer_user_id AS "buyerUserId",
+    `SELECT id, listing_id AS "listingId", buyer_user_id AS "buyerUserId", enquiry_id AS "enquiryId",
             to_char(preferred_date, 'YYYY-MM-DD') AS "preferredDate", preferred_time_slot AS "preferredTimeSlot",
             visitor_count AS "visitorCount", requested_at AS "requestedAt", scheduled_at AS "scheduledAt", status,
             seller_note AS "sellerNote", buyer_note AS "buyerNote", created_at AS "createdAt"
      FROM marketplace.site_visits
-     WHERE listing_id = $1 AND buyer_user_id = $2
+     WHERE enquiry_id = $1
+        OR (enquiry_id IS NULL AND listing_id = $2 AND buyer_user_id = $3)
      ORDER BY created_at DESC`,
-    [listingId, buyerUserId]
+    [enquiryId, listingId, buyerUserId]
   );
 
 export const sellerContactInfo = listingId =>

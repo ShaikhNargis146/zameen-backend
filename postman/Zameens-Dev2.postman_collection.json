@@ -93,7 +93,7 @@
     {
       "name": "Enquiries",
       "item": [
-        { "name": "Create enquiry", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"enquiryType\": \"CONTACT\",\n  \"message\": \"Interested in this plot, please share more details.\",\n  \"preferredContactChannel\": \"PHONE\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/enquiries" } },
+        { "name": "Create enquiry", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"enquiryType\": \"CONTACT\",\n  \"message\": \"Interested in this plot, please share more details.\",\n  \"preferredContactChannel\": \"PHONE\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/enquiries", "description": "One active enquiry per buyer+listing: if the caller already has an open enquiry (status not CLOSED/LOST) for this listing, that same enquiry is returned instead of creating a duplicate." } },
         { "name": "Buyer: List enquiries", "request": { "method": "GET", "url": "{{baseUrl}}/buyer/enquiries?status=NEW&listingId={{listingId}}" } },
         { "name": "Buyer: Enquiry details", "request": { "method": "GET", "url": "{{baseUrl}}/buyer/enquiries/{{enquiryId}}" } },
         { "name": "Seller: List enquiries", "request": { "method": "GET", "url": "{{baseUrl}}/seller/enquiries?status=NEW&listingId={{listingId}}&search=plot" } },
@@ -106,7 +106,7 @@
     {
       "name": "Site Visits",
       "item": [
-        { "name": "Create site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"preferredDate\": \"2026-09-01\",\n  \"preferredTimeSlot\": \"MORNING\",\n  \"visitorCount\": 2,\n  \"note\": \"Would like to see the boundary markers.\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/site-visits" } },
+        { "name": "Create site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"preferredDate\": \"2026-09-01\",\n  \"preferredTimeSlot\": \"MORNING\",\n  \"visitorCount\": 2,\n  \"note\": \"Would like to see the boundary markers.\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/site-visits", "description": "Attaches to the buyer's existing active enquiry for this listing (creating one if none exists yet) and advances it to SITE_VISIT status - it never creates a second enquiry. Repeating the same preferredDate + preferredTimeSlot while a non-cancelled visit already holds that slot fails with 409 SITE_VISIT_DUPLICATE." } },
         { "name": "Buyer: List site visits", "request": { "method": "GET", "url": "{{baseUrl}}/buyer/site-visits?status=REQUESTED&fromDate=2026-08-01&toDate=2026-09-30" } },
         { "name": "Seller: List site visits", "request": { "method": "GET", "url": "{{baseUrl}}/seller/site-visits?status=REQUESTED&fromDate=2026-08-01&toDate=2026-09-30" } },
         { "name": "Seller: Confirm site visit", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"scheduledAt\": \"2026-09-02T05:30:00.000Z\",\n  \"sellerNote\": \"Confirmed, will meet at the site entrance.\"\n}" }, "url": "{{baseUrl}}/site-visits/{{visitId}}/confirm" } },
