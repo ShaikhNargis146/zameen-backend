@@ -133,10 +133,9 @@ export const submit = async listing => {
 const transitions = {
   pause: { valid: ["PUBLISHED"], status: "PAUSED", action: "be paused" },
   resume: {
-    valid: ["PAUSED", "INACTIVE"],
+    valid: ["PAUSED"],
     status: "PUBLISHED",
     action: "be resumed",
-    approved: true,
     published: true
   },
   withdraw: {
@@ -473,6 +472,8 @@ export const reinstate = async ({ id, reason, actorId }) => {
 export const expirePublishedListings = async () => {
   const expired = await repository.expirePublished();
   if (expired.length)
-    logger.info(`Expired ${expired.length} published listing(s) past their expiresAt.`);
+    logger.info(
+      `Expired ${expired.length} published listing(s) past their expiresAt.`
+    );
   return expired.length;
 };

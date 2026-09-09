@@ -89,20 +89,67 @@ npm start
 
 ### Loading the India location hierarchy
 
-The location hierarchy is operational data, not schema seed data. The
-canonical schema is created first; LGD data is then loaded explicitly. Do not
-put a national data dump in `schema.sql`, do not load it on application startup,
-and do not commit downloaded source workbooks or generated CSV files.
+The location hierarchy is a **database bootstrap requirement**. It is loaded
+once for each new database, not on every API-server startup. All API servers
+sharing an initialized database immediately use the same hierarchy, PIN data,
+and state masters.
+
+The canonical schema is created first; LGD data is then loaded explicitly. Do
+not put a national data dump in `schema.sql`, do not load it on application
+startup, and do not commit downloaded source workbooks or generated CSV files.
+Keep the approved source bundle in versioned, protected deployment storage and
+make it available to the single database-bootstrap job as `locations_data/`.
+That bundle contains the four LGD exports and, when PIN lookup is required,
+`pincode.csv`.
 
 Download the four LGD exports (states, districts, sub-districts and villages)
-into the ignored `locations_data/` directory, then run:
+and the approved `pincode.csv` into the ignored `locations_data/` directory.
+For every **new, empty database**, after `npm run db:schema`, run the single
+bootstrap command:
 
 ```bash
-npm run locations:prepare
-npm run locations:check
-npm run locations:import
-npm run masters:seed
+python3 -m pip install -r scripts/requirements-location-import.txt
+npm run locations:seed
 ```
+
+`locations:seed` runs `locations:prepare`, `locations:check`,
+`locations:import`, and `masters:seed` in that order. It includes PIN import
+automatically whenever `locations_data/pincode.csv` is present. It refuses to
+run unless `geo.locations` is empty, preventing an accidental second bootstrap.
+Do not run it as part of `npm start`, container startup, or each
+application-server deployment; run it only in the controlled job that provisions
+the shared database.
+
+For an interrupted import, suspected duplicate, or approved data refresh, first
+run the read-only report:
+
+```bash
+npm run locations:status
+# Optional: confirm the exact PIN used by a property save.
+npm run locations:status -- --pincode=410206
+```
+
+It reports rows written by the location bootstrap and possible duplicate
+location identities. Do not manually delete `geo.locations` rows blindly:
+properties, organizations, channel partners, content, opportunities, auctions,
+and postal-code links can reference them. An intentional LGD refresh uses
+`npm run locations:prepare`, `npm run locations:check`, and
+`npm run locations:import` (without the empty-database guard), after operations
+reviews the source-data change.
+
+If an initial bootstrap was interrupted after it wrote any hierarchy batch,
+do **not** rerun `locations:seed` and do not clean up its already imported
+rows. Resume the same prepared source data instead:
+
+```bash
+npm run locations:resume
+```
+
+This safely replays the idempotent hierarchy/PIN import and then seeds the
+state masters. Wait for the command to print its final JSON result and return
+to the shell prompt before testing the location APIs. A full India village
+import is intentionally a long-running database job; run it from a persistent
+deployment session when the connection could otherwise be interrupted.
 
 `locations:prepare` uses Python 3 with `openpyxl` to stream the LGD `.xlsx`
 workbooks into ignored CSV files. `locations:check` validates every hierarchy
@@ -145,12 +192,14 @@ with the same reserved LGD identity. They never reactivate a location that
 operations deliberately disabled, and they do not automatically retire entries
 absent from a new export; lifecycle changes remain an explicit operations task.
 
-`npm run masters:seed` loads curated state-level master data after the location
-hierarchy. It currently configures Maharashtra (`MH`) parcel identifiers:
-Survey Number, Gat Number, CTS Number and Plot Number. These are configuration
-records, not API hard-coded values; each property resolves valid identifier
-types through its own location's state. The command refuses to choose between
-duplicate state records, so reconcile duplicate state data before rerunning it.
+`npm run masters:seed` reconciles the canonical global master data (property,
+land-use, ownership and area-unit types, amenities, and document types), then
+loads curated state-level master data after the location hierarchy. It currently
+configures Maharashtra (`MH`) parcel identifiers: Survey Number, Gat Number,
+CTS Number and Plot Number. These are configuration records, not API hard-coded
+values; each property resolves valid identifier types through its own location's
+state. The command refuses to choose between duplicate state records, so
+reconcile duplicate state data before rerunning it.
 
 ### Development listing demo data
 
@@ -329,8 +378,11 @@ the storage client is created during process startup. The bucket must also
 allow the UI origin (for example `http://localhost:5173`) in its **bucket CORS
 policy**. API CORS settings do not control direct browser uploads to GCS.
 The tracked [`cors.json`](../cors.json) permits the local React development
-origins on ports `3000` and `5173`; add the exact production HTTPS UI origin
-before release. Apply the file to the configured bucket after changing it:
+origins and the current shared test UI origin `http://34.133.120.182:3000`.
+API CORS and bucket CORS are separate settings: keep `CORS_ORIGINS` and this
+file aligned. Add the exact production HTTPS UI origin before release; do not
+use a wildcard origin. Apply the file to the configured bucket after changing
+it:
 
 ```bash
 gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json

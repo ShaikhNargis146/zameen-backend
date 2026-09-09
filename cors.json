@@ -1,6 +1,10 @@
 [
     {
-      "origin": ["http://localhost:3000", "http://localhost:5173"],
+      "origin": [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://34.133.120.182:3000"
+      ],
       "responseHeader": ["Content-Type", "Authorization"],
       "method": ["GET", "PUT", "POST", "DELETE", "HEAD"],
       "maxAgeSeconds": 3600

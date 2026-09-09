@@ -157,7 +157,7 @@
           }
         },
         {
-          "name": "Admin \u2014 approve listing",
+          "name": "Admin \u2014 approve and publish listing",
           "request": {
             "method": "POST",
             "header": [

@@ -222,7 +222,7 @@ export const adminListing = id => summary(id);
 export const approve = ({ id, expiresAt }) =>
   run(
     "oneOrNone",
-    `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'INACTIVE', approved_at = now(), expires_at = COALESCE($2, expires_at), rejection_reason = NULL WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
+    `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'PUBLISHED', approved_at = now(), published_at = COALESCE(published_at, now()), expires_at = COALESCE($2, expires_at), rejection_reason = NULL WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
     [id, expiresAt]
   );
 export const reject = (id, reason) =>
@@ -242,7 +242,9 @@ export const suspend = id =>
 export const reinstate = id =>
   run(
     "oneOrNone",
-    `UPDATE marketplace.listings SET status = 'INACTIVE'
+    `UPDATE marketplace.listings
+     SET status = CASE WHEN review_status = 'APPROVED' THEN 'PUBLISHED' ELSE 'INACTIVE' END,
+         published_at = CASE WHEN review_status = 'APPROVED' THEN COALESCE(published_at, now()) ELSE published_at END
      WHERE id = $1 AND deleted_at IS NULL AND status = 'SUSPENDED'
      RETURNING id`,
     [id]

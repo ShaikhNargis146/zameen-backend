@@ -2331,7 +2331,15 @@ Method
 	ADMIN
 	ActionReason
 	Listing
+	POST
+	/admin/listings/{listingId}/reinstate
+	ADMIN
+	ActionReason?
+	Listing
 	
+
+Publication rule
+	A seller submits a complete listing for moderation. Admin approval is the publication decision: `POST /admin/listings/{listingId}/approve` returns the listing as `reviewStatus=APPROVED` and `status=PUBLISHED`. `POST /listings/{listingId}/resume` is only for a seller-paused listing.
 
 ActionReason
 Field
