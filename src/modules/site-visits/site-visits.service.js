@@ -1,5 +1,9 @@
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
+import {
+  parsePagination,
+  paginationMeta,
+  splitCountedRows
+} from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
@@ -11,13 +15,23 @@ import { uuid } from "./site-visits.validation.js";
 const mapDbError = error => {
   if (error?.code === "23503")
     return new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
+  if (error?.code === "23505")
+    return new HttpError(
+      409,
+      "SITE_VISIT_DUPLICATE",
+      "A site visit is already requested for this listing at that date and time slot."
+    );
   return error;
 };
 
 const toSiteVisits = async rows => {
   if (!rows.length) return [];
   const [listingCards, buyerSummaries] = await Promise.all([
-    listingCardsByIds(rows.map(row => row.listingId), null, { requirePublished: false }),
+    listingCardsByIds(
+      rows.map(row => row.listingId),
+      null,
+      { requirePublished: false }
+    ),
     userSummariesByIds(rows.map(row => row.buyerUserId))
   ]);
   const listingById = new Map(listingCards.map(card => [card.listingId, card]));
@@ -52,25 +66,52 @@ const cancellableStates = ["REQUESTED", "CONFIRMED", "RESCHEDULED"];
 const completableStates = ["CONFIRMED", "RESCHEDULED"];
 
 export const ownedByBuyer = async (visitId, actorId) => {
-  const row = await repository.findOwnedByBuyer(uuid(visitId, "visitId"), actorId);
-  if (!row) throw new HttpError(404, "SITE_VISIT_NOT_FOUND", "Site visit was not found.");
+  const row = await repository.findOwnedByBuyer(
+    uuid(visitId, "visitId"),
+    actorId
+  );
+  if (!row)
+    throw new HttpError(
+      404,
+      "SITE_VISIT_NOT_FOUND",
+      "Site visit was not found."
+    );
   return row;
 };
 
 export const ownedBySeller = async (visitId, actorId) => {
-  const row = await repository.findOwnedBySeller(uuid(visitId, "visitId"), actorId);
-  if (!row) throw new HttpError(404, "SITE_VISIT_NOT_FOUND", "Site visit was not found.");
+  const row = await repository.findOwnedBySeller(
+    uuid(visitId, "visitId"),
+    actorId
+  );
+  if (!row)
+    throw new HttpError(
+      404,
+      "SITE_VISIT_NOT_FOUND",
+      "Site visit was not found."
+    );
   return row;
 };
 
 export const ownedByParticipant = async (visitId, actorId) => {
-  const row = await repository.findOwnedByParticipant(uuid(visitId, "visitId"), actorId);
-  if (!row) throw new HttpError(404, "SITE_VISIT_NOT_FOUND", "Site visit was not found.");
+  const row = await repository.findOwnedByParticipant(
+    uuid(visitId, "visitId"),
+    actorId
+  );
+  if (!row)
+    throw new HttpError(
+      404,
+      "SITE_VISIT_NOT_FOUND",
+      "Site visit was not found."
+    );
   return row;
 };
 
 const findOrCreateActiveEnquiry = async ({ listingId, buyerUserId }) => {
-  const existing = await enquiriesRepository.findOpenEnquiryForBuyer(listingId, buyerUserId);
+  const existing = await enquiriesRepository.findOpenEnquiryForBuyer(
+    listingId,
+    buyerUserId
+  );
   if (existing) return existing.id;
   const result = await enquiriesRepository.insert({
     listingId,
@@ -80,6 +121,12 @@ const findOrCreateActiveEnquiry = async ({ listingId, buyerUserId }) => {
   });
   if (!result.ok) throw mapDbError(result.error);
   return result.data.id;
+};
+
+const updateEnquiryStatus = async (enquiryId, status) => {
+  const result = await enquiriesRepository.updateStatus(enquiryId, status);
+  if (!result.ok) throw mapDbError(result.error);
+  return result.data;
 };
 
 export const create = async ({ actorId, listingId, input }) => {
@@ -98,8 +145,11 @@ export const create = async ({ actorId, listingId, input }) => {
       "A site visit is already requested for this listing at that date and time slot."
     );
 
-  const enquiryId = await findOrCreateActiveEnquiry({ listingId, buyerUserId: actorId });
-  await enquiriesRepository.updateStatus(enquiryId, "SITE_VISIT");
+  const enquiryId = await findOrCreateActiveEnquiry({
+    listingId,
+    buyerUserId: actorId
+  });
+  await updateEnquiryStatus(enquiryId, "SITE_VISIT");
 
   const result = await repository.insert({
     listingId,
@@ -122,16 +172,28 @@ export const create = async ({ actorId, listingId, input }) => {
 
 export const listForBuyer = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listForBuyer(actorId, filters, { limit, offset });
+  const counted = await repository.listForBuyer(actorId, filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: await toSiteVisits(rows), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: await toSiteVisits(rows),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const listForSeller = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listForSeller(actorId, filters, { limit, offset });
+  const counted = await repository.listForSeller(actorId, filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: await toSiteVisits(rows), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: await toSiteVisits(rows),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const confirm = async ({ visit, scheduledAt, sellerNote }) => {
@@ -141,7 +203,11 @@ export const confirm = async ({ visit, scheduledAt, sellerNote }) => {
       "INVALID_TRANSITION",
       "Site visit cannot be confirmed from its current state."
     );
-  const result = await repository.confirm({ id: visit.id, scheduledAt, sellerNote });
+  const result = await repository.confirm({
+    id: visit.id,
+    scheduledAt,
+    sellerNote
+  });
   if (!result.ok) throw result.error;
   await notifications.notifyUser(visit.buyerUserId, {
     type: "SITE_VISIT_CONFIRMED",
@@ -192,7 +258,11 @@ export const cancel = async ({ visit, actorId, reason }) => {
     type: "SITE_VISIT_CANCELLED",
     title: "Site visit cancelled",
     body: "A site visit was cancelled.",
-    data: { visitId: visit.id, listingId: visit.listingId, reason: reason || null }
+    data: {
+      visitId: visit.id,
+      listingId: visit.listingId,
+      reason: reason || null
+    }
   });
   return toSiteVisit(result.data);
 };
@@ -211,8 +281,13 @@ export const complete = async ({ visit, sellerNote, enquiryStatus }) => {
     const enquiryId =
       visit.enquiryId ||
       (visit.buyerUserId &&
-        (await enquiriesRepository.findOpenEnquiryForBuyer(visit.listingId, visit.buyerUserId))?.id);
-    if (enquiryId) await enquiriesRepository.updateStatus(enquiryId, enquiryStatus);
+        (
+          await enquiriesRepository.findOpenEnquiryForBuyer(
+            visit.listingId,
+            visit.buyerUserId
+          )
+        )?.id);
+    if (enquiryId) await updateEnquiryStatus(enquiryId, enquiryStatus);
   }
 
   return toSiteVisit(result.data);
