@@ -37,6 +37,29 @@ test("discovery search requires an area unit whenever area is filtered", () => {
   );
 });
 
+test("discovery search accepts a regex search term and trims it", () => {
+  const result = search({ search: "  ^plot.*[0-9]+$  " });
+  assert.equal(result.search, "^plot.*[0-9]+$");
+});
+
+test("discovery search treats a blank search term as absent", () => {
+  assert.equal(search({ search: "   " }).search, null);
+});
+
+test("discovery search rejects an invalid regex search term", () => {
+  assert.throws(
+    () => search({ search: "(unclosed" }),
+    error => error.code === "VALIDATION_ERROR"
+  );
+});
+
+test("discovery search rejects an overly long search term", () => {
+  assert.throws(
+    () => search({ search: "a".repeat(101) }),
+    error => error.code === "VALIDATION_ERROR"
+  );
+});
+
 test("map search validates bounds and compare requires unique listing ids", () => {
   const result = map({
     bounds: { north: 19.2, south: 18.9, east: 73.2, west: 72.9 },
