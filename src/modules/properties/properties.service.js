@@ -4,6 +4,7 @@ import { scannerPresentation } from "../../shared/scanner.js";
 import {
   belongsToProperty,
   createStorageKey,
+  optionalSignedReadUrl,
   signedReadUrl,
   signedWriteUrl
 } from "../../utils/storage.js";
@@ -224,8 +225,8 @@ export const passport = async propertyId => {
 };
 const mediaResponse = async item => ({
   ...item,
-  url: await signedReadUrl(item.storageKey),
-  thumbnailUrl: await signedReadUrl(item.thumbnailStorageKey)
+  url: await optionalSignedReadUrl(item.storageKey),
+  thumbnailUrl: await optionalSignedReadUrl(item.thumbnailStorageKey)
 });
 const documentResponse = async (item, includeDownload = false) => ({
   ...item,
@@ -233,38 +234,43 @@ const documentResponse = async (item, includeDownload = false) => ({
     ? { downloadUrl: await signedReadUrl(item.storageKey) }
     : { downloadUrl: null })
 });
-export const createMediaUpload = ({ propertyId, input }) =>
-  signedWriteUrl({
-    storageKey: createStorageKey({
-      propertyId,
-      category: "media",
-      fileName: input.fileName
-    }),
-    mimeType: input.mimeType
-  });
+export const createMediaUpload = ({ propertyId, input }) => {
+  const ticket = item =>
+    signedWriteUrl({
+      storageKey: createStorageKey({
+        propertyId,
+        category: "media",
+        fileName: item.fileName
+      }),
+      mimeType: item.mimeType
+    });
+  return Array.isArray(input) ? Promise.all(input.map(ticket)) : ticket(input);
+};
 export const completeMedia = async ({ propertyId, actorId, input }) => {
-  if (
-    !belongsToProperty({
-      propertyId,
-      category: "media",
-      storageKey: input.storageKey
-    })
-  )
-    throw new HttpError(
-      400,
-      "INVALID_STORAGE_KEY",
-      "storageKey does not belong to this property upload."
-    );
-  const saved = await repository.createMedia({
-    ...input,
-    isCover: false,
-    propertyId,
-    userId: actorId
+  const items = Array.isArray(input) ? input : [input];
+  items.forEach(item => {
+    if (
+      !belongsToProperty({
+        propertyId,
+        category: "media",
+        storageKey: item.storageKey
+      })
+    )
+      throw new HttpError(
+        400,
+        "INVALID_STORAGE_KEY",
+        "storageKey does not belong to this property upload."
+      );
   });
-  if (input.isCover) await repository.setCover(propertyId, saved.id);
-  return mediaResponse(
-    (await repository.media(propertyId)).find(item => item.id === saved.id)
+  const ids = await repository.createMediaBatch(
+    propertyId,
+    items.map(item => ({ ...item, userId: actorId }))
   );
+  const media = await repository.media(propertyId);
+  const responses = await Promise.all(
+    ids.map(id => mediaResponse(media.find(item => item.id === id)))
+  );
+  return Array.isArray(input) ? responses : responses[0];
 };
 export const listMedia = async propertyId =>
   Promise.all((await repository.media(propertyId)).map(mediaResponse));

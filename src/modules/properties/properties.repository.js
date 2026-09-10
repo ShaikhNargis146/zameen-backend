@@ -241,21 +241,40 @@ export const mediaForProperty = (propertyId, mediaId) =>
     `SELECT id FROM land.property_media WHERE id = $1 AND property_id = $2 AND deleted_at IS NULL`,
     [mediaId, propertyId]
   );
-export const createMedia = input =>
-  run(
-    "one",
-    `INSERT INTO land.property_media (property_id, media_type, storage_key, mime_type, sort_order, is_cover, caption, uploaded_by_user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-    [
-      input.propertyId,
-      input.mediaType,
-      input.storageKey,
-      input.mimeType,
-      input.sortOrder,
-      input.isCover,
-      input.caption,
-      input.userId
-    ]
-  );
+export const createMediaBatch = async (propertyId, items) => {
+  const result = await pg.tx(async transaction => {
+    const ids = [];
+    for (const input of items) {
+      const row = await transaction.one(
+        `INSERT INTO land.property_media (property_id, media_type, storage_key, mime_type, sort_order, is_cover, caption, uploaded_by_user_id) VALUES ($1,$2,$3,$4,$5,false,$6,$7) RETURNING id`,
+        [
+          propertyId,
+          input.mediaType,
+          input.storageKey,
+          input.mimeType,
+          input.sortOrder,
+          input.caption,
+          input.userId
+        ]
+      );
+      ids.push(row.id);
+    }
+    const coverIndex = items.map(item => item.isCover).lastIndexOf(true);
+    if (coverIndex !== -1) {
+      await transaction.none(
+        `UPDATE land.property_media SET is_cover = false WHERE property_id = $1 AND deleted_at IS NULL`,
+        [propertyId]
+      );
+      await transaction.none(
+        `UPDATE land.property_media SET is_cover = true WHERE id = $1`,
+        [ids[coverIndex]]
+      );
+    }
+    return ids;
+  });
+  if (!result.ok) throw result.error;
+  return result.data;
+};
 export const updateMedia = (mediaId, changes) =>
   pg.updateWhere({
     table: "land.property_media",

@@ -71,3 +71,14 @@ test("the schema supports state-scoped document types", async () => {
   assert.match(schema, /uq_land_document_types_state/);
   assert.match(schema, /INSERT INTO land\.document_types[\s\S]*ON CONFLICT DO NOTHING;/);
 });
+
+test("master seed repairs the global area-unit baseline on existing databases", async () => {
+  const seed = await readFile(
+    new URL("../../scripts/seed-state-masters.js", import.meta.url),
+    "utf8"
+  );
+  assert.match(seed, /const seedGlobalMasters/);
+  assert.match(seed, /INSERT INTO land\.area_units/);
+  assert.match(seed, /\["SQFT", "Square feet", 1\]/);
+  assert.match(seed, /await seedGlobalMasters\(transaction\)/);
+});

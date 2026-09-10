@@ -24,7 +24,14 @@ npm run db:schema
 # 4b. Existing canonical Zameens database only. Do not run both 4a and 4b.
 # npm run db:migrate
 
-# 5. Start the API and verify it in another terminal.
+# 5. For a new database, bootstrap location hierarchy, PIN codes, and state masters.
+#    Do this once for the database, from a controlled deployment/operations job.
+#    Do not run it on every API server start.
+python3 -m pip install -r scripts/requirements-location-import.txt
+# Place the approved LGD source workbooks and pincode.csv in locations_data/ first.
+npm run locations:seed
+
+# 6. Start the API and verify it in another terminal.
 npm start
 curl http://localhost:8080/api/v1/status
 ```
@@ -39,6 +46,16 @@ For a local UI, `OTP_DELIVERY_MODE=console` in `.env` prints development OTPs
 to the API log. AI and direct file uploads need their respective OpenAI and
 Google Cloud Storage settings; the rest of the API can be developed without
 them. See the [first-run troubleshooting guide](docs/backend-development.md#first-run-database-troubleshooting).
+
+`locations:seed` imports the approved LGD hierarchy, the optional
+`locations_data/pincode.csv`, and curated state masters. It now refuses to run
+unless `geo.locations` is empty, so it cannot accidentally seed a second time.
+Use `npm run locations:status` for a read-only report before investigating any
+suspected duplicate. The source files are intentionally not committed: keep a
+versioned, protected location-data bundle in deployment storage and make it
+available as `locations_data/` to the one database-bootstrap job. A new API
+server using an already initialized database does not need the bundle or this
+command.
 
 ## Database
 

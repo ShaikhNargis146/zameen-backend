@@ -27,11 +27,19 @@ const argumentValue = (name, defaultValue = null) => {
 const inputDirectory = path.resolve(argumentValue("--input-dir", ".location-import"));
 const shouldApply = process.argv.includes("--apply");
 const onlyPincodes = process.argv.includes("--only-pincodes");
+const requireEmpty = process.argv.includes("--require-empty");
 
 const required = (value, label) => {
   const normalized = String(value || "").trim();
   if (!normalized) throw new Error(`${label} is required.`);
   return normalized;
+};
+
+const progress = (dataset, completed, total = null) => {
+  const suffix = total == null ? "" : ` / ${Number(total).toLocaleString()}`;
+  console.log(
+    `[location-import] ${dataset}: ${Number(completed).toLocaleString()}${suffix}`
+  );
 };
 
 const readCsv = async function* (filename) {
@@ -186,9 +194,16 @@ const applyLocationBatch = async (db, type, rows) => {
   });
 };
 
-const importDataset = async ({ db, filename, type, parentIdForRow }) => {
+const importDataset = async ({
+  db,
+  filename,
+  type,
+  parentIdForRow,
+  expectedRows
+}) => {
   let processed = 0;
   let batch = [];
+  console.log(`[location-import] Starting ${type.toLowerCase()} import.`);
   for await (const record of readCsv(filename)) {
     const code = required(record.code, `${type} code`);
     const sourceStateCode = record.state_code || (type === "STATE" ? code : null);
@@ -206,12 +221,14 @@ const importDataset = async ({ db, filename, type, parentIdForRow }) => {
     if (batch.length === batchSize) {
       await applyLocationBatch(db, type, batch);
       processed += batch.length;
+      progress(type.toLowerCase(), processed, expectedRows);
       batch = [];
     }
   }
   if (batch.length) {
     await applyLocationBatch(db, type, batch);
     processed += batch.length;
+    progress(type.toLowerCase(), processed, expectedRows);
   }
   return processed;
 };
@@ -258,6 +275,7 @@ const collectPincodes = async db => {
     if (!state) {
       unmatchedStateLabels.add(stateName);
       rows += 1;
+      if (rows % batchSize === 0) progress("PIN rows resolved", rows);
       continue;
     }
     postalCode.stateCodes.add(state.code);
@@ -267,11 +285,15 @@ const collectPincodes = async db => {
     if (!districtId) {
       unmatchedDistrictLabels.add(`${stateName}|${districtName}`);
       rows += 1;
+      if (rows % batchSize === 0) progress("PIN rows resolved", rows);
       continue;
     }
     links.set(`${code}|${districtId}`, { code, location_id: districtId });
     rows += 1;
+    if (rows % batchSize === 0) progress("PIN rows resolved", rows);
   }
+
+  progress("PIN rows resolved", rows);
 
   return {
     postalCodes: [...postalCodes.values()].map(postalCode => ({
@@ -304,7 +326,11 @@ const chunks = (items, size) => {
 };
 
 const importPincodes = async db => {
+  console.log("[location-import] Resolving PIN codes against imported districts.");
   const collected = await collectPincodes(db);
+  console.log(
+    `[location-import] Writing ${collected.postalCodes.length.toLocaleString()} unique PIN codes and ${collected.links.length.toLocaleString()} district links.`
+  );
   for (const rows of chunks(collected.postalCodes, batchSize)) {
     await db.none(
       `INSERT INTO geo.postal_codes (code, state_code)
@@ -339,6 +365,17 @@ const applyData = async metadata => {
     if (!schema.exists) {
       throw new Error("Canonical schema is missing. Run npm run db:schema on a new database first.");
     }
+    if (requireEmpty) {
+      const existing = await db.one(
+        "SELECT count(*)::int AS count FROM geo.locations"
+      );
+      if (existing.count > 0) {
+        throw new Error(
+          `Location bootstrap requires an empty geo.locations table; found ${existing.count} existing records. ` +
+            "Run npm run locations:status to inspect the database. Use npm run locations:import only for an intentional, reviewed refresh."
+        );
+      }
+    }
     let locations = null;
     if (!onlyPincodes) {
       const india = await ensureIndia(db);
@@ -346,13 +383,15 @@ const applyData = async metadata => {
         db,
         filename: "states.csv",
         type: locationTypes.states,
-        parentIdForRow: () => india.id
+        parentIdForRow: () => india.id,
+        expectedRows: metadata.datasets.states.rows
       });
       const stateIds = await locationIdsBySlug(db, locationTypes.states);
       const districts = await importDataset({
         db,
         filename: "districts.csv",
         type: locationTypes.districts,
+        expectedRows: metadata.datasets.districts.rows,
         parentIdForRow: row => {
           const id = stateIds.get(lgdSlug(locationTypes.states, row.state_code));
           if (!id) throw new Error(`State ${row.state_code} was not imported.`);
@@ -364,6 +403,7 @@ const applyData = async metadata => {
         db,
         filename: "subdistricts.csv",
         type: locationTypes.subdistricts,
+        expectedRows: metadata.datasets.subdistricts.rows,
         parentIdForRow: row => {
           const id = districtIds.get(lgdSlug(locationTypes.districts, row.district_code));
           if (!id) throw new Error(`District ${row.district_code} was not imported.`);
@@ -375,6 +415,7 @@ const applyData = async metadata => {
         db,
         filename: "villages.csv",
         type: locationTypes.villages,
+        expectedRows: metadata.datasets.villages.rows,
         parentIdForRow: row => {
           const id = subdistrictIds.get(
             lgdSlug(locationTypes.subdistricts, row.subdistrict_code)

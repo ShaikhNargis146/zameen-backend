@@ -532,6 +532,7 @@ CREATE INDEX idx_marketplace_enquiry_notes_enquiry ON marketplace.enquiry_notes(
 CREATE TABLE marketplace.site_visits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
   buyer_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  enquiry_id uuid REFERENCES marketplace.enquiries(id) ON DELETE SET NULL,
   preferred_date date NOT NULL, preferred_time_slot varchar(20) NOT NULL CHECK (preferred_time_slot IN ('MORNING','AFTERNOON','EVENING')),
   visitor_count integer NOT NULL DEFAULT 1 CHECK (visitor_count BETWEEN 1 AND 20),
   requested_at timestamptz NOT NULL DEFAULT now(), scheduled_at timestamptz,
@@ -541,6 +542,12 @@ CREATE TABLE marketplace.site_visits (
 );
 CREATE INDEX idx_marketplace_site_visits_listing ON marketplace.site_visits(listing_id, scheduled_at);
 CREATE INDEX idx_marketplace_site_visits_buyer ON marketplace.site_visits(buyer_user_id, scheduled_at) WHERE buyer_user_id IS NOT NULL;
+CREATE INDEX idx_marketplace_site_visits_enquiry ON marketplace.site_visits(enquiry_id) WHERE enquiry_id IS NOT NULL;
+-- One non-cancelled visit per buyer+listing+slot. Repeat requests for the same
+-- slot are rejected with SITE_VISIT_DUPLICATE rather than creating a duplicate.
+CREATE UNIQUE INDEX idx_marketplace_site_visits_dedupe
+  ON marketplace.site_visits(listing_id, buyer_user_id, preferred_date, preferred_time_slot)
+  WHERE status <> 'CANCELLED' AND buyer_user_id IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- COMMERCE: one payment model for plans, promotions and services.

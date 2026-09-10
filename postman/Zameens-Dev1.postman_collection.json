@@ -1,12 +1,13 @@
 {
   "info": {
     "name": "Zameens — Developer 1 APIs",
-    "description": "Complete Developer 1 UI-contract collection. Run the master/location requests first, use their UUIDs in the variables below, then complete the property and listing flow. All responses use { success, data, meta }. Admin requests require an ADMIN access token.",
+    "description": "Complete Developer 1 UI-contract collection. Run the master/location requests first, use their UUIDs in the variables below, then complete the property and listing flow. Listing publication is seller submit -> admin approve and publish. All responses use { success, data, meta }. Admin requests use {{adminAccessToken}}.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
     { "key": "accessToken", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
     { "key": "refreshToken", "value": "" },
     { "key": "challengeId", "value": "" },
     { "key": "userId", "value": "" },
@@ -101,6 +102,8 @@
       "item": [
         { "name": "Create media upload ticket", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('storageKey', body.data.storageKey);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\"\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url" } },
         { "name": "Complete media upload", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('mediaId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\",\n  \"isCover\": true\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/complete" } },
+        { "name": "Create media upload tickets (batch)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"files\": [\n    { \"fileName\": \"plot-1.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 200000, \"mediaType\": \"IMAGE\" },\n    { \"fileName\": \"plot-2.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 180000, \"mediaType\": \"IMAGE\" }\n  ]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url" }, "description": "Selecting multiple files at once: pass a `files` array (up to 20) instead of a single file object. The response returns `{ \"files\": [...] }` with one upload ticket per file, in the same order." },
+        { "name": "Complete media upload (batch)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"files\": [\n    { \"storageKey\": \"{{storageKey}}\", \"fileName\": \"plot-1.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 200000, \"mediaType\": \"IMAGE\", \"isCover\": true },\n    { \"storageKey\": \"{{storageKey}}\", \"fileName\": \"plot-2.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 180000, \"mediaType\": \"IMAGE\" }\n  ]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/complete" }, "description": "Each entry needs the storageKey returned by its own upload ticket. All files are saved atomically in one request; the response returns `{ \"files\": [...] }` with the created media records." },
         { "name": "List media", "request": { "method": "GET", "url": "{{baseUrl}}/properties/{{propertyId}}/media" } },
         { "name": "Update media", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"caption\": \"Main road frontage\",\n  \"sortOrder\": 0\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}" } },
         { "name": "Reorder media", "request": { "method": "PUT", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"mediaIds\": [\"{{mediaId}}\"]\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/media/order" } },
@@ -117,6 +120,15 @@
       ]
     },
     {
+      "name": "Listing publication flow — run in order",
+      "description": "A listing must be complete and submitted by its seller. Administrative approval is the publication decision: it changes the listing to APPROVED + PUBLISHED and makes the public-detail endpoint available. Resume is only for a listing the seller previously paused.",
+      "item": [
+        { "name": "1. Submit complete listing for moderation (seller)", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/submit" } },
+        { "name": "2. Approve and publish submitted listing (admin)", "request": { "method": "POST", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"note\": \"Listing approved after review\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve" } },
+        { "name": "3. Verify published public detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/detail" } }
+      ]
+    },
+    {
       "name": "Listings and moderation",
       "item": [
         { "name": "Create listing", "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.success) pm.collectionVariables.set('listingId', body.data.id);"] } }], "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"transactionType\": \"SALE\",\n  \"title\": \"Land parcel for sale in Panvel\",\n  \"description\": \"Well located land parcel with direct road access and clear documentation.\",\n  \"priceAmountMinor\": 100000000,\n  \"currency\": \"INR\",\n  \"isNegotiable\": true\n}" }, "url": "{{baseUrl}}/properties/{{propertyId}}/listings" } },
@@ -124,15 +136,15 @@
         { "name": "My listing", "request": { "method": "GET", "url": "{{baseUrl}}/listings/{{listingId}}" } },
         { "name": "Update listing", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"priceAmountMinor\": 95000000,\n  \"isNegotiable\": true\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}" } },
         { "name": "Delete listing", "request": { "method": "DELETE", "url": "{{baseUrl}}/listings/{{listingId}}" } },
-        { "name": "Submit listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/submit" } },
+        { "name": "Submit listing for admin review (seller)", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/submit" } },
         { "name": "Pause listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/pause" } },
-        { "name": "Resume listing", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/resume" } },
+        { "name": "Resume paused listing (seller)", "request": { "method": "POST", "url": "{{baseUrl}}/listings/{{listingId}}/resume" } },
         { "name": "Withdraw listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Seller requested withdrawal\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/withdraw" } },
         { "name": "Mark listing sold", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Completed sale\"\n}" }, "url": "{{baseUrl}}/listings/{{listingId}}/mark-sold" } },
         { "name": "Public listing detail", "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/listings/{{listingId}}/detail" } },
         { "name": "Admin — list listings", "request": { "method": "GET", "url": "{{baseUrl}}/admin/listings?reviewStatus=PENDING&page=1&limit=20" } },
         { "name": "Admin — listing detail", "request": { "method": "GET", "url": "{{baseUrl}}/admin/listings/{{listingId}}" } },
-        { "name": "Admin — approve listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"note\": \"Listing approved after review\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve" } },
+        { "name": "Admin — approve and publish listing", "request": { "method": "POST", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"note\": \"Listing approved after review\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve" } },
         { "name": "Admin — reject listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Please provide clearer property documents.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/reject" } },
         { "name": "Admin — suspend listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Listing requires compliance review.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/suspend" } },
         { "name": "Admin — reinstate listing", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Compliance review complete, listing reinstated.\"\n}" }, "url": "{{baseUrl}}/admin/listings/{{listingId}}/reinstate" } }

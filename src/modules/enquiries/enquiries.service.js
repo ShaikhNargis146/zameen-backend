@@ -1,5 +1,9 @@
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
+import {
+  parsePagination,
+  paginationMeta,
+  splitCountedRows
+} from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
@@ -16,8 +20,14 @@ const mapDbError = error => {
 export const toEnquiries = async rows => {
   if (!rows.length) return [];
   const [listingCards, userSummaries] = await Promise.all([
-    listingCardsByIds(rows.map(row => row.listingId), null, { requirePublished: false }),
-    userSummariesByIds(rows.flatMap(row => [row.buyerUserId, row.assignedToUserId]))
+    listingCardsByIds(
+      rows.map(row => row.listingId),
+      null,
+      { requirePublished: false }
+    ),
+    userSummariesByIds(
+      rows.flatMap(row => [row.buyerUserId, row.assignedToUserId])
+    )
   ]);
   const listingById = new Map(listingCards.map(card => [card.listingId, card]));
   return rows.map(row => ({
@@ -27,7 +37,9 @@ export const toEnquiries = async rows => {
     enquiryType: row.enquiryType,
     message: row.message,
     status: row.status,
-    assignedTo: row.assignedToUserId ? userSummaries.get(row.assignedToUserId) || null : null,
+    assignedTo: row.assignedToUserId
+      ? userSummaries.get(row.assignedToUserId) || null
+      : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   }));
@@ -37,7 +49,9 @@ const toEnquiry = async row => (await toEnquiries([row]))[0];
 
 const toEnquiryNotes = async rows => {
   if (!rows.length) return [];
-  const authors = await userSummariesByIds(rows.map(row => row.createdByUserId));
+  const authors = await userSummariesByIds(
+    rows.map(row => row.createdByUserId)
+  );
   return rows.map(row => ({
     id: row.id,
     note: row.note,
@@ -61,20 +75,29 @@ const toSiteVisit = (row, listingCard, buyerSummary) => ({
 });
 
 export const ownedByBuyer = async (enquiryId, actorId) => {
-  const row = await repository.findOwnedByBuyer(uuid(enquiryId, "enquiryId"), actorId);
-  if (!row) throw new HttpError(404, "ENQUIRY_NOT_FOUND", "Enquiry was not found.");
+  const row = await repository.findOwnedByBuyer(
+    uuid(enquiryId, "enquiryId"),
+    actorId
+  );
+  if (!row)
+    throw new HttpError(404, "ENQUIRY_NOT_FOUND", "Enquiry was not found.");
   return row;
 };
 
 export const ownedBySeller = async (enquiryId, actorId) => {
-  const row = await repository.findOwnedBySeller(uuid(enquiryId, "enquiryId"), actorId);
-  if (!row) throw new HttpError(404, "ENQUIRY_NOT_FOUND", "Enquiry was not found.");
+  const row = await repository.findOwnedBySeller(
+    uuid(enquiryId, "enquiryId"),
+    actorId
+  );
+  if (!row)
+    throw new HttpError(404, "ENQUIRY_NOT_FOUND", "Enquiry was not found.");
   return row;
 };
 
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
-  const result = await repository.insert({
+
+  const result = await repository.insertAndLinkUnlinkedVisits({
     listingId,
     buyerUserId: actorId,
     enquiryType: input.enquiryType,
@@ -92,23 +115,35 @@ export const create = async ({ actorId, listingId, input }) => {
 
 export const listForBuyer = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listForBuyer(actorId, filters, { limit, offset });
+  const counted = await repository.listForBuyer(actorId, filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: await toEnquiries(rows), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: await toEnquiries(rows),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const listForSeller = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listForSeller(actorId, filters, { limit, offset });
+  const counted = await repository.listForSeller(actorId, filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: await toEnquiries(rows), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: await toEnquiries(rows),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 const buildDetail = async (row, { includeNotes }) => {
   const [enquiry, noteRows, siteVisitRows] = await Promise.all([
     toEnquiry(row),
     includeNotes ? repository.notesForEnquiry(row.id) : Promise.resolve([]),
-    repository.siteVisitsForListingBuyer(row.listingId, row.buyerUserId)
+    repository.siteVisitsForEnquiry(row.id)
   ]);
   const notes = await toEnquiryNotes(noteRows);
   const siteVisits = siteVisitRows.map(visit =>
@@ -141,15 +176,20 @@ export const addNote = async ({ enquiry, actorId, note }) => {
   return (await toEnquiryNotes([row]))[0];
 };
 
-export const contactReveal = async ({ actorId, listingId, preferredChannel }) => {
+export const contactReveal = async ({
+  actorId,
+  listingId,
+  preferredChannel
+}) => {
   await assertListingAvailable(listingId);
   const sellerInfo = await repository.sellerContactInfo(listingId);
-  if (!sellerInfo) throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
+  if (!sellerInfo)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
 
   const existing = await repository.findOpenEnquiryForBuyer(listingId, actorId);
   let leadCreated = false;
   if (!existing) {
-    const result = await repository.insert({
+    const result = await repository.insertAndLinkUnlinkedVisits({
       listingId,
       buyerUserId: actorId,
       enquiryType: "CONTACT",
@@ -160,12 +200,17 @@ export const contactReveal = async ({ actorId, listingId, preferredChannel }) =>
     await notifications.notifySeller(listingId, {
       type: "ENQUIRY_NEW",
       title: "New enquiry received",
-      body: "A buyer revealed your contact details and a new enquiry was created.",
+      body:
+        "A buyer revealed your contact details and a new enquiry was created.",
       data: { enquiryId: result.data.id, listingId }
     });
   }
 
-  await repository.recordContactRevealEvent({ listingId, userId: actorId, preferredChannel });
+  await repository.recordContactRevealEvent({
+    listingId,
+    userId: actorId,
+    preferredChannel
+  });
 
   return {
     listingId,
