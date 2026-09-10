@@ -4296,7 +4296,7 @@ Method
 	
 
 CreateSiteVisit
-	A site visit does not create an enquiry. When the buyer has an active enquiry for the same listing, the backend links that visit to it and changes its status to SITE_VISIT atomically. A visit requested before an enquiry remains unlinked until the buyer creates one, at which point it is linked atomically. `enquiryStatus` on completion updates only that directly linked enquiry.
+	A site visit does not create an enquiry. When the buyer has an active enquiry for the same listing, the backend links that visit to it and changes its status to SITE_VISIT atomically. A visit requested before an enquiry remains unlinked until the buyer creates one, at which point it is linked atomically. `enquiryStatus` on completion updates only that directly linked enquiry. Repeating the same preferredDate + preferredTimeSlot while a non-cancelled visit already holds that slot fails with 409 SITE_VISIT_DUPLICATE; error.details is `[{ "visitId": "<existing visit id>" }]` so the UI can deep-link the buyer to the visit they already hold without a lookup.
 Field
 	Type
 	Required

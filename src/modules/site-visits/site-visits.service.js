@@ -120,7 +120,8 @@ export const create = async ({ actorId, listingId, input }) => {
     throw new HttpError(
       409,
       "SITE_VISIT_DUPLICATE",
-      "A site visit is already requested for this listing at that date and time slot."
+      "A site visit is already requested for this listing at that date and time slot.",
+      [{ visitId: duplicate.id }]
     );
 
   const existingEnquiry = await enquiriesRepository.findOpenEnquiryForBuyer(

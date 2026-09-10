@@ -92,23 +92,25 @@ export const scanner = async (req, res) =>
   ok(res, await service.scanner(req.property.id));
 export const passport = async (req, res) =>
   ok(res, await service.passport(req.property.id));
-export const mediaUpload = async (req, res) =>
-  ok(
-    res,
-    await service.createMediaUpload({
-      propertyId: req.property.id,
-      input: validation.mediaUpload(req.body || {})
-    })
-  );
-export const completeMedia = async (req, res) =>
-  created(
-    res,
-    await service.completeMedia({
-      propertyId: req.property.id,
-      actorId: req.actor.id,
-      input: validation.mediaComplete(req.body || {})
-    })
-  );
+export const mediaUpload = async (req, res) => {
+  const batch = Array.isArray(req.body?.files);
+  const input = validation.mediaUpload(req.body || {});
+  const tickets = await service.createMediaUpload({
+    propertyId: req.property.id,
+    input
+  });
+  return ok(res, batch ? { files: tickets } : tickets);
+};
+export const completeMedia = async (req, res) => {
+  const batch = Array.isArray(req.body?.files);
+  const input = validation.mediaComplete(req.body || {});
+  const items = await service.completeMedia({
+    propertyId: req.property.id,
+    actorId: req.actor.id,
+    input
+  });
+  return created(res, batch ? { files: items } : items);
+};
 export const media = async (req, res) =>
   ok(res, await service.listMedia(req.property.id));
 export const updateMedia = async (req, res) =>

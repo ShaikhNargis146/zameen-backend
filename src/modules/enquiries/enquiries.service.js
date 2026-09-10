@@ -189,7 +189,7 @@ export const contactReveal = async ({
   const existing = await repository.findOpenEnquiryForBuyer(listingId, actorId);
   let leadCreated = false;
   if (!existing) {
-    const result = await repository.insert({
+    const result = await repository.insertAndLinkUnlinkedVisits({
       listingId,
       buyerUserId: actorId,
       enquiryType: "CONTACT",

@@ -348,8 +348,20 @@ const fileInput = (body, acceptedMediaTypes = null) => {
   return { fileName, mimeType, fileSizeBytes, mediaType };
 };
 const mediaTypes = new Set(["IMAGE", "VIDEO", "DRONE_VIDEO", "SITE_PLAN"]);
-export const mediaUpload = body => fileInput(body, mediaTypes);
-export const mediaComplete = body => {
+const maxFilesPerBatch = 20;
+const batchFiles = body => {
+  const files = body.files;
+  if (!files.length)
+    throw new HttpError(400, "VALIDATION_ERROR", "At least one file is required.");
+  if (files.length > maxFilesPerBatch)
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      `A maximum of ${maxFilesPerBatch} files can be uploaded at a time.`
+    );
+  return files;
+};
+const mediaCompleteInput = body => {
   const input = fileInput(body, mediaTypes);
   if (!body.storageKey)
     throw new HttpError(400, "VALIDATION_ERROR", "storageKey is required.");
@@ -364,6 +376,14 @@ export const mediaComplete = body => {
     caption: body.caption ? String(body.caption).slice(0, 255) : null
   };
 };
+export const mediaUpload = body =>
+  Array.isArray(body.files)
+    ? batchFiles(body).map(file => fileInput(file, mediaTypes))
+    : fileInput(body, mediaTypes);
+export const mediaComplete = body =>
+  Array.isArray(body.files)
+    ? batchFiles(body).map(mediaCompleteInput)
+    : mediaCompleteInput(body);
 export const mediaUpdate = body => {
   const changes = {};
   if (has(body, "caption"))

@@ -18,12 +18,21 @@ const withOneStub = async (stub, callback) => {
 test("new enquiry atomically links earlier unlinked site visits", async () => {
   await withOneStub(
     async (query, params) => {
-      assert.match(query, /WITH created_enquiry AS/);
+      // The enquiry's status must be decided in the INSERT itself, from a
+      // read-only CTE over the pre-existing site_visits rows. A sibling CTE
+      // cannot UPDATE the row that another CTE in the same WITH just
+      // INSERTed into the same table: all data-modifying CTEs in one WITH
+      // share a single snapshot, so that UPDATE silently matches zero rows
+      // (confirmed against a real Postgres instance, not just this stub).
+      assert.match(query, /WITH unlinked_visits AS/);
+      assert.match(query, /INSERT INTO marketplace\.enquiries/);
+      assert.match(
+        query,
+        /VALUES \(\$1, \$2, \$3, \$4, CASE WHEN EXISTS \(SELECT 1 FROM unlinked_visits\) THEN 'SITE_VISIT' ELSE 'NEW' END\)/
+      );
       assert.match(query, /UPDATE marketplace\.site_visits visit/);
-      assert.match(query, /visit\.enquiry_id IS NULL/);
-      assert.match(query, /visit\.status <> 'CANCELLED'/);
-      assert.match(query, /SET status = CASE/);
-      assert.match(query, /THEN 'SITE_VISIT'/);
+      assert.match(query, /WHERE visit\.id IN \(SELECT id FROM unlinked_visits\)/);
+      assert.match(query, /SELECT [\s\S]*FROM created_enquiry/);
       assert.deepEqual(params, [
         "listing-1",
         "buyer-1",

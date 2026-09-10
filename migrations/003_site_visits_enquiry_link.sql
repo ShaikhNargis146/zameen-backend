@@ -22,24 +22,32 @@ WHERE sv.enquiry_id IS NULL
 -- Preserve history while resolving legacy duplicate requests before adding the
 -- unique index. The earliest request remains active; later duplicates become
 -- CANCELLED and remain visible in the buyer/seller history.
-WITH ranked_duplicates AS (
-  SELECT id,
-         row_number() OVER (
-           PARTITION BY listing_id, buyer_user_id, preferred_date, preferred_time_slot
-           ORDER BY requested_at, created_at, id
-         ) AS row_number
-  FROM marketplace.site_visits
-  WHERE status <> 'CANCELLED' AND buyer_user_id IS NOT NULL
-)
-UPDATE marketplace.site_visits sv
-SET status = 'CANCELLED',
-    seller_note = concat_ws(
-      E'\n\n',
-      nullif(btrim(sv.seller_note), ''),
-      'Cancelled during the site-visit data upgrade because a duplicate request existed for the same date and time slot.'
-    )
-FROM ranked_duplicates duplicate
-WHERE sv.id = duplicate.id AND duplicate.row_number > 1;
+DO $$
+DECLARE
+  cancelled_count int;
+BEGIN
+  WITH ranked_duplicates AS (
+    SELECT id,
+           row_number() OVER (
+             PARTITION BY listing_id, buyer_user_id, preferred_date, preferred_time_slot
+             ORDER BY requested_at, created_at, id
+           ) AS row_number
+    FROM marketplace.site_visits
+    WHERE status <> 'CANCELLED' AND buyer_user_id IS NOT NULL
+  )
+  UPDATE marketplace.site_visits sv
+  SET status = 'CANCELLED',
+      seller_note = concat_ws(
+        E'\n\n',
+        nullif(btrim(sv.seller_note), ''),
+        'Cancelled during the site-visit data upgrade because a duplicate request existed for the same date and time slot.'
+      )
+  FROM ranked_duplicates duplicate
+  WHERE sv.id = duplicate.id AND duplicate.row_number > 1;
+
+  GET DIAGNOSTICS cancelled_count = ROW_COUNT;
+  RAISE NOTICE 'site-visit data upgrade: cancelled % duplicate site visit row(s)', cancelled_count;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_marketplace_site_visits_enquiry
   ON marketplace.site_visits(enquiry_id) WHERE enquiry_id IS NOT NULL;
