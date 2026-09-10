@@ -136,6 +136,7 @@ const transitions = {
     valid: ["PAUSED"],
     status: "PUBLISHED",
     action: "be resumed",
+    approved: true,
     published: true
   },
   withdraw: {

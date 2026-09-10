@@ -31,10 +31,23 @@ export const insert = ({
     `INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, enquiry_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING ${insertColumns}`,
-    [listingId, buyerUserId, enquiryId, preferredDate, preferredTimeSlot, visitorCount, buyerNote]
+    [
+      listingId,
+      buyerUserId,
+      enquiryId,
+      preferredDate,
+      preferredTimeSlot,
+      visitorCount,
+      buyerNote
+    ]
   );
 
-export const findActiveDuplicate = ({ listingId, buyerUserId, preferredDate, preferredTimeSlot }) =>
+export const findActiveDuplicate = ({
+  listingId,
+  buyerUserId,
+  preferredDate,
+  preferredTimeSlot
+}) =>
   run(
     "oneOrNone",
     `SELECT ${selectColumns} FROM marketplace.site_visits sv
@@ -54,7 +67,9 @@ export const findOwnedByBuyer = (id, buyerId) =>
 export const findOwnedBySeller = (id, sellerId) =>
   run(
     "oneOrNone",
-    `SELECT ${selectColumns} FROM marketplace.site_visits sv WHERE sv.id = $1 AND ${sellerOwnsListing(2)}`,
+    `SELECT ${selectColumns} FROM marketplace.site_visits sv WHERE sv.id = $1 AND ${sellerOwnsListing(
+      2
+    )}`,
     [id, sellerId]
   );
 
@@ -66,7 +81,11 @@ export const findOwnedByParticipant = (id, actorId) =>
     [id, actorId]
   );
 
-export const listForBuyer = (buyerId, { status, fromDate, toDate }, { limit, offset }) =>
+export const listForBuyer = (
+  buyerId,
+  { status, fromDate, toDate },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${selectColumns}, count(*) OVER()::int AS total
@@ -79,7 +98,11 @@ export const listForBuyer = (buyerId, { status, fromDate, toDate }, { limit, off
     [buyerId, status || null, fromDate || null, toDate || null, limit, offset]
   );
 
-export const listForSeller = (sellerId, { status, fromDate, toDate }, { limit, offset }) =>
+export const listForSeller = (
+  sellerId,
+  { status, fromDate, toDate },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${selectColumns}, count(*) OVER()::int AS total
@@ -95,7 +118,11 @@ export const listForSeller = (sellerId, { status, fromDate, toDate }, { limit, o
 export const confirm = ({ id, scheduledAt, sellerNote }) =>
   pg.updateWhere({
     table: "marketplace.site_visits",
-    set: { status: "CONFIRMED", scheduled_at: scheduledAt, seller_note: sellerNote },
+    set: {
+      status: "CONFIRMED",
+      scheduled_at: scheduledAt,
+      seller_note: sellerNote
+    },
     where: "id = ${id}",
     params: { id },
     returning: insertColumns
@@ -104,7 +131,11 @@ export const confirm = ({ id, scheduledAt, sellerNote }) =>
 export const reschedule = ({ id, scheduledAt, noteColumn, note }) =>
   pg.updateWhere({
     table: "marketplace.site_visits",
-    set: { status: "RESCHEDULED", scheduled_at: scheduledAt, [noteColumn]: note },
+    set: {
+      status: "RESCHEDULED",
+      scheduled_at: scheduledAt,
+      [noteColumn]: note
+    },
     where: "id = ${id}",
     params: { id },
     returning: insertColumns
@@ -119,11 +150,20 @@ export const cancel = ({ id, noteColumn, note }) =>
     returning: insertColumns
   });
 
-export const complete = ({ id, sellerNote }) =>
-  pg.updateWhere({
-    table: "marketplace.site_visits",
-    set: { status: "COMPLETED", seller_note: sellerNote },
-    where: "id = ${id}",
-    params: { id },
-    returning: insertColumns
-  });
+export const complete = ({ id, sellerNote, enquiryStatus }) =>
+  pg.one(
+    `WITH updated_visit AS (
+       UPDATE marketplace.site_visits
+       SET status = 'COMPLETED', seller_note = $2
+       WHERE id = $1
+       RETURNING *
+     ), updated_enquiry AS (
+       UPDATE marketplace.enquiries enquiry
+       SET status = $3
+       FROM updated_visit visit
+       WHERE $3::varchar IS NOT NULL AND enquiry.id = visit.enquiry_id
+       RETURNING enquiry.id
+     )
+     SELECT ${insertColumns} FROM updated_visit`,
+    [id, sellerNote, enquiryStatus]
+  );

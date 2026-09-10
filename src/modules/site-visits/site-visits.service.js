@@ -107,28 +107,6 @@ export const ownedByParticipant = async (visitId, actorId) => {
   return row;
 };
 
-const findOrCreateActiveEnquiry = async ({ listingId, buyerUserId }) => {
-  const existing = await enquiriesRepository.findOpenEnquiryForBuyer(
-    listingId,
-    buyerUserId
-  );
-  if (existing) return existing.id;
-  const result = await enquiriesRepository.insert({
-    listingId,
-    buyerUserId,
-    enquiryType: "GENERAL",
-    message: null
-  });
-  if (!result.ok) throw mapDbError(result.error);
-  return result.data.id;
-};
-
-const updateEnquiryStatus = async (enquiryId, status) => {
-  const result = await enquiriesRepository.updateStatus(enquiryId, status);
-  if (!result.ok) throw mapDbError(result.error);
-  return result.data;
-};
-
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
 
@@ -145,16 +123,15 @@ export const create = async ({ actorId, listingId, input }) => {
       "A site visit is already requested for this listing at that date and time slot."
     );
 
-  const enquiryId = await findOrCreateActiveEnquiry({
+  const existingEnquiry = await enquiriesRepository.findOpenEnquiryForBuyer(
     listingId,
-    buyerUserId: actorId
-  });
-  await updateEnquiryStatus(enquiryId, "SITE_VISIT");
+    actorId
+  );
 
   const result = await repository.insert({
     listingId,
     buyerUserId: actorId,
-    enquiryId,
+    enquiryId: existingEnquiry?.id || null,
     preferredDate: input.preferredDate,
     preferredTimeSlot: input.preferredTimeSlot,
     visitorCount: input.visitorCount,
@@ -274,21 +251,24 @@ export const complete = async ({ visit, sellerNote, enquiryStatus }) => {
       "INVALID_TRANSITION",
       "Site visit cannot be completed from its current state."
     );
-  const result = await repository.complete({ id: visit.id, sellerNote });
+  const result = await repository.complete({
+    id: visit.id,
+    sellerNote,
+    enquiryStatus
+  });
   if (!result.ok) throw result.error;
 
-  if (enquiryStatus) {
-    const enquiryId =
-      visit.enquiryId ||
-      (visit.buyerUserId &&
-        (
-          await enquiriesRepository.findOpenEnquiryForBuyer(
-            visit.listingId,
-            visit.buyerUserId
-          )
-        )?.id);
-    if (enquiryId) await updateEnquiryStatus(enquiryId, enquiryStatus);
-  }
+  if (enquiryStatus && visit.enquiryId)
+    await notifications.notifyUser(visit.buyerUserId, {
+      type: "ENQUIRY_STATUS_UPDATED",
+      title: "Your enquiry was updated",
+      body: `Your enquiry status changed to ${enquiryStatus}.`,
+      data: {
+        enquiryId: visit.enquiryId,
+        listingId: visit.listingId,
+        status: enquiryStatus
+      }
+    });
 
   return toSiteVisit(result.data);
 };

@@ -34,11 +34,17 @@ export const findOwnedByBuyer = (id, buyerId) =>
 export const findOwnedBySeller = (id, sellerId) =>
   run(
     "oneOrNone",
-    `SELECT ${selectColumns} FROM marketplace.enquiries e WHERE e.id = $1 AND ${sellerOwnsListing(2)}`,
+    `SELECT ${selectColumns} FROM marketplace.enquiries e WHERE e.id = $1 AND ${sellerOwnsListing(
+      2
+    )}`,
     [id, sellerId]
   );
 
-export const listForBuyer = (buyerId, { status, listingId }, { limit, offset }) =>
+export const listForBuyer = (
+  buyerId,
+  { status, listingId },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${selectColumns}, count(*) OVER()::int AS total
@@ -50,7 +56,11 @@ export const listForBuyer = (buyerId, { status, listingId }, { limit, offset }) 
     [buyerId, status || null, listingId || null, limit, offset]
   );
 
-export const listForSeller = (sellerId, { status, listingId, search }, { limit, offset }) =>
+export const listForSeller = (
+  sellerId,
+  { status, listingId, search },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${selectColumns}, count(*) OVER()::int AS total
@@ -62,7 +72,14 @@ export const listForSeller = (sellerId, { status, listingId, search }, { limit, 
        AND ($3::uuid IS NULL OR e.listing_id = $3)
        AND ($4::varchar IS NULL OR buyer.display_name ILIKE $4 OR buyer.phone_e164 ILIKE $4 OR buyer.email::text ILIKE $4 OR l.title ILIKE $4)
      ORDER BY e.created_at DESC LIMIT $5 OFFSET $6`,
-    [sellerId, status || null, listingId || null, search ? `%${search}%` : null, limit, offset]
+    [
+      sellerId,
+      status || null,
+      listingId || null,
+      search ? `%${search}%` : null,
+      limit,
+      offset
+    ]
   );
 
 export const updateStatus = (id, status) =>
@@ -91,7 +108,7 @@ export const notesForEnquiry = enquiryId =>
     [enquiryId]
   );
 
-export const siteVisitsForEnquiry = (enquiryId, listingId, buyerUserId) =>
+export const siteVisitsForEnquiry = enquiryId =>
   run(
     "any",
     `SELECT id, listing_id AS "listingId", buyer_user_id AS "buyerUserId", enquiry_id AS "enquiryId",
@@ -100,9 +117,8 @@ export const siteVisitsForEnquiry = (enquiryId, listingId, buyerUserId) =>
             seller_note AS "sellerNote", buyer_note AS "buyerNote", created_at AS "createdAt"
      FROM marketplace.site_visits
      WHERE enquiry_id = $1
-        OR (enquiry_id IS NULL AND listing_id = $2 AND buyer_user_id = $3)
      ORDER BY created_at DESC`,
-    [enquiryId, listingId, buyerUserId]
+    [enquiryId]
   );
 
 export const sellerContactInfo = listingId =>
@@ -129,10 +145,18 @@ export const findOpenEnquiryForBuyer = (listingId, buyerUserId) =>
     [listingId, buyerUserId]
   );
 
-export const recordContactRevealEvent = ({ listingId, userId, preferredChannel }) =>
+export const recordContactRevealEvent = ({
+  listingId,
+  userId,
+  preferredChannel
+}) =>
   run(
     "none",
     `INSERT INTO marketplace.listing_events (listing_id, user_id, event_type, metadata)
      VALUES ($1,$2,'CONTACT_REVEAL',$3::jsonb)`,
-    [listingId, userId, JSON.stringify({ preferredChannel: preferredChannel || null })]
+    [
+      listingId,
+      userId,
+      JSON.stringify({ preferredChannel: preferredChannel || null })
+    ]
   );
