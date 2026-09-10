@@ -60,6 +60,23 @@ const enumList = (value, values, field) => {
     invalid("VALIDATION_ERROR", `${field} contains an invalid value.`);
   return items;
 };
+const optionalRegexSearch = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (text.length > 100)
+    invalid("VALIDATION_ERROR", `${field} must be at most 100 characters.`);
+  try {
+    // eslint-disable-next-line no-new
+    new RegExp(text);
+  } catch {
+    invalid(
+      "VALIDATION_ERROR",
+      `${field} must be a valid regular expression.`
+    );
+  }
+  return text;
+};
 
 export const search = (body = {}) => {
   const minPriceMinor = optionalNumber(body.minPriceMinor, "minPriceMinor", {
@@ -102,6 +119,7 @@ export const search = (body = {}) => {
       transactionTypes,
       "transactionTypes"
     ),
+    search: optionalRegexSearch(body.search, "search"),
     minPriceMinor,
     maxPriceMinor,
     minArea,
