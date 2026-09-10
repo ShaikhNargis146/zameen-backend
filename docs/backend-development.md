@@ -377,15 +377,15 @@ either variable because
 the storage client is created during process startup. The bucket must also
 allow the UI origin (for example `http://localhost:5173`) in its **bucket CORS
 policy**. API CORS settings do not control direct browser uploads to GCS.
-The tracked [`cors.json`](../cors.json) permits the local React development
-origins and the current shared test UI origin `http://34.133.120.182:3000`.
-API CORS and bucket CORS are separate settings: keep `CORS_ORIGINS` and this
-file aligned. Add the exact production HTTPS UI origin before release; do not
-use a wildcard origin. Apply the file to the configured bucket after changing
-it:
+The tracked [`cors.json`](../cors.json) permits only local development origins.
+API CORS and bucket CORS are separate settings: keep `CORS_ORIGINS` and the
+active bucket policy aligned. For a shared test or production deployment, copy
+this file outside the repository, add the exact HTTPS UI origin there, and
+apply that environment-specific file. Do not commit server IP addresses and do
+not use a wildcard origin. Apply the selected file to the configured bucket:
 
 ```bash
-gcloud storage buckets update gs://YOUR_BUCKET --cors-file=cors.json
+gcloud storage buckets update gs://YOUR_BUCKET --cors-file=/secure/path/gcs-cors.json
 ```
 
 Confirm the active policy with:

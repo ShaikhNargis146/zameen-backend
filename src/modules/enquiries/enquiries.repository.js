@@ -24,6 +24,40 @@ export const insert = ({ listingId, buyerUserId, enquiryType, message }) =>
     [listingId, buyerUserId, enquiryType, message]
   );
 
+export const insertAndLinkUnlinkedVisits = ({
+  listingId,
+  buyerUserId,
+  enquiryType,
+  message
+}) =>
+  pg.one(
+    `WITH created_enquiry AS (
+       INSERT INTO marketplace.enquiries (listing_id, buyer_user_id, enquiry_type, message)
+       VALUES ($1,$2,$3,$4)
+       RETURNING *
+     ), linked_visits AS (
+       UPDATE marketplace.site_visits visit
+       SET enquiry_id = enquiry.id
+       FROM created_enquiry enquiry
+       WHERE visit.enquiry_id IS NULL
+         AND visit.listing_id = enquiry.listing_id
+         AND visit.buyer_user_id = enquiry.buyer_user_id
+         AND visit.status <> 'CANCELLED'
+       RETURNING visit.id
+     ), updated_enquiry AS (
+       UPDATE marketplace.enquiries enquiry
+       SET status = CASE
+         WHEN EXISTS (SELECT 1 FROM linked_visits) THEN 'SITE_VISIT'
+         ELSE enquiry.status
+       END
+       FROM created_enquiry created
+       WHERE enquiry.id = created.id
+       RETURNING enquiry.*
+     )
+     SELECT ${insertColumns} FROM updated_enquiry`,
+    [listingId, buyerUserId, enquiryType, message]
+  );
+
 export const findOwnedByBuyer = (id, buyerId) =>
   run(
     "oneOrNone",

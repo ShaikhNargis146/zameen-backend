@@ -32,7 +32,12 @@ WITH ranked_duplicates AS (
   WHERE status <> 'CANCELLED' AND buyer_user_id IS NOT NULL
 )
 UPDATE marketplace.site_visits sv
-SET status = 'CANCELLED'
+SET status = 'CANCELLED',
+    seller_note = concat_ws(
+      E'\n\n',
+      nullif(btrim(sv.seller_note), ''),
+      'Cancelled during the site-visit data upgrade because a duplicate request existed for the same date and time slot.'
+    )
 FROM ranked_duplicates duplicate
 WHERE sv.id = duplicate.id AND duplicate.row_number > 1;
 

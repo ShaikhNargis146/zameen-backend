@@ -28,9 +28,18 @@ export const insert = ({
   buyerNote
 }) =>
   pg.one(
-    `INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, enquiry_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     RETURNING ${insertColumns}`,
+    `WITH created_visit AS (
+       INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, enquiry_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING *
+     ), updated_enquiry AS (
+       UPDATE marketplace.enquiries enquiry
+       SET status = 'SITE_VISIT'
+       FROM created_visit visit
+       WHERE visit.enquiry_id IS NOT NULL AND enquiry.id = visit.enquiry_id
+       RETURNING enquiry.id
+     )
+     SELECT ${insertColumns} FROM created_visit`,
     [
       listingId,
       buyerUserId,

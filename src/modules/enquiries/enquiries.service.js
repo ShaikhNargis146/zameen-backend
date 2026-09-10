@@ -97,7 +97,7 @@ export const ownedBySeller = async (enquiryId, actorId) => {
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
 
-  const result = await repository.insert({
+  const result = await repository.insertAndLinkUnlinkedVisits({
     listingId,
     buyerUserId: actorId,
     enquiryType: input.enquiryType,

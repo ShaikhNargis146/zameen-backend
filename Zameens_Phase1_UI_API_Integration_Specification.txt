@@ -3958,7 +3958,7 @@ Method
 	
 
 CreateEnquiry
-	Every valid request creates a separate enquiry. The UI must disable its submit action while the request is in flight; the backend does not discard a later message or enquiry type merely because the buyer already has an open enquiry for that listing.
+	Every valid request creates a separate enquiry. The UI must disable its submit action while the request is in flight; the backend does not discard a later message or enquiry type merely because the buyer already has an open enquiry for that listing. If the buyer already requested an unlinked, non-cancelled site visit for this listing, that visit is linked to this new enquiry and the enquiry status becomes SITE_VISIT.
 Field
 	Type
 	Required
@@ -4296,7 +4296,7 @@ Method
 	
 
 CreateSiteVisit
-	A site visit is an independent request. When the buyer has an active enquiry for the same listing, the backend links that visit to the enquiry for history only; it does not create an enquiry or change its status. `enquiryStatus` on completion updates only that directly linked enquiry.
+	A site visit does not create an enquiry. When the buyer has an active enquiry for the same listing, the backend links that visit to it and changes its status to SITE_VISIT atomically. A visit requested before an enquiry remains unlinked until the buyer creates one, at which point it is linked atomically. `enquiryStatus` on completion updates only that directly linked enquiry.
 Field
 	Type
 	Required

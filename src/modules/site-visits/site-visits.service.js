@@ -256,7 +256,7 @@ export const complete = async ({ visit, sellerNote, enquiryStatus }) => {
     sellerNote,
     enquiryStatus
   });
-  if (!result.ok) throw result.error;
+  if (!result.ok) throw mapDbError(result.error);
 
   if (enquiryStatus && visit.enquiryId)
     await notifications.notifyUser(visit.buyerUserId, {
