@@ -9,6 +9,7 @@ const contentTypes = new Set([
   "PROPERTY_LAW",
   "GUIDE"
 ]);
+const contentStatuses = new Set(["DRAFT", "PUBLISHED", "ARCHIVED"]);
 const languages = new Set(["en", "hi", "mr", "gu", "pa", "te", "ta"]);
 const metrics = new Set([
   "ASKING_PRICE",
@@ -18,11 +19,16 @@ const metrics = new Set([
 ]);
 const minYear = 1900;
 const maxYear = 2100;
+const maxFileSizeBytes = 50 * 1024 * 1024;
+const toField = code =>
+  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalUuid = (value, field) =>
@@ -30,19 +36,19 @@ const optionalUuid = (value, field) =>
 
 const requiredString = (value, min, max, field) => {
   const text = String(value ?? "").trim();
-  if (text.length < min || text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be between ${min} and ${max} characters.`
-    );
+  if (text.length < min || text.length > max) {
+    const message = `${field} must be between ${min} and ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalString = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be at most ${max} characters.`);
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalText = (value, field) => {
@@ -51,15 +57,19 @@ const optionalText = (value, field) => {
 };
 const requiredText = (value, field) => {
   const text = String(value ?? "");
-  if (!text.trim().length)
-    throw new HttpError(400, `INVALID_${field}`, `${field} is required.`);
+  if (!text.trim().length) {
+    const message = `${field} is required.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const requiredEnum = (value, set, code, label) => {
   const text = String(value ?? "").trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 const optionalEnum = (value, set, code, label) => {
@@ -74,19 +84,18 @@ const optionalUrl = (value, field) => {
     // eslint-disable-next-line no-new
     new URL(text);
   } catch {
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a valid URL.`);
+    const message = `${field} must be a valid URL.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
   }
   return text;
 };
 
 export const language = value => {
   const text = String(value ?? "").trim().toLowerCase();
-  if (!languages.has(text))
-    throw new HttpError(
-      400,
-      "INVALID_LANGUAGE",
-      "language must be one of en, hi, mr, gu, pa, te, ta."
-    );
+  if (!languages.has(text)) {
+    const message = "language must be one of en, hi, mr, gu, pa, te, ta.";
+    throw new HttpError(400, "INVALID_LANGUAGE", message, [{ field: "language", message }]);
+  }
   return text;
 };
 export const optionalLanguage = value =>
@@ -94,12 +103,10 @@ export const optionalLanguage = value =>
 
 const requiredYear = (value, field) => {
   const num = Number(value);
-  if (!Number.isInteger(num) || num < minYear || num > maxYear)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be a year between ${minYear} and ${maxYear}.`
-    );
+  if (!Number.isInteger(num) || num < minYear || num > maxYear) {
+    const message = `${field} must be a year between ${minYear} and ${maxYear}.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 const optionalYear = (value, field) =>
@@ -107,15 +114,19 @@ const optionalYear = (value, field) =>
 
 const requiredNonNegativeNumber = (value, field) => {
   const num = Number(value);
-  if (!Number.isFinite(num) || num < 0)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a number >= 0.`);
+  if (!Number.isFinite(num) || num < 0) {
+    const message = `${field} must be a number >= 0.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
 const periodDate = value => {
   const date = new Date(value);
-  if (!value || !Number.isFinite(date.valueOf()))
-    throw new HttpError(400, "INVALID_PERIOD_DATE", "periodDate must be a valid date.");
+  if (!value || !Number.isFinite(date.valueOf())) {
+    const message = "periodDate must be a valid date.";
+    throw new HttpError(400, "INVALID_PERIOD_DATE", message, [{ field: "periodDate", message }]);
+  }
   return date;
 };
 
@@ -137,23 +148,49 @@ export const contentListQuery = query => ({
   query
 });
 
+const fileInput = body => {
+  const fileName = requiredString(body.fileName, 1, 255, "FILE_NAME");
+  const mimeType = requiredString(body.mimeType, 1, 255, "MIME_TYPE").toLowerCase();
+  const fileSizeBytes = Number(body.fileSizeBytes);
+  if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > maxFileSizeBytes) {
+    const message = `fileSizeBytes must be a positive whole number up to ${maxFileSizeBytes} bytes.`;
+    throw new HttpError(400, "INVALID_FILE_SIZE_BYTES", message, [{ field: "fileSizeBytes", message }]);
+  }
+  return { fileName, mimeType, fileSizeBytes };
+};
+
+export const mediaUploadInit = body => fileInput(body);
+
+export const mediaComplete = body => ({
+  ...fileInput(body),
+  storageKey: requiredString(body.storageKey, 1, 2048, "STORAGE_KEY")
+});
+
+export const adminContentListQuery = query => ({
+  filters: {
+    status: optionalEnum(query.status, contentStatuses, "STATUS", "DRAFT, PUBLISHED, or ARCHIVED"),
+    type: optionalEnum(query.type, contentTypes, "TYPE", "a valid ContentType"),
+    language: optionalLanguage(query.language),
+    search: optionalString(query.search, 200, "SEARCH")
+  },
+  query
+});
+
 export const createContent = body => {
   const translations = Array.isArray(body.translations) ? body.translations : [];
-  if (!translations.length)
-    throw new HttpError(
-      400,
-      "TRANSLATIONS_REQUIRED",
-      "translations must contain at least one language entry."
-    );
+  if (!translations.length) {
+    const message = "translations must contain at least one language entry.";
+    throw new HttpError(400, "TRANSLATIONS_REQUIRED", message, [{ field: "translations", message }]);
+  }
   const seen = new Set();
   const mapped = translations.map((entry, index) => {
     const translation = translationInput(entry, index);
-    if (seen.has(translation.language))
-      throw new HttpError(
-        400,
-        "DUPLICATE_TRANSLATION_LANGUAGE",
-        `translations contains language "${translation.language}" more than once.`
-      );
+    if (seen.has(translation.language)) {
+      const message = `translations contains language "${translation.language}" more than once.`;
+      throw new HttpError(400, "DUPLICATE_TRANSLATION_LANGUAGE", message, [
+        { field: "translations", message }
+      ]);
+    }
     seen.add(translation.language);
     return translation;
   });
@@ -184,12 +221,12 @@ export const updateContent = body => {
         const seen = new Set();
         return body.translations.map((entry, index) => {
           const translation = translationInput(entry, index);
-          if (seen.has(translation.language))
-            throw new HttpError(
-              400,
-              "DUPLICATE_TRANSLATION_LANGUAGE",
-              `translations contains language "${translation.language}" more than once.`
-            );
+          if (seen.has(translation.language)) {
+            const message = `translations contains language "${translation.language}" more than once.`;
+            throw new HttpError(400, "DUPLICATE_TRANSLATION_LANGUAGE", message, [
+              { field: "translations", message }
+            ]);
+          }
           seen.add(translation.language);
           return translation;
         });
@@ -205,7 +242,9 @@ export const marketTrendQuery = query => {
   const fromYear = optionalYear(query.fromYear, "FROM_YEAR");
   const toYear = optionalYear(query.toYear, "TO_YEAR");
   if (fromYear !== null && toYear !== null && toYear < fromYear)
-    throw new HttpError(400, "INVALID_TO_YEAR", "toYear must be greater than or equal to fromYear.");
+    throw new HttpError(400, "INVALID_TO_YEAR", "toYear must be greater than or equal to fromYear.", [
+      { field: "toYear", message: "toYear must be greater than or equal to fromYear." }
+    ]);
   return {
     locationId: uuid(query.locationId, "locationId"),
     propertyTypeId: optionalUuid(query.propertyTypeId, "propertyTypeId"),

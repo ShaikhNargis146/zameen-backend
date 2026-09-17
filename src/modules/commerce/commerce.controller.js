@@ -61,6 +61,17 @@ export const webhook = async (req, res) =>
     })
   );
 
+export const adminPlans = async (req, res) => {
+  const { data, meta } = await service.adminListPlans({
+    filters: validation.adminPlanListQuery(req.query || {}),
+    query: req.query
+  });
+  ok(res, data, meta);
+};
+
+export const adminGetPlan = async (req, res) =>
+  ok(res, await service.adminGetPlan(validation.uuid(req.params.planId, "planId")));
+
 export const createPlan = async (req, res) =>
   created(res, await service.createPlan(validation.createPlan(req.body || {})));
 
@@ -151,6 +162,15 @@ export const updateServiceRequestStatus = async (req, res) =>
     await service.updateServiceRequestStatus({
       requestId: validation.uuid(req.params.requestId, "requestId"),
       changes: validation.updateServiceRequestStatus(req.body || {})
+    })
+  );
+
+export const serviceReportUploadUrl = async (req, res) =>
+  ok(
+    res,
+    await service.createServiceReportUpload({
+      requestId: validation.uuid(req.params.requestId, "requestId"),
+      input: validation.fileUploadInit(req.body || {})
     })
   );
 

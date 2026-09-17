@@ -5,6 +5,7 @@ import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/
 import { hmacSha256Hex, randomToken, safeEqualHex, sha256 } from "../../utils/crypto.js";
 import {
   belongsToServiceRequest,
+  createServiceReportStorageKey,
   createServiceRequestStorageKey,
   signedReadUrl,
   signedWriteUrl
@@ -46,12 +47,33 @@ const toPlan = row =>
     isActive: row.isActive
   };
 
+const toPlanAdmin = row =>
+  row && {
+    ...toPlan(row),
+    productId: row.productId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+
 export const listPlans = async audience => (await repository.listActivePlans(audience)).map(toPlan);
 
 export const getPlan = async planId => {
   const row = await repository.findPlanById(planId);
   if (!row) throw new HttpError(404, "PLAN_NOT_FOUND", "Plan was not found.");
   return toPlan(row);
+};
+
+export const adminListPlans = async ({ filters, query }) => {
+  const { page, limit, offset } = parsePagination(query);
+  const rows = await repository.listPlansAdmin({ ...filters, limit, offset });
+  const total = rows[0]?.total || 0;
+  return { data: rows.map(toPlanAdmin), meta: paginationMeta({ page, limit, total }) };
+};
+
+export const adminGetPlan = async planId => {
+  const row = await repository.findPlanById(planId);
+  if (!row) throw new HttpError(404, "PLAN_NOT_FOUND", "Plan was not found.");
+  return toPlanAdmin(row);
 };
 
 export const createPlan = async input => {
@@ -504,6 +526,15 @@ export const updateServiceRequestStatus = async ({ requestId, changes }) => {
   });
   if (!result.ok) throw result.error;
   return toServiceRequest(result.data, { includeInternal: true });
+};
+
+export const createServiceReportUpload = async ({ requestId, input }) => {
+  const existing = await repository.findServiceRequestById(requestId);
+  if (!existing) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  return signedWriteUrl({
+    storageKey: createServiceReportStorageKey({ requestId, fileName: input.fileName }),
+    mimeType: input.mimeType
+  });
 };
 
 export const submitServiceReport = async ({ requestId, input }) => {

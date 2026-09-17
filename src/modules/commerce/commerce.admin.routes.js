@@ -5,6 +5,8 @@ import * as controller from "./commerce.controller.js";
 
 const router = Router();
 
+router.get("/plans", requireAdmin, asyncRoute(controller.adminPlans));
+router.get("/plans/:planId", requireAdmin, asyncRoute(controller.adminGetPlan));
 router.post("/plans", requireAdmin, asyncRoute(controller.createPlan));
 router.patch("/plans/:planId", requireAdmin, asyncRoute(controller.updatePlan));
 router.post("/plans/:planId/activate", requireAdmin, asyncRoute(controller.activatePlan));
@@ -20,6 +22,11 @@ router.patch(
   "/service-requests/:requestId/status",
   requireAdmin,
   asyncRoute(controller.updateServiceRequestStatus)
+);
+router.post(
+  "/service-requests/:requestId/report/upload-url",
+  requireAdmin,
+  asyncRoute(controller.serviceReportUploadUrl)
 );
 router.post(
   "/service-requests/:requestId/report",

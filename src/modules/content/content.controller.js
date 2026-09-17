@@ -16,6 +16,20 @@ export const contentDetail = async (req, res) =>
     })
   );
 
+export const adminList = async (req, res) => {
+  const { data, meta } = await service.listContentAdmin(validation.adminContentListQuery(req.query || {}));
+  ok(res, data, meta);
+};
+
+export const adminGet = async (req, res) =>
+  ok(res, await service.getContentAdmin(validation.uuid(req.params.contentId, "contentId")));
+
+export const mediaUploadUrl = async (req, res) =>
+  ok(res, await service.createMediaUpload(validation.mediaUploadInit(req.body || {})));
+
+export const completeMediaUpload = async (req, res) =>
+  created(res, await service.completeMediaUpload(validation.mediaComplete(req.body || {})));
+
 export const createContent = async (req, res) =>
   created(
     res,

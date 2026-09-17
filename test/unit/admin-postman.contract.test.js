@@ -28,6 +28,12 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
   );
 
   const expected = [
+    "POST {{baseUrl}}/auth/otp/request",
+    "POST {{baseUrl}}/auth/otp/verify",
+    "POST {{baseUrl}}/auth/refresh",
+    "POST {{baseUrl}}/auth/logout",
+    "POST {{baseUrl}}/auth/logout-all",
+    "GET {{baseUrl}}/admin/dashboard",
     "GET {{baseUrl}}/admin/users",
     "GET {{baseUrl}}/admin/users/{{userId}}",
     "PATCH {{baseUrl}}/admin/users/{{userId}}/status",
@@ -41,6 +47,8 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "GET {{baseUrl}}/admin/verifications",
     "GET {{baseUrl}}/admin/verifications/{{verificationId}}",
     "PATCH {{baseUrl}}/admin/verifications/{{verificationId}}",
+    "GET {{baseUrl}}/admin/plans",
+    "GET {{baseUrl}}/admin/plans/{{planId}}",
     "POST {{baseUrl}}/admin/plans",
     "PATCH {{baseUrl}}/admin/plans/{{planId}}",
     "POST {{baseUrl}}/admin/plans/{{planId}}/activate",
@@ -48,12 +56,17 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "GET {{baseUrl}}/admin/service-requests",
     "GET {{baseUrl}}/admin/service-requests/{{serviceRequestId}}",
     "PATCH {{baseUrl}}/admin/service-requests/{{serviceRequestId}}/status",
+    "POST {{baseUrl}}/admin/service-requests/{{serviceRequestId}}/report/upload-url",
     "POST {{baseUrl}}/admin/service-requests/{{serviceRequestId}}/report",
+    "GET {{baseUrl}}/admin/content",
+    "GET {{baseUrl}}/admin/content/{{contentId}}",
     "POST {{baseUrl}}/admin/content",
     "PATCH {{baseUrl}}/admin/content/{{contentId}}",
     "DELETE {{baseUrl}}/admin/content/{{contentId}}",
     "POST {{baseUrl}}/admin/content/{{contentId}}/publish",
     "POST {{baseUrl}}/admin/content/{{contentId}}/archive",
+    "POST {{baseUrl}}/admin/content/media/upload-url",
+    "POST {{baseUrl}}/admin/content/media/complete",
     "POST {{baseUrl}}/admin/market-trends",
     "PATCH {{baseUrl}}/admin/market-trends/{{seriesId}}",
     "DELETE {{baseUrl}}/admin/market-trends/{{seriesId}}",
@@ -72,6 +85,10 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "POST {{baseUrl}}/admin/auctions",
     "PATCH {{baseUrl}}/admin/auctions/{{auctionId}}",
     "DELETE {{baseUrl}}/admin/auctions/{{auctionId}}",
+    "GET {{baseUrl}}/admin/ads",
+    "GET {{baseUrl}}/admin/ads/{{adId}}",
+    "POST {{baseUrl}}/admin/ads/media/upload-url",
+    "POST {{baseUrl}}/admin/ads/media/complete",
     "POST {{baseUrl}}/admin/ads",
     "PATCH {{baseUrl}}/admin/ads/{{adId}}",
     "DELETE {{baseUrl}}/admin/ads/{{adId}}",
@@ -82,7 +99,10 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
   assert.equal(collection.auth?.bearer?.[0]?.value, "{{adminAccessToken}}");
   assert.equal(
     flattenRequests(collection.item).every(
-      (request) => !request.auth || request.auth?.bearer?.[0]?.value === "{{adminAccessToken}}"
+      (request) =>
+        !request.auth ||
+        request.auth?.type === "noauth" ||
+        request.auth?.bearer?.[0]?.value === "{{adminAccessToken}}"
     ),
     true
   );

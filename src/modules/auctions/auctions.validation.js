@@ -3,11 +3,15 @@ import { HttpError } from "../../shared/http.js";
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const auctionStatuses = new Set(["UPCOMING", "CLOSED", "CANCELLED"]);
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+const toField = code =>
+  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalUuid = (value, field) =>
@@ -15,27 +19,29 @@ const optionalUuid = (value, field) =>
 
 const requiredString = (value, min, max, field) => {
   const text = String(value ?? "").trim();
-  if (text.length < min || text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be between ${min} and ${max} characters.`
-    );
+  if (text.length < min || text.length > max) {
+    const message = `${field} must be between ${min} and ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalString = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be at most ${max} characters.`);
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalNonNegativeInteger = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isInteger(num) || num < 0)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a whole number >= 0.`);
+  if (!Number.isInteger(num) || num < 0) {
+    const message = `${field} must be a whole number >= 0.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
@@ -45,29 +51,36 @@ const requiredUrl = (value, field) => {
     // eslint-disable-next-line no-new
     new URL(text);
   } catch {
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a valid URL.`);
+    const message = `${field} must be a valid URL.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
   }
   return text;
 };
 
 const requiredDateTime = (value, field) => {
   const date = new Date(value);
-  if (!value || !Number.isFinite(date.valueOf()))
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a valid date/time.`);
+  if (!value || !Number.isFinite(date.valueOf())) {
+    const message = `${field} must be a valid date/time.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return date;
 };
 const optionalDate = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const date = new Date(value);
-  if (!Number.isFinite(date.valueOf()))
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a valid date.`);
+  if (!Number.isFinite(date.valueOf())) {
+    const message = `${field} must be a valid date.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return date;
 };
 
 const requiredEnum = (value, set, code, label) => {
   const text = String(value ?? "").trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 const optionalEnum = (value, set, code, label) => {
@@ -113,7 +126,9 @@ export const auctionListQuery = query => {
   const fromDate = optionalDate(query.fromDate, "FROM_DATE");
   const toDate = optionalDate(query.toDate, "TO_DATE");
   if (fromDate && toDate && toDate < fromDate)
-    throw new HttpError(400, "INVALID_TO_DATE", "toDate must be on or after fromDate.");
+    throw new HttpError(400, "INVALID_TO_DATE", "toDate must be on or after fromDate.", [
+      { field: "toDate", message: "toDate must be on or after fromDate." }
+    ]);
   return {
     locationId: optionalUuid(query.locationId, "locationId"),
     status: optionalEnum(query.status, auctionStatuses, "STATUS", "UPCOMING, CLOSED, or CANCELLED"),

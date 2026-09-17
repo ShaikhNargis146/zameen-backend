@@ -1,6 +1,6 @@
 import { pg, run } from "../../shared/db.js";
 
-const adColumns = `a.id, a.name, a.placement, a.image_storage_key AS "imageStorageKey", a.target_url AS "targetUrl", a.starts_at AS "startsAt", a.ends_at AS "endsAt", a.status`;
+const adColumns = `a.id, a.name, a.placement, a.image_storage_key AS "imageStorageKey", a.target_url AS "targetUrl", a.starts_at AS "startsAt", a.ends_at AS "endsAt", a.status, a.created_at AS "createdAt", a.updated_at AS "updatedAt"`;
 
 export const listActive = placementValue =>
   run(
@@ -14,6 +14,19 @@ export const listActive = placementValue =>
 
 export const findById = id =>
   run("oneOrNone", `SELECT ${adColumns} FROM content.ads a WHERE a.id = $1`, [id]);
+
+export const listAdmin = ({ status, placement, search, limit, offset }) =>
+  run(
+    "any",
+    `SELECT ${adColumns}, count(*) OVER()::int AS total
+     FROM content.ads a
+     WHERE ($1::varchar IS NULL OR a.status = $1)
+       AND ($2::varchar IS NULL OR a.placement = $2)
+       AND ($3::varchar IS NULL OR a.name ILIKE $3)
+     ORDER BY a.created_at DESC
+     LIMIT $4 OFFSET $5`,
+    [status, placement, search ? `%${search}%` : null, limit, offset]
+  );
 
 export const create = ({ name, placement, imageStorageKey, targetUrl, startsAt, endsAt, status }) =>
   run(

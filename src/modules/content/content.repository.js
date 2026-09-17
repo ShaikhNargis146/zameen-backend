@@ -38,6 +38,22 @@ export const findPublishedBySlug = ({ slug, language }) =>
     [slug, language]
   );
 
+export const listAdmin = ({ status, type, language, search, limit, offset }) =>
+  run(
+    "any",
+    `SELECT ${contentCardColumns}, ${translationColumns}, ${locationFields}, count(*) OVER()::int AS total
+     FROM content.content_items ci
+     JOIN content.content_translations ct ON ct.content_id = ci.id AND ct.language_code = $1
+     LEFT JOIN geo.locations loc ON loc.id = ci.location_id
+     WHERE ci.deleted_at IS NULL
+       AND ($2::varchar IS NULL OR ci.status = $2)
+       AND ($3::varchar IS NULL OR ci.type = $3)
+       AND ($4::varchar IS NULL OR to_tsvector('simple', ct.title || ' ' || coalesce(ct.summary, '') || ' ' || coalesce(ct.body, '')) @@ plainto_tsquery('simple', $4))
+     ORDER BY ci.updated_at DESC NULLS LAST, ci.created_at DESC
+     LIMIT $5 OFFSET $6`,
+    [language, status, type, search, limit, offset]
+  );
+
 export const findContentById = id =>
   run(
     "oneOrNone",
