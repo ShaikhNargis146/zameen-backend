@@ -862,6 +862,7 @@ Dev 1 owns database design/migrations, auth/users, locations, property/land/list
 | locationIds | uuid[] | No | Valid locations | Locations. |
 | propertyTypeIds | uuid[] | No | Valid master IDs | Land types. |
 | transactionTypes | string[] | No | SALE/LEASE | Transaction filter. |
+| search | string\|null | No | Max 100 chars, valid regex | Case-insensitive regex matched against title, price (as text), and property type name. |
 | minPriceMinor | integer\|null | No | >=0 | Minimum price. |
 | maxPriceMinor | integer\|null | No | >= min | Maximum price. |
 | minArea | number\|null | No | >=0 | Minimum area in selected input unit. |
