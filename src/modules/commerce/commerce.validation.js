@@ -15,6 +15,8 @@ const orderStatuses = new Set([
 const providers = new Set(["RAZORPAY"]);
 const currencies = new Set(["INR"]);
 const maxOrderItems = 20;
+const targetTypes = new Set(["LISTING", "SERVICE_REQUEST"]);
+const billingModes = new Set(["ONE_TIME", "RECURRING"]);
 const e164Pattern = /^\+[1-9]\d{7,14}$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const serviceTypes = new Set([
@@ -125,19 +127,6 @@ const optionalObject = (value, field) => {
 const optionalBoolean = (value, fallback) =>
   value === undefined || value === null ? fallback : Boolean(value);
 
-const optionalUrl = (value, field) => {
-  if (value === undefined || value === null || value === "") return null;
-  const text = String(value).trim();
-  try {
-    // eslint-disable-next-line no-new
-    new URL(text);
-  } catch {
-    const message = `${field} must be a valid URL.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
-  }
-  return text;
-};
-
 export const planAudience = query =>
   optionalEnum(query.audience, planTypes, "AUDIENCE", "FREE, PREMIUM, or BROKER");
 
@@ -146,22 +135,38 @@ export const createOrder = body => {
     const message = `items must contain between 1 and ${maxOrderItems} entries.`;
     throw new HttpError(400, "INVALID_ITEMS", message, [{ field: "items", message }]);
   }
-  const items = body.items.map((item, index) => ({
-    productId: uuid(item?.productId, `items[${index}].productId`),
-    quantity:
-      optionalPositiveInteger(
-        item?.quantity,
-        `ITEMS_${index}_QUANTITY`,
-        `items[${index}].quantity`
-      ) ?? 1,
-    targetType: optionalString(
+  const items = body.items.map((item, index) => {
+    const targetType = optionalEnum(
       item?.targetType,
-      50,
+      targetTypes,
       `ITEMS_${index}_TARGET_TYPE`,
-      `items[${index}].targetType`
-    ),
-    targetId: optionalUuid(item?.targetId, `items[${index}].targetId`)
-  }));
+      "LISTING or SERVICE_REQUEST"
+    );
+    const targetId = optionalUuid(item?.targetId, `items[${index}].targetId`);
+    if (targetType && !targetId) {
+      const message = `items[${index}].targetId is required when targetType is set.`;
+      throw new HttpError(400, "TARGET_ID_REQUIRED", message, [
+        { field: `items[${index}].targetId`, message }
+      ]);
+    }
+    if (targetId && !targetType) {
+      const message = `items[${index}].targetType is required when targetId is set.`;
+      throw new HttpError(400, "TARGET_TYPE_REQUIRED", message, [
+        { field: `items[${index}].targetType`, message }
+      ]);
+    }
+    return {
+      productId: uuid(item?.productId, `items[${index}].productId`),
+      quantity:
+        optionalPositiveInteger(
+          item?.quantity,
+          `ITEMS_${index}_QUANTITY`,
+          `items[${index}].quantity`
+        ) ?? 1,
+      targetType,
+      targetId
+    };
+  });
 
   const couponCode = optionalString(body.couponCode, 50, "COUPON_CODE");
   if (couponCode)
@@ -183,15 +188,27 @@ export const orderListQuery = query => ({
 export const createPayment = body => ({
   provider: body?.provider
     ? requiredEnum(body.provider, providers, "PROVIDER", "RAZORPAY")
-    : "RAZORPAY",
-  returnUrl: optionalUrl(body?.returnUrl, "RETURN_URL")
+    : "RAZORPAY"
 });
 
-export const verifyPayment = body => ({
-  paymentId: uuid(body.paymentId, "paymentId"),
-  providerPaymentId: requiredString(body.providerPaymentId, 1, 255, "PROVIDER_PAYMENT_ID"),
-  providerOrderId: requiredString(body.providerOrderId, 1, 255, "PROVIDER_ORDER_ID"),
-  signature: requiredString(body.signature, 1, 512, "SIGNATURE")
+// Query params Razorpay appends when redirecting the customer's browser back
+// to our Payment Link callback URL. There is no Authorization header on this
+// request, and the handler using this must never throw into a JSON error
+// response — it always redirects, even on garbage input — so unlike the rest
+// of this file, this reads values defensively (a plain string-or-null cast)
+// instead of throwing on anything unexpected; an invalid/oversized value
+// simply fails the signature check downstream instead of blowing up here.
+const safeQueryString = (value, max) => {
+  if (typeof value !== "string" || !value) return null;
+  return value.length > max ? null : value;
+};
+
+export const paymentCallbackQuery = query => ({
+  paymentId: safeQueryString(query?.razorpay_payment_id, 255),
+  paymentLinkId: safeQueryString(query?.razorpay_payment_link_id, 255),
+  referenceId: safeQueryString(query?.razorpay_payment_link_reference_id, 255),
+  status: safeQueryString(query?.razorpay_payment_link_status, 50),
+  signature: safeQueryString(query?.razorpay_signature, 512)
 });
 
 const optionalStrictBoolean = (value, field) => {
@@ -221,7 +238,10 @@ export const createPlan = body => ({
   featuredDays: optionalNonNegativeInteger(body.featuredDays, "FEATURED_DAYS"),
   verificationIncluded: optionalBoolean(body.verificationIncluded, false),
   features: optionalObject(body.features, "FEATURES") || {},
-  isActive: optionalBoolean(body.isActive, true)
+  isActive: optionalBoolean(body.isActive, true),
+  billingMode: body.billingMode
+    ? requiredEnum(body.billingMode, billingModes, "BILLING_MODE", "ONE_TIME or RECURRING")
+    : "ONE_TIME"
 });
 
 export const updatePlan = body => {
@@ -247,6 +267,13 @@ export const updatePlan = body => {
   if (Object.hasOwn(body, "features"))
     changes.features = optionalObject(body.features, "FEATURES") || {};
   if (Object.hasOwn(body, "isActive")) changes.isActive = Boolean(body.isActive);
+  if (Object.hasOwn(body, "billingMode"))
+    changes.billingMode = requiredEnum(
+      body.billingMode,
+      billingModes,
+      "BILLING_MODE",
+      "ONE_TIME or RECURRING"
+    );
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;

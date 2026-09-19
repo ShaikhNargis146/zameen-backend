@@ -42,14 +42,17 @@ export const createPayment = async (req, res) =>
     })
   );
 
-export const verifyPayment = async (req, res) =>
-  ok(
-    res,
-    await service.verifyPayment({
-      actorId: req.actor.id,
-      input: validation.verifyPayment(req.body || {})
-    })
-  );
+// Razorpay redirects the customer's browser here after a Payment Link
+// attempt (Section 10 of docs/razorpay-integration-plan.md). There is no
+// Authorization header and nothing here should ever render JSON — the
+// service always resolves to a redirect target, even on an invalid/missing
+// signature, so this handler never throws into the JSON error middleware.
+export const paymentCallback = async (req, res) => {
+  const { redirectUrl } = await service.paymentCallback({
+    query: validation.paymentCallbackQuery(req.query || {})
+  });
+  res.redirect(302, redirectUrl);
+};
 
 export const webhook = async (req, res) =>
   ok(
