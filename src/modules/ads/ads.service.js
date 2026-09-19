@@ -1,5 +1,5 @@
 import { HttpError } from "../../shared/http.js";
-import { paginationMeta, parsePagination } from "../../shared/pagination.js";
+import { paginationMeta, parsePagination, splitCountedRows } from "../../shared/pagination.js";
 import {
   belongsToAd,
   createAdStorageKey,
@@ -35,8 +35,8 @@ const notFound = () => new HttpError(404, "AD_NOT_FOUND", "Ad was not found.");
 
 export const adminList = async ({ filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const rows = await repository.listAdmin({ ...filters, limit, offset });
-  const total = rows[0]?.total || 0;
+  const counted = await repository.listAdmin({ ...filters, limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
   return { data: await Promise.all(rows.map(toAdAdmin)), meta: paginationMeta({ page, limit, total }) };
 };
 

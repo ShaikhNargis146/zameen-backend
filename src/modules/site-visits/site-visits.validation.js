@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -12,8 +13,6 @@ const siteVisitStatuses = new Set([
 ]);
 const completeEnquiryStatuses = new Set(["INTERESTED", "CLOSED", "LOST"]);
 
-const toField = code =>
-  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();

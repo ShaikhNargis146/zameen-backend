@@ -97,13 +97,22 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
 
   assert.deepEqual([...signatures].sort(), expected.sort());
   assert.equal(collection.auth?.bearer?.[0]?.value, "{{adminAccessToken}}");
+
+  // Only the pre-login Auth-folder requests may opt out of the bearer token: they run before
+  // an admin session exists, so there's nothing to attach yet. Every other request — including
+  // any future admin endpoint — must inherit or explicitly carry the shared adminAccessToken.
+  const preLoginSignatures = new Set([
+    "POST {{baseUrl}}/auth/otp/request",
+    "POST {{baseUrl}}/auth/otp/verify",
+    "POST {{baseUrl}}/auth/refresh"
+  ]);
   assert.equal(
-    flattenRequests(collection.item).every(
-      (request) =>
-        !request.auth ||
-        request.auth?.type === "noauth" ||
-        request.auth?.bearer?.[0]?.value === "{{adminAccessToken}}"
-    ),
+    flattenRequests(collection.item).every((request) => {
+      if (!request.auth) return true;
+      if (request.auth.type === "noauth")
+        return preLoginSignatures.has(requestSignature(request));
+      return request.auth.bearer?.[0]?.value === "{{adminAccessToken}}";
+    }),
     true
   );
 });

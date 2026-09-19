@@ -1,5 +1,5 @@
 import { HttpError } from "../../shared/http.js";
-import { paginationMeta, parsePagination } from "../../shared/pagination.js";
+import { paginationMeta, parsePagination, splitCountedRows } from "../../shared/pagination.js";
 import {
   belongsToContent,
   createContentStorageKey,
@@ -81,30 +81,35 @@ const adminContentDetail = async contentId => {
   if (!item) throw new HttpError(404, "CONTENT_NOT_FOUND", "Content was not found.");
   const translations = await repository.translationsForContent(contentId);
   const primary = pickPrimaryTranslation(translations);
-  const detail = await toContentDetail(
-    {
-      ...item,
-      slug: primary?.slug ?? null,
-      title: primary?.title ?? null,
-      summary: primary?.summary ?? null,
-      body: primary?.body ?? null
-    },
-    { availableLanguages: translations.map(t => t.languageCode), includeStatus: true }
-  );
-  return { ...detail, translations };
+  return {
+    detail: await toContentDetail(
+      {
+        ...item,
+        slug: primary?.slug ?? null,
+        title: primary?.title ?? null,
+        summary: primary?.summary ?? null,
+        body: primary?.body ?? null
+      },
+      { availableLanguages: translations.map(t => t.languageCode), includeStatus: true }
+    ),
+    translations
+  };
 };
 
 export const listContentAdmin = async ({ filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const rows = await repository.listAdmin({ ...filters, limit, offset });
-  const total = rows[0]?.total || 0;
+  const counted = await repository.listAdmin({ ...filters, limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
   return {
     data: await Promise.all(rows.map(toContentAdminCard)),
     meta: paginationMeta({ page, limit, total })
   };
 };
 
-export const getContentAdmin = adminContentDetail;
+export const getContentAdmin = async contentId => {
+  const { detail, translations } = await adminContentDetail(contentId);
+  return { ...detail, translations };
+};
 
 export const createMediaUpload = input =>
   signedWriteUrl({
@@ -129,7 +134,7 @@ export const createContent = async ({ actorId, input }) => {
   } catch (error) {
     mapReferenceError(error);
   }
-  return adminContentDetail(contentId);
+  return (await adminContentDetail(contentId)).detail;
 };
 
 export const updateContent = async ({ contentId, changes }) => {
@@ -140,7 +145,7 @@ export const updateContent = async ({ contentId, changes }) => {
   } catch (error) {
     mapReferenceError(error);
   }
-  return adminContentDetail(contentId);
+  return (await adminContentDetail(contentId)).detail;
 };
 
 export const removeContent = async contentId => {
@@ -175,7 +180,7 @@ export const transitionContent = async ({ contentId, action }) => {
       "CONTENT_TRANSITION_CONFLICT",
       "Content changed before this transition could be applied."
     );
-  return adminContentDetail(contentId);
+  return (await adminContentDetail(contentId)).detail;
 };
 
 const toSeries = row => ({

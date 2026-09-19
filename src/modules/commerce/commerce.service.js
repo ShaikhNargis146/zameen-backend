@@ -4,6 +4,7 @@ import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { hmacSha256Hex, randomToken, safeEqualHex, sha256 } from "../../utils/crypto.js";
 import {
+  belongsToServiceReport,
   belongsToServiceRequest,
   createServiceReportStorageKey,
   createServiceRequestStorageKey,
@@ -65,8 +66,8 @@ export const getPlan = async planId => {
 
 export const adminListPlans = async ({ filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const rows = await repository.listPlansAdmin({ ...filters, limit, offset });
-  const total = rows[0]?.total || 0;
+  const counted = await repository.listPlansAdmin({ ...filters, limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
   return { data: rows.map(toPlanAdmin), meta: paginationMeta({ page, limit, total }) };
 };
 
@@ -545,6 +546,12 @@ export const submitServiceReport = async ({ requestId, input }) => {
       409,
       "INVALID_TRANSITION",
       "Service request cannot be marked completed from its current state."
+    );
+  if (!belongsToServiceReport({ requestId, storageKey: input.storageKey }))
+    throw new HttpError(
+      400,
+      "INVALID_STORAGE_KEY",
+      "storageKey does not belong to this service request's report upload."
     );
   const result = await repository.setServiceRequestReport({
     id: requestId,

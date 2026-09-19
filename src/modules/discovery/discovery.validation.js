@@ -65,14 +65,15 @@ const optionalRegexSearch = (value, field) => {
   const text = String(value).trim();
   if (!text) return null;
   if (text.length > 100)
-    invalid("VALIDATION_ERROR", `${field} must be at most 100 characters.`);
+    invalid("VALIDATION_ERROR", `${field} must be at most 100 characters.`, field);
   try {
     // eslint-disable-next-line no-new
     new RegExp(text);
   } catch {
     invalid(
       "VALIDATION_ERROR",
-      `${field} must be a valid regular expression.`
+      `${field} must be a valid regular expression.`,
+      field
     );
   }
   return text;

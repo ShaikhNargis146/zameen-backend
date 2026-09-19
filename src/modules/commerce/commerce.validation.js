@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const planTypes = new Set(["FREE", "PREMIUM", "BROKER"]);
@@ -32,8 +33,6 @@ const serviceRequestStatuses = new Set([
   "CANCELLED"
 ]);
 const maxFileSizeBytes = 50 * 1024 * 1024;
-const toField = code =>
-  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
@@ -47,12 +46,12 @@ export const uuid = (value, field) => {
 const optionalUuid = (value, field) =>
   value === undefined || value === null || value === "" ? null : uuid(value, field);
 
-const optionalString = (value, max, field) => {
+const optionalString = (value, max, field, detailsField = toField(field)) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
   if (text.length > max) {
     const message = `${field} must be at most ${max} characters.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
   }
   return text;
 };
@@ -94,12 +93,12 @@ const requiredNonNegativeInteger = (value, field) => {
   return num;
 };
 
-const optionalPositiveInteger = (value, field) => {
+const optionalPositiveInteger = (value, field, detailsField = toField(field)) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
   if (!Number.isInteger(num) || num <= 0) {
     const message = `${field} must be a positive whole number.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
   }
   return num;
 };
@@ -149,8 +148,18 @@ export const createOrder = body => {
   }
   const items = body.items.map((item, index) => ({
     productId: uuid(item?.productId, `items[${index}].productId`),
-    quantity: optionalPositiveInteger(item?.quantity, `ITEMS_${index}_QUANTITY`) ?? 1,
-    targetType: optionalString(item?.targetType, 50, `ITEMS_${index}_TARGET_TYPE`),
+    quantity:
+      optionalPositiveInteger(
+        item?.quantity,
+        `ITEMS_${index}_QUANTITY`,
+        `items[${index}].quantity`
+      ) ?? 1,
+    targetType: optionalString(
+      item?.targetType,
+      50,
+      `ITEMS_${index}_TARGET_TYPE`,
+      `items[${index}].targetType`
+    ),
     targetId: optionalUuid(item?.targetId, `items[${index}].targetId`)
   }));
 
@@ -185,11 +194,18 @@ export const verifyPayment = body => ({
   signature: requiredString(body.signature, 1, 512, "SIGNATURE")
 });
 
+const optionalStrictBoolean = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1"].includes(text)) return true;
+  if (["false", "0"].includes(text)) return false;
+  const message = `${field} must be true or false.`;
+  throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+};
+
 export const adminPlanListQuery = query => ({
   planType: optionalEnum(query.planType, planTypes, "PLAN_TYPE", "FREE, PREMIUM, or BROKER"),
-  isActive: query.isActive === undefined || query.isActive === null || query.isActive === ""
-    ? null
-    : query.isActive === "true" || query.isActive === true,
+  isActive: optionalStrictBoolean(query.isActive, "IS_ACTIVE"),
   search: optionalString(query.search, 200, "SEARCH")
 });
 

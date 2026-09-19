@@ -181,7 +181,15 @@ export const propertyLocation = body => {
     longitude < -180 ||
     longitude > 180
   )
-    throw new HttpError(400, "INVALID_COORDINATES", "latitude and longitude are required numeric values.");
+    throw new HttpError(
+      400,
+      "INVALID_COORDINATES",
+      "latitude and longitude are required numeric values.",
+      [
+        { field: "latitude", message: "latitude must be a number between -90 and 90." },
+        { field: "longitude", message: "longitude must be a number between -180 and 180." }
+      ]
+    );
   const pincode = body.pincode == null ? null : String(body.pincode).trim();
   if (pincode && !/^\d{6}$/.test(pincode))
     throw new HttpError(400, "INVALID_PINCODE", "pincode must contain 6 digits.", [
@@ -305,7 +313,19 @@ const fileInput = (body, acceptedMediaTypes = null) => {
     fileSizeBytes <= 0 ||
     fileSizeBytes > 50 * 1024 * 1024
   )
-    throw new HttpError(400, "VALIDATION_ERROR", "fileName, mimeType, and fileSizeBytes are required.");
+    throw new HttpError(
+      400,
+      "VALIDATION_ERROR",
+      "fileName, mimeType, and fileSizeBytes are required.",
+      [
+        { field: "fileName", message: "fileName is required and must be at most 255 characters." },
+        { field: "mimeType", message: "mimeType is required." },
+        {
+          field: "fileSizeBytes",
+          message: "fileSizeBytes must be a positive whole number up to 50MB."
+        }
+      ]
+    );
   const mediaType = body.mediaType
     ? String(body.mediaType).toUpperCase()
     : null;

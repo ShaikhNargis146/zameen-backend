@@ -1,10 +1,9 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const auctionStatuses = new Set(["UPCOMING", "CLOSED", "CANCELLED"]);
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
-const toField = code =>
-  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();

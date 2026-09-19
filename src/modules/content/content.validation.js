@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const contentTypes = new Set([
@@ -20,8 +21,6 @@ const metrics = new Set([
 const minYear = 1900;
 const maxYear = 2100;
 const maxFileSizeBytes = 50 * 1024 * 1024;
-const toField = code =>
-  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
@@ -34,11 +33,11 @@ export const uuid = (value, field) => {
 const optionalUuid = (value, field) =>
   value === undefined || value === null || value === "" ? null : uuid(value, field);
 
-const requiredString = (value, min, max, field) => {
+const requiredString = (value, min, max, field, detailsField = toField(field)) => {
   const text = String(value ?? "").trim();
   if (text.length < min || text.length > max) {
     const message = `${field} must be between ${min} and ${max} characters.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
   }
   return text;
 };
@@ -55,11 +54,11 @@ const optionalText = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   return String(value);
 };
-const requiredText = (value, field) => {
+const requiredText = (value, field, detailsField = toField(field)) => {
   const text = String(value ?? "");
   if (!text.trim().length) {
     const message = `${field} is required.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
   }
   return text;
 };
@@ -100,6 +99,11 @@ export const language = value => {
 };
 export const optionalLanguage = value =>
   value === undefined || value === null || value === "" ? "en" : language(value);
+// Unlike optionalLanguage (used by the public single-language content read, which needs a
+// concrete language to resolve), the admin list has no default: omitting it must mean "any
+// language", not silently "en", so items authored only in another language stay visible.
+const optionalAdminLanguage = value =>
+  value === undefined || value === null || value === "" ? null : language(value);
 
 const requiredYear = (value, field) => {
   const num = Number(value);
@@ -132,10 +136,10 @@ const periodDate = value => {
 
 const translationInput = (entry, index) => ({
   language: language(entry?.language),
-  slug: requiredString(entry?.slug, 1, 255, `TRANSLATIONS_${index}_SLUG`),
-  title: requiredString(entry?.title, 1, 500, `TRANSLATIONS_${index}_TITLE`),
+  slug: requiredString(entry?.slug, 1, 255, `TRANSLATIONS_${index}_SLUG`, `translations[${index}].slug`),
+  title: requiredString(entry?.title, 1, 500, `TRANSLATIONS_${index}_TITLE`, `translations[${index}].title`),
   summary: optionalText(entry?.summary, `TRANSLATIONS_${index}_SUMMARY`),
-  body: requiredText(entry?.body, `TRANSLATIONS_${index}_BODY`)
+  body: requiredText(entry?.body, `TRANSLATIONS_${index}_BODY`, `translations[${index}].body`)
 });
 
 export const contentListQuery = query => ({
@@ -170,7 +174,7 @@ export const adminContentListQuery = query => ({
   filters: {
     status: optionalEnum(query.status, contentStatuses, "STATUS", "DRAFT, PUBLISHED, or ARCHIVED"),
     type: optionalEnum(query.type, contentTypes, "TYPE", "a valid ContentType"),
-    language: optionalLanguage(query.language),
+    language: optionalAdminLanguage(query.language),
     search: optionalString(query.search, 200, "SEARCH")
   },
   query

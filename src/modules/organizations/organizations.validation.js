@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const orgTypes = new Set(["BROKERAGE", "DEVELOPER", "CORPORATE", "AGENCY"]);
 const orgStatuses = new Set(["PENDING", "ACTIVE", "SUSPENDED"]);
@@ -8,8 +9,6 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const trimmed = value => String(value ?? "").trim();
-const toField = code =>
-  /^[A-Z0-9_]+$/.test(code) ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()) : code;
 
 const optionalPhone = value => {
   if (value === undefined || value === null || value === "") return null;

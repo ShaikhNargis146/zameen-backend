@@ -38,12 +38,20 @@ export const findPublishedBySlug = ({ slug, language }) =>
     [slug, language]
   );
 
+// language is optional here (unlike the public listPublished, which always resolves one):
+// when omitted, pick each item's "en" translation if it has one, else its alphabetically
+// first, so items authored only in a non-English language still appear in the admin list.
 export const listAdmin = ({ status, type, language, search, limit, offset }) =>
   run(
     "any",
     `SELECT ${contentCardColumns}, ${translationColumns}, ${locationFields}, count(*) OVER()::int AS total
      FROM content.content_items ci
-     JOIN content.content_translations ct ON ct.content_id = ci.id AND ct.language_code = $1
+     JOIN LATERAL (
+       SELECT * FROM content.content_translations t
+       WHERE t.content_id = ci.id AND ($1::varchar IS NULL OR t.language_code = $1)
+       ORDER BY (t.language_code = 'en') DESC, t.language_code
+       LIMIT 1
+     ) ct ON true
      LEFT JOIN geo.locations loc ON loc.id = ci.location_id
      WHERE ci.deleted_at IS NULL
        AND ($2::varchar IS NULL OR ci.status = $2)
