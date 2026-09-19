@@ -17,19 +17,19 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const optionalUuid = (value, field) => {
   if (!value) return null;
   const id = String(value).trim();
-  if (!uuidPattern.test(id))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(id)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field, message }]);
+  }
   return id;
 };
 const text = (value, field, min, max, required = false) => {
   const result = String(value || "").trim();
   if (!result && !required) return null;
-  if (result.length < min || result.length > max)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must contain ${min} to ${max} characters.`
-    );
+  if (result.length < min || result.length > max) {
+    const message = `${field} must contain ${min} to ${max} characters.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return result;
 };
 const transactionType = value => {
@@ -37,7 +37,9 @@ const transactionType = value => {
     .trim()
     .toUpperCase();
   if (!transactionTypes.has(result))
-    throw new HttpError(400, "VALIDATION_ERROR", "transactionType is invalid.");
+    throw new HttpError(400, "VALIDATION_ERROR", "transactionType is invalid.", [
+      { field: "transactionType", message: "transactionType is invalid." }
+    ]);
   return result;
 };
 const language = value => {
@@ -45,28 +47,25 @@ const language = value => {
     .trim()
     .toLowerCase();
   if (!languages.has(result))
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "canonicalLanguage is unsupported."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "canonicalLanguage is unsupported.", [
+      { field: "canonicalLanguage", message: "canonicalLanguage is unsupported." }
+    ]);
   return result;
 };
 const price = value => {
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result <= 0)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "priceAmountMinor must be a positive integer."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "priceAmountMinor must be a positive integer.", [
+      { field: "priceAmountMinor", message: "priceAmountMinor must be a positive integer." }
+    ]);
   return result;
 };
 const boolean = (value, field) => {
   if (typeof value === "boolean") return value;
   if (["true", "1"].includes(String(value).toLowerCase())) return true;
   if (["false", "0"].includes(String(value).toLowerCase())) return false;
-  throw new HttpError(400, "VALIDATION_ERROR", `${field} must be a boolean.`);
+  const message = `${field} must be a boolean.`;
+  throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
 };
 export const create = body => {
   return {
@@ -80,11 +79,9 @@ export const create = body => {
       String(body.currency || "INR").toUpperCase() === "INR"
         ? "INR"
         : (() => {
-            throw new HttpError(
-              400,
-              "VALIDATION_ERROR",
-              "currency must be INR in this release."
-            );
+            throw new HttpError(400, "VALIDATION_ERROR", "currency must be INR in this release.", [
+              { field: "currency", message: "currency must be INR in this release." }
+            ]);
           })(),
     isNegotiable:
       body.isNegotiable === undefined
@@ -116,11 +113,9 @@ export const update = body => {
     else if (input === "priceAmountMinor") changes[column] = price(body[input]);
     else if (input === "currency") {
       if (String(body[input]).toUpperCase() !== "INR")
-        throw new HttpError(
-          400,
-          "VALIDATION_ERROR",
-          "currency must be INR in this release."
-        );
+        throw new HttpError(400, "VALIDATION_ERROR", "currency must be INR in this release.", [
+          { field: "currency", message: "currency must be INR in this release." }
+        ]);
       changes[column] = "INR";
     } else changes[column] = boolean(body[input], "isNegotiable");
   }
@@ -134,13 +129,13 @@ export const sellerList = query => {
     ? String(query.reviewStatus).toUpperCase()
     : null;
   if (status && !listingStatuses.has(status))
-    throw new HttpError(400, "VALIDATION_ERROR", "Invalid listing status.");
+    throw new HttpError(400, "VALIDATION_ERROR", "Invalid listing status.", [
+      { field: "status", message: "Invalid listing status." }
+    ]);
   if (reviewStatus && !reviewStatuses.has(reviewStatus))
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "Invalid listing review status."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "Invalid listing review status.", [
+      { field: "reviewStatus", message: "Invalid listing review status." }
+    ]);
   const page = Math.min(Math.max(Number(query.page || 1), 1), 10000);
   const limit = Math.min(Math.max(Number(query.limit || 20), 1), 100);
   return {
@@ -161,11 +156,9 @@ export const reviewStatus = query =>
     ? reviewStatuses.has(String(query.reviewStatus).toUpperCase())
       ? String(query.reviewStatus).toUpperCase()
       : (() => {
-          throw new HttpError(
-            400,
-            "VALIDATION_ERROR",
-            "Invalid listing review status."
-          );
+          throw new HttpError(400, "VALIDATION_ERROR", "Invalid listing review status.", [
+            { field: "reviewStatus", message: "Invalid listing review status." }
+          ]);
         })()
     : null;
 export const reason = body => {
@@ -179,11 +172,9 @@ export const approval = body => {
     expiresAt &&
     (!Number.isFinite(expiresAt.valueOf()) || expiresAt <= new Date())
   )
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "expiresAt must be a future ISO date."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "expiresAt must be a future ISO date.", [
+      { field: "expiresAt", message: "expiresAt must be a future ISO date." }
+    ]);
   return {
     expiresAt,
     note:
@@ -196,11 +187,9 @@ export const adminList = query => ({
     ? (() => {
         const value = String(query.status).toUpperCase();
         if (!listingStatuses.has(value))
-          throw new HttpError(
-            400,
-            "VALIDATION_ERROR",
-            "Invalid listing status."
-          );
+          throw new HttpError(400, "VALIDATION_ERROR", "Invalid listing status.", [
+            { field: "status", message: "Invalid listing status." }
+          ]);
         return value;
       })()
     : null,

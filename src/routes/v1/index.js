@@ -30,6 +30,7 @@ import auctionsAdminRoutes from "../../modules/auctions/auctions.admin.routes.js
 import adsRoutes from "../../modules/ads/ads.routes.js";
 import adsAdminRoutes from "../../modules/ads/ads.admin.routes.js";
 import notificationsRoutes from "../../modules/notifications/notifications.routes.js";
+import adminDashboardRoutes from "../../modules/admin-dashboard/admin-dashboard.routes.js";
 
 const router = express.Router();
 
@@ -54,6 +55,7 @@ router.use("/admin", channelPartnersAdminRoutes);
 router.use("/admin", investmentOpportunitiesAdminRoutes);
 router.use("/admin", auctionsAdminRoutes);
 router.use("/admin", adsAdminRoutes);
+router.use("/admin", adminDashboardRoutes);
 router.use("/", propertyRoutes);
 router.use("/", listingRoutesV1);
 router.use("/", discoveryRoutes);

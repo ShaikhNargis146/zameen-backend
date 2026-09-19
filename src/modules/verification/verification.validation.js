@@ -13,12 +13,10 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const optionalText = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must be at most ${max} characters.`
-    );
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return text;
 };
 const enumValue = (value, values, field, required = false) => {
@@ -26,8 +24,10 @@ const enumValue = (value, values, field, required = false) => {
     .trim()
     .toUpperCase();
   if (!item && !required) return null;
-  if (!values.has(item))
-    throw new HttpError(400, "VALIDATION_ERROR", `${field} is invalid.`);
+  if (!values.has(item)) {
+    const message = `${field} is invalid.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return item;
 };
 
@@ -40,12 +40,10 @@ export const listQuery = query => ({
 });
 export const id = value => {
   const text = String(value || "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(
-      400,
-      "INVALID_ID",
-      "verificationId must be a valid UUID."
-    );
+  if (!uuidPattern.test(text)) {
+    const message = "verificationId must be a valid UUID.";
+    throw new HttpError(400, "INVALID_ID", message, [{ field: "verificationId", message }]);
+  }
   return text;
 };
 export const update = body => ({

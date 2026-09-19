@@ -13,8 +13,8 @@ const sortValues = new Set([
   "AREA_DESC"
 ]);
 
-const invalid = (code, message) => {
-  throw new HttpError(400, code, message);
+const invalid = (code, message, field) => {
+  throw new HttpError(400, code, message, field !== undefined ? [{ field, message }] : undefined);
 };
 const optionalNumber = (value, field, { min = 0, integer = false } = {}) => {
   if (value === undefined || value === null || value === "") return null;
@@ -24,7 +24,7 @@ const optionalNumber = (value, field, { min = 0, integer = false } = {}) => {
     number < min ||
     (integer && !Number.isInteger(number))
   )
-    invalid("VALIDATION_ERROR", `${field} is invalid.`);
+    invalid("VALIDATION_ERROR", `${field} is invalid.`, field);
   return number;
 };
 const optionalBoolean = (value, field) => {
@@ -32,21 +32,21 @@ const optionalBoolean = (value, field) => {
   if (typeof value === "boolean") return value;
   if (["true", "1"].includes(String(value).toLowerCase())) return true;
   if (["false", "0"].includes(String(value).toLowerCase())) return false;
-  invalid("VALIDATION_ERROR", `${field} must be a boolean.`);
+  invalid("VALIDATION_ERROR", `${field} must be a boolean.`, field);
 };
 const uuidList = (value, field) => {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value))
-    invalid("VALIDATION_ERROR", `${field} must be an array.`);
+    invalid("VALIDATION_ERROR", `${field} must be an array.`, field);
   const ids = [...new Set(value.map(item => String(item).trim()))];
   if (ids.some(id => !uuidPattern.test(id)))
-    invalid("INVALID_ID", `${field} must contain UUIDs only.`);
+    invalid("INVALID_ID", `${field} must contain UUIDs only.`, field);
   return ids;
 };
 const enumList = (value, values, field) => {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value))
-    invalid("VALIDATION_ERROR", `${field} must be an array.`);
+    invalid("VALIDATION_ERROR", `${field} must be an array.`, field);
   const items = [
     ...new Set(
       value.map(item =>
@@ -57,7 +57,7 @@ const enumList = (value, values, field) => {
     )
   ];
   if (items.some(item => !values.has(item)))
-    invalid("VALIDATION_ERROR", `${field} contains an invalid value.`);
+    invalid("VALIDATION_ERROR", `${field} contains an invalid value.`, field);
   return items;
 };
 const optionalRegexSearch = (value, field) => {
@@ -65,14 +65,15 @@ const optionalRegexSearch = (value, field) => {
   const text = String(value).trim();
   if (!text) return null;
   if (text.length > 100)
-    invalid("VALIDATION_ERROR", `${field} must be at most 100 characters.`);
+    invalid("VALIDATION_ERROR", `${field} must be at most 100 characters.`, field);
   try {
     // eslint-disable-next-line no-new
     new RegExp(text);
   } catch {
     invalid(
       "VALIDATION_ERROR",
-      `${field} must be a valid regular expression.`
+      `${field} must be a valid regular expression.`,
+      field
     );
   }
   return text;
@@ -94,12 +95,14 @@ export const search = (body = {}) => {
   )
     invalid(
       "VALIDATION_ERROR",
-      "maxPriceMinor must be greater than or equal to minPriceMinor."
+      "maxPriceMinor must be greater than or equal to minPriceMinor.",
+      "maxPriceMinor"
     );
   if (maxArea !== null && minArea !== null && maxArea < minArea)
     invalid(
       "VALIDATION_ERROR",
-      "maxArea must be greater than or equal to minArea."
+      "maxArea must be greater than or equal to minArea.",
+      "maxArea"
     );
   const areaUnitId = body.areaUnitId
     ? uuidList([body.areaUnitId], "areaUnitId")[0]
@@ -107,7 +110,8 @@ export const search = (body = {}) => {
   if ((minArea !== null || maxArea !== null) && !areaUnitId)
     invalid(
       "AREA_UNIT_REQUIRED",
-      "areaUnitId is required with an area filter."
+      "areaUnitId is required with an area filter.",
+      "areaUnitId"
     );
   const page = Math.min(Math.max(Number(body.page || 1), 1), 10000);
   const limit = Math.min(Math.max(Number(body.limit || 20), 1), 100);
@@ -132,7 +136,7 @@ export const search = (body = {}) => {
     sellerType: enumList(body.sellerType, sellerTypes, "sellerType"),
     sort: sortValues.has(String(body.sort || "RELEVANCE").toUpperCase())
       ? String(body.sort || "RELEVANCE").toUpperCase()
-      : invalid("VALIDATION_ERROR", "sort is invalid."),
+      : invalid("VALIDATION_ERROR", "sort is invalid.", "sort"),
     page,
     limit,
     offset: (page - 1) * limit
@@ -142,7 +146,7 @@ export const search = (body = {}) => {
 export const suggestions = query => {
   const q = String(query.q || "").trim();
   if (q.length < 2 || q.length > 100)
-    invalid("VALIDATION_ERROR", "q must contain 2 to 100 characters.");
+    invalid("VALIDATION_ERROR", "q must contain 2 to 100 characters.", "q");
   return { q, limit: Math.min(Math.max(Number(query.limit || 10), 1), 25) };
 };
 
@@ -182,7 +186,8 @@ export const compare = body => {
   if (listingIds.length < 2 || listingIds.length > 4)
     invalid(
       "VALIDATION_ERROR",
-      "listingIds must contain 2 to 4 unique listings."
+      "listingIds must contain 2 to 4 unique listings.",
+      "listingIds"
     );
   return listingIds;
 };

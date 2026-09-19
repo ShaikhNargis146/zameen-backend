@@ -6,12 +6,10 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const nullableText = (value, field, max) => {
   if (value === null || value === undefined || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must be at most ${max} characters.`
-    );
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return text;
 };
 
@@ -22,13 +20,13 @@ export const profileChanges = body => {
       .trim()
       .replace(/\s+/g, " ");
     if (!name)
-      throw new HttpError(400, "INVALID_NAME", "Name cannot be empty.");
+      throw new HttpError(400, "INVALID_NAME", "Name cannot be empty.", [
+        { field: "displayName", message: "Name cannot be empty." }
+      ]);
     if (name.length > 200)
-      throw new HttpError(
-        400,
-        "VALIDATION_ERROR",
-        "displayName must be at most 200 characters."
-      );
+      throw new HttpError(400, "VALIDATION_ERROR", "displayName must be at most 200 characters.", [
+        { field: "displayName", message: "displayName must be at most 200 characters." }
+      ]);
     changes.display_name = name;
   }
   if (Object.hasOwn(body, "firstName"))
@@ -38,17 +36,17 @@ export const profileChanges = body => {
   if (Object.hasOwn(body, "email")) {
     const email = nullableText(body.email, "email", 255);
     if (email && !emailPattern.test(email))
-      throw new HttpError(400, "INVALID_EMAIL", "email must be valid.");
+      throw new HttpError(400, "INVALID_EMAIL", "email must be valid.", [
+        { field: "email", message: "email must be valid." }
+      ]);
     changes.email = email?.toLowerCase() || null;
   }
   if (Object.hasOwn(body, "preferredLanguage")) {
     const language = String(body.preferredLanguage || "").trim();
     if (!languages.has(language))
-      throw new HttpError(
-        400,
-        "INVALID_LANGUAGE",
-        "preferredLanguage must be a language code."
-      );
+      throw new HttpError(400, "INVALID_LANGUAGE", "preferredLanguage must be a language code.", [
+        { field: "preferredLanguage", message: "preferredLanguage must be a language code." }
+      ]);
     changes.preferred_language = language;
   }
   if (!Object.keys(changes).length)
@@ -67,22 +65,18 @@ export const selfRole = body => {
   // left as-is pending that larger piece of work.
   const role = String(body.roleCode || body.role || "").toUpperCase();
   if (!["BUYER", "SELLER", "BROKER", "DEVELOPER", "CORPORATE"].includes(role))
-    throw new HttpError(
-      400,
-      "ROLE_NOT_SELF_ASSIGNABLE",
-      "This role cannot be self-assigned."
-    );
+    throw new HttpError(400, "ROLE_NOT_SELF_ASSIGNABLE", "This role cannot be self-assigned.", [
+      { field: "roleCode", message: "This role cannot be self-assigned." }
+    ]);
   return role;
 };
 
 export const userStatus = body => {
   const status = String(body.status || "").toUpperCase();
   if (!statuses.has(status))
-    throw new HttpError(
-      400,
-      "INVALID_STATUS",
-      "status must be ACTIVE or BLOCKED."
-    );
+    throw new HttpError(400, "INVALID_STATUS", "status must be ACTIVE or BLOCKED.", [
+      { field: "status", message: "status must be ACTIVE or BLOCKED." }
+    ]);
   return { status, reason: nullableText(body.reason, "reason", 500) };
 };
 
@@ -91,11 +85,9 @@ export const roles = body => {
     ? [...new Set(body.roles.map(role => String(role).toUpperCase()))]
     : [];
   if (!result.length)
-    throw new HttpError(
-      400,
-      "ROLES_REQUIRED",
-      "roles must be a non-empty array."
-    );
+    throw new HttpError(400, "ROLES_REQUIRED", "roles must be a non-empty array.", [
+      { field: "roles", message: "roles must be a non-empty array." }
+    ]);
   return {
     roleCodes: result,
     reason: nullableText(body.reason, "reason", 500)
@@ -105,7 +97,9 @@ export const roles = body => {
 export const adminListQuery = query => {
   const status = query.status ? String(query.status).toUpperCase() : null;
   if (status && !statuses.has(status))
-    throw new HttpError(400, "INVALID_STATUS", "Invalid user status.");
+    throw new HttpError(400, "INVALID_STATUS", "Invalid user status.", [
+      { field: "status", message: "Invalid user status." }
+    ]);
   return {
     page: Math.max(Number(query.page || 1), 1),
     limit: Math.min(Math.max(Number(query.limit || 20), 1), 100),

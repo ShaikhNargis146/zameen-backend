@@ -46,46 +46,43 @@ const boolean = (value, field, fallback = null) => {
     .toLowerCase();
   if (["true", "1"].includes(normalized)) return true;
   if (["false", "0"].includes(normalized)) return false;
-  throw new HttpError(400, "VALIDATION_ERROR", `${field} must be a boolean.`);
+  const message = `${field} must be a boolean.`;
+  throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
 };
 const optionalEnum = (value, field, values) => {
   if (value === undefined || value === null || value === "") return null;
   const normalized = String(value)
     .trim()
     .toUpperCase();
-  if (!values.has(normalized))
-    throw new HttpError(400, "VALIDATION_ERROR", `${field} is invalid.`);
+  if (!values.has(normalized)) {
+    const message = `${field} is invalid.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return normalized;
 };
 const nonNegative = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const number = Number(value);
-  if (!Number.isFinite(number) || number < 0)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must be a non-negative number.`
-    );
+  if (!Number.isFinite(number) || number < 0) {
+    const message = `${field} must be a non-negative number.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return number;
 };
 const integerInRange = (value, field, min, max) => {
   const number = Number(value);
-  if (!Number.isInteger(number) || number < min || number > max)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must be an integer from ${min} to ${max}.`
-    );
+  if (!Number.isInteger(number) || number < min || number > max) {
+    const message = `${field} must be an integer from ${min} to ${max}.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return number;
 };
 
 export const createProperty = body => {
   if (!body.propertyTypeId)
-    throw new HttpError(
-      400,
-      "PROPERTY_TYPE_REQUIRED",
-      "propertyTypeId is required."
-    );
+    throw new HttpError(400, "PROPERTY_TYPE_REQUIRED", "propertyTypeId is required.", [
+      { field: "propertyTypeId", message: "propertyTypeId is required." }
+    ]);
   return {
     propertyTypeId: body.propertyTypeId,
     landUseTypeId: body.landUseTypeId || null,
@@ -109,11 +106,9 @@ export const updateProperty = body => {
 export const propertyList = query => {
   const status = query.status ? String(query.status).toUpperCase() : null;
   if (status && !propertyStatuses.has(status))
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "status must be ACTIVE or ARCHIVED."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "status must be ACTIVE or ARCHIVED.", [
+      { field: "status", message: "status must be ACTIVE or ARCHIVED." }
+    ]);
   const page =
     query.page === undefined ? 1 : integerInRange(query.page, "page", 1, 10000);
   const limit =
@@ -122,11 +117,9 @@ export const propertyList = query => {
       : integerInRange(query.limit, "limit", 1, 100);
   const search = String(query.search || "").trim();
   if (search.length > 200)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "search must be at most 200 characters."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "search must be at most 200 characters.", [
+      { field: "search", message: "search must be at most 200 characters." }
+    ]);
   return {
     page,
     limit,
@@ -139,7 +132,9 @@ export const landDetails = body => ({
   areaUnitId:
     body.areaUnitId ||
     (() => {
-      throw new HttpError(400, "AREA_REQUIRED", "areaUnitId is required.");
+      throw new HttpError(400, "AREA_REQUIRED", "areaUnitId is required.", [
+        { field: "areaUnitId", message: "areaUnitId is required." }
+      ]);
     })(),
   lengthValue:
     body.lengthValue == null ? null : positive(body.lengthValue, "lengthValue"),
@@ -169,9 +164,13 @@ export const landDetails = body => ({
 });
 export const propertyLocation = body => {
   if (!body.locationId)
-    throw new HttpError(400, "LOCATION_REQUIRED", "locationId is required.");
+    throw new HttpError(400, "LOCATION_REQUIRED", "locationId is required.", [
+      { field: "locationId", message: "locationId is required." }
+    ]);
   if (!isUuid(body.locationId))
-    throw new HttpError(400, "INVALID_ID", "locationId must be a valid UUID.");
+    throw new HttpError(400, "INVALID_ID", "locationId must be a valid UUID.", [
+      { field: "locationId", message: "locationId must be a valid UUID." }
+    ]);
   const latitude = Number(body.latitude);
   const longitude = Number(body.longitude);
   if (
@@ -185,29 +184,27 @@ export const propertyLocation = body => {
     throw new HttpError(
       400,
       "INVALID_COORDINATES",
-      "latitude and longitude are required numeric values."
+      "latitude and longitude are required numeric values.",
+      [
+        { field: "latitude", message: "latitude must be a number between -90 and 90." },
+        { field: "longitude", message: "longitude must be a number between -180 and 180." }
+      ]
     );
   const pincode = body.pincode == null ? null : String(body.pincode).trim();
   if (pincode && !/^\d{6}$/.test(pincode))
-    throw new HttpError(
-      400,
-      "INVALID_PINCODE",
-      "pincode must contain 6 digits."
-    );
+    throw new HttpError(400, "INVALID_PINCODE", "pincode must contain 6 digits.", [
+      { field: "pincode", message: "pincode must contain 6 digits." }
+    ]);
   const addressLine = body.addressLine ? String(body.addressLine).trim() : null;
   const landmark = body.landmark ? String(body.landmark).trim() : null;
   if (addressLine && addressLine.length > 500)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "addressLine must be at most 500 characters."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "addressLine must be at most 500 characters.", [
+      { field: "addressLine", message: "addressLine must be at most 500 characters." }
+    ]);
   if (landmark && landmark.length > 255)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "landmark must be at most 255 characters."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "landmark must be at most 255 characters.", [
+      { field: "landmark", message: "landmark must be at most 255 characters." }
+    ]);
   return {
     locationId: body.locationId,
     pincode,
@@ -230,11 +227,9 @@ export const propertyLocation = body => {
 };
 export const amenities = body => {
   if (!Array.isArray(body.amenities))
-    throw new HttpError(
-      400,
-      "INVALID_AMENITIES",
-      "amenities must be an array."
-    );
+    throw new HttpError(400, "INVALID_AMENITIES", "amenities must be an array.", [
+      { field: "amenities", message: "amenities must be an array." }
+    ]);
   const result = body.amenities.map(item =>
     typeof item === "string"
       ? { amenityId: item, valueText: null }
@@ -247,20 +242,16 @@ export const amenities = body => {
     result.some(item => !item.amenityId) ||
     new Set(result.map(item => item.amenityId)).size !== result.length
   )
-    throw new HttpError(
-      400,
-      "INVALID_AMENITIES",
-      "Each amenity must be unique and valid."
-    );
+    throw new HttpError(400, "INVALID_AMENITIES", "Each amenity must be unique and valid.", [
+      { field: "amenities", message: "Each amenity must be unique and valid." }
+    ]);
   return result;
 };
 export const identifiers = body => {
   if (!Array.isArray(body.identifiers))
-    throw new HttpError(
-      400,
-      "INVALID_IDENTIFIERS",
-      "identifiers must be an array."
-    );
+    throw new HttpError(400, "INVALID_IDENTIFIERS", "identifiers must be an array.", [
+      { field: "identifiers", message: "identifiers must be an array." }
+    ]);
   const result = body.identifiers.map(item => {
     const type = String(item.type || "").toUpperCase();
     const value = String(item.value || "").trim();
@@ -268,7 +259,13 @@ export const identifiers = body => {
       throw new HttpError(
         400,
         "INVALID_IDENTIFIERS",
-        "Each identifier requires a type and a value of at most 255 characters."
+        "Each identifier requires a type and a value of at most 255 characters.",
+        [
+          {
+            field: "identifiers",
+            message: "Each identifier requires a type and a value of at most 255 characters."
+          }
+        ]
       );
     return { type, value };
   });
@@ -276,38 +273,30 @@ export const identifiers = body => {
     new Set(result.map(item => `${item.type}|${item.value}`)).size !==
     result.length
   )
-    throw new HttpError(
-      400,
-      "INVALID_IDENTIFIERS",
-      "Each identifier type and value combination must be unique."
-    );
+    throw new HttpError(400, "INVALID_IDENTIFIERS", "Each identifier type and value combination must be unique.", [
+      { field: "identifiers", message: "Each identifier type and value combination must be unique." }
+    ]);
   return result;
 };
 export const verificationRequest = body => {
   const note = body.note == null ? null : String(body.note).trim();
   if (note && note.length > 500)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "note must be at most 500 characters."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "note must be at most 500 characters.", [
+      { field: "note", message: "note must be at most 500 characters." }
+    ]);
   if (body.checkTypes == null)
     return { checkTypes: [...verificationTypes], note };
   if (!Array.isArray(body.checkTypes))
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "checkTypes must be an array."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "checkTypes must be an array.", [
+      { field: "checkTypes", message: "checkTypes must be an array." }
+    ]);
   const values = [
     ...new Set(body.checkTypes.map(value => String(value).toUpperCase()))
   ];
   if (!values.length || values.some(value => !verificationTypes.has(value)))
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "Invalid verification check type."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "Invalid verification check type.", [
+      { field: "checkTypes", message: "Invalid verification check type." }
+    ]);
   return { checkTypes: values, note };
 };
 const fileInput = (body, acceptedMediaTypes = null) => {
@@ -327,24 +316,34 @@ const fileInput = (body, acceptedMediaTypes = null) => {
     throw new HttpError(
       400,
       "VALIDATION_ERROR",
-      "fileName, mimeType, and fileSizeBytes are required."
+      "fileName, mimeType, and fileSizeBytes are required.",
+      [
+        { field: "fileName", message: "fileName is required and must be at most 255 characters." },
+        { field: "mimeType", message: "mimeType is required." },
+        {
+          field: "fileSizeBytes",
+          message: "fileSizeBytes must be a positive whole number up to 50MB."
+        }
+      ]
     );
   const mediaType = body.mediaType
     ? String(body.mediaType).toUpperCase()
     : null;
   if (acceptedMediaTypes && !acceptedMediaTypes.has(mediaType))
-    throw new HttpError(400, "VALIDATION_ERROR", "Invalid mediaType.");
+    throw new HttpError(400, "VALIDATION_ERROR", "Invalid mediaType.", [
+      { field: "mediaType", message: "Invalid mediaType." }
+    ]);
   if (!acceptedMediaTypes && mediaType)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "mediaType is only valid for property media."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "mediaType is only valid for property media.", [
+      { field: "mediaType", message: "mediaType is only valid for property media." }
+    ]);
   const allowedMimeTypes = acceptedMediaTypes
     ? mediaMimeTypes.get(mediaType)
     : documentMimeTypes;
   if (!allowedMimeTypes?.has(mimeType))
-    throw new HttpError(400, "VALIDATION_ERROR", "Unsupported mimeType.");
+    throw new HttpError(400, "VALIDATION_ERROR", "Unsupported mimeType.", [
+      { field: "mimeType", message: "Unsupported mimeType." }
+    ]);
   return { fileName, mimeType, fileSizeBytes, mediaType };
 };
 const mediaTypes = new Set(["IMAGE", "VIDEO", "DRONE_VIDEO", "SITE_PLAN"]);
@@ -352,19 +351,21 @@ const maxFilesPerBatch = 20;
 const batchFiles = body => {
   const files = body.files;
   if (!files.length)
-    throw new HttpError(400, "VALIDATION_ERROR", "At least one file is required.");
-  if (files.length > maxFilesPerBatch)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `A maximum of ${maxFilesPerBatch} files can be uploaded at a time.`
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "At least one file is required.", [
+      { field: "files", message: "At least one file is required." }
+    ]);
+  if (files.length > maxFilesPerBatch) {
+    const message = `A maximum of ${maxFilesPerBatch} files can be uploaded at a time.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field: "files", message }]);
+  }
   return files;
 };
 const mediaCompleteInput = body => {
   const input = fileInput(body, mediaTypes);
   if (!body.storageKey)
-    throw new HttpError(400, "VALIDATION_ERROR", "storageKey is required.");
+    throw new HttpError(400, "VALIDATION_ERROR", "storageKey is required.", [
+      { field: "storageKey", message: "storageKey is required." }
+    ]);
   return {
     ...input,
     storageKey: String(body.storageKey),
@@ -390,11 +391,9 @@ export const mediaUpdate = body => {
     changes.caption = body.caption ? String(body.caption).slice(0, 255) : null;
   if (has(body, "sortOrder")) {
     if (!Number.isInteger(body.sortOrder) || body.sortOrder < 0)
-      throw new HttpError(
-        400,
-        "VALIDATION_ERROR",
-        "sortOrder must be a non-negative integer."
-      );
+      throw new HttpError(400, "VALIDATION_ERROR", "sortOrder must be a non-negative integer.", [
+        { field: "sortOrder", message: "sortOrder must be a non-negative integer." }
+      ]);
     changes.sort_order = body.sortOrder;
   }
   if (!Object.keys(changes).length)
@@ -407,11 +406,9 @@ export const mediaOrder = body => {
     !body.mediaIds.length ||
     new Set(body.mediaIds).size !== body.mediaIds.length
   )
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "mediaIds must be a unique non-empty array."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "mediaIds must be a unique non-empty array.", [
+      { field: "mediaIds", message: "mediaIds must be a unique non-empty array." }
+    ]);
   return body.mediaIds;
 };
 export const documentUpload = body => fileInput(body);
@@ -439,11 +436,9 @@ export const documentComplete = body => {
 export const documentAccessGrant = body => {
   const granteeUserId = String(body.granteeUserId || "").trim();
   if (!isUuid(granteeUserId))
-    throw new HttpError(
-      400,
-      "INVALID_ID",
-      "granteeUserId must be a valid UUID."
-    );
+    throw new HttpError(400, "INVALID_ID", "granteeUserId must be a valid UUID.", [
+      { field: "granteeUserId", message: "granteeUserId must be a valid UUID." }
+    ]);
   if (
     body.expiresAt === undefined ||
     body.expiresAt === null ||
@@ -452,10 +447,8 @@ export const documentAccessGrant = body => {
     return { granteeUserId, expiresAt: null };
   const expiresAt = new Date(body.expiresAt);
   if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= new Date())
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "expiresAt must be a future ISO-8601 timestamp."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "expiresAt must be a future ISO-8601 timestamp.", [
+      { field: "expiresAt", message: "expiresAt must be a future ISO-8601 timestamp." }
+    ]);
   return { granteeUserId, expiresAt: expiresAt.toISOString() };
 };

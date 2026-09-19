@@ -7,18 +7,18 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const text = (value, field, min, max, required = false) => {
   const result = String(value || "").trim();
   if (!result && !required) return null;
-  if (result.length < min || result.length > max)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} must contain ${min} to ${max} characters.`
-    );
+  if (result.length < min || result.length > max) {
+    const message = `${field} must contain ${min} to ${max} characters.`;
+    throw new HttpError(400, "VALIDATION_ERROR", message, [{ field, message }]);
+  }
   return result;
 };
 const uuid = (value, field) => {
   const result = String(value || "").trim();
-  if (!uuidPattern.test(result))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(result)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field, message }]);
+  }
   return result;
 };
 const language = value => {
@@ -26,7 +26,9 @@ const language = value => {
     .trim()
     .toLowerCase();
   if (!languages.has(result))
-    throw new HttpError(400, "VALIDATION_ERROR", "language is unsupported.");
+    throw new HttpError(400, "VALIDATION_ERROR", "language is unsupported.", [
+      { field: "language", message: "language is unsupported." }
+    ]);
   return result;
 };
 
@@ -41,14 +43,14 @@ export const conversation = body => {
     .trim()
     .toUpperCase();
   if (!contexts.has(contextType))
-    throw new HttpError(400, "VALIDATION_ERROR", "contextType is invalid.");
+    throw new HttpError(400, "VALIDATION_ERROR", "contextType is invalid.", [
+      { field: "contextType", message: "contextType is invalid." }
+    ]);
   const listingId = body.listingId ? uuid(body.listingId, "listingId") : null;
   if (contextType === "PROPERTY" && !listingId)
-    throw new HttpError(
-      400,
-      "LISTING_REQUIRED",
-      "listingId is required for PROPERTY context."
-    );
+    throw new HttpError(400, "LISTING_REQUIRED", "listingId is required for PROPERTY context.", [
+      { field: "listingId", message: "listingId is required for PROPERTY context." }
+    ]);
   return {
     contextType,
     listingId,
@@ -68,11 +70,9 @@ export const listingGenerate = body => {
       ? []
       : body.highlights;
   if (!Array.isArray(highlights) || highlights.length > 10)
-    throw new HttpError(
-      400,
-      "VALIDATION_ERROR",
-      "highlights must contain at most 10 items."
-    );
+    throw new HttpError(400, "VALIDATION_ERROR", "highlights must contain at most 10 items.", [
+      { field: "highlights", message: "highlights must contain at most 10 items." }
+    ]);
   return {
     propertyId: body.propertyId ? uuid(body.propertyId, "propertyId") : null,
     propertyTypeId: body.propertyTypeId

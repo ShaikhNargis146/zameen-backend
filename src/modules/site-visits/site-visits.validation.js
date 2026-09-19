@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -12,72 +13,89 @@ const siteVisitStatuses = new Set([
 ]);
 const completeEnquiryStatuses = new Set(["INTERESTED", "CLOSED", "LOST"]);
 
+
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalString = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be at most ${max} characters.`
-    );
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalEnum = (value, set, code, label) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
 const requiredEnum = (value, set, code, label) => {
   const text = String(value ?? "").trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
 const requiredDate = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!datePattern.test(text))
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a date in YYYY-MM-DD format.`);
+  if (!datePattern.test(text)) {
+    const message = `${field} must be a date in YYYY-MM-DD format.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   const today = new Date().toISOString().slice(0, 10);
-  if (text < today)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be today or a future date.`);
+  if (text < today) {
+    const message = `${field} must be today or a future date.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalDate = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (!datePattern.test(text))
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a date in YYYY-MM-DD format.`);
+  if (!datePattern.test(text)) {
+    const message = `${field} must be a date in YYYY-MM-DD format.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalVisitorCount = value => {
   if (value === undefined || value === null || value === "") return 1;
   const count = Number.parseInt(value, 10);
-  if (!Number.isInteger(count) || count < 1 || count > 20)
-    throw new HttpError(400, "INVALID_VISITOR_COUNT", "visitorCount must be between 1 and 20.");
+  if (!Number.isInteger(count) || count < 1 || count > 20) {
+    const message = "visitorCount must be between 1 and 20.";
+    throw new HttpError(400, "INVALID_VISITOR_COUNT", message, [{ field: "visitorCount", message }]);
+  }
   return count;
 };
 
 const requiredFutureDatetime = (value, field) => {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime()))
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a valid datetime.`);
-  if (date.getTime() <= Date.now())
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be in the future.`);
+  if (Number.isNaN(date.getTime())) {
+    const message = `${field} must be a valid datetime.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
+  if (date.getTime() <= Date.now()) {
+    const message = `${field} must be in the future.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return date.toISOString();
 };
 

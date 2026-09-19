@@ -55,6 +55,18 @@ export const createServiceRequestStorageKey = ({ requestId, fileName }) =>
   `service-requests/${requestId}/files/${randomUUID()}-${safeName(fileName)}`;
 export const belongsToServiceRequest = ({ requestId, storageKey }) =>
   String(storageKey || "").startsWith(`service-requests/${requestId}/files/`);
+export const createServiceReportStorageKey = ({ requestId, fileName }) =>
+  `service-requests/${requestId}/report/${randomUUID()}-${safeName(fileName)}`;
+export const belongsToServiceReport = ({ requestId, storageKey }) =>
+  String(storageKey || "").startsWith(`service-requests/${requestId}/report/`);
+export const createContentStorageKey = ({ fileName }) =>
+  `content/covers/${randomUUID()}-${safeName(fileName)}`;
+export const belongsToContent = ({ storageKey }) =>
+  String(storageKey || "").startsWith("content/covers/");
+export const createAdStorageKey = ({ fileName }) =>
+  `ads/creatives/${randomUUID()}-${safeName(fileName)}`;
+export const belongsToAd = ({ storageKey }) =>
+  String(storageKey || "").startsWith("ads/creatives/");
 export const signedWriteUrl = async ({ storageKey, mimeType }) => {
   try {
     const [uploadUrl] = await ensureStorage()

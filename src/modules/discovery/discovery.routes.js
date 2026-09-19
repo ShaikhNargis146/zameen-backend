@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { asyncRoute } from "../../shared/http.js";
 import { optionalAuth } from "../auth/auth.routes.js";
-import { mapRateLimit } from "../../config/rate-limit.config.js";
+import { mapRateLimit, searchRateLimit } from "../../config/rate-limit.config.js";
 import * as controller from "./discovery.controller.js";
 
 const router = Router();
-router.post("/search/listings", optionalAuth, asyncRoute(controller.search));
+router.post("/search/listings", searchRateLimit, optionalAuth, asyncRoute(controller.search));
 router.get("/search/suggestions", asyncRoute(controller.suggestions));
 router.post(
   "/search/map",

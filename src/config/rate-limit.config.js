@@ -24,6 +24,21 @@ export const mapRateLimit = rateLimit({
   )
 });
 
+// Listing search accepts a free-text `search` term evaluated as a Postgres regex (~*) against
+// every candidate row; it's more generous than mapRateLimit since it's the primary search path,
+// but unauthenticated callers still need a cap so a cheap, valid-but-expensive pattern can't be
+// replayed without limit.
+export const searchRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: message(
+    "SEARCH_RATE_LIMITED",
+    "Too many search requests. Please try again shortly."
+  )
+});
+
 export const aiRateLimit = rateLimit({
   windowMs: 60 * 1000,
   limit: 20,

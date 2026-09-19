@@ -5,6 +5,10 @@ import * as controller from "./content.controller.js";
 
 const router = Router();
 
+router.get("/content", requireAdmin, asyncRoute(controller.adminList));
+router.get("/content/:contentId", requireAdmin, asyncRoute(controller.adminGet));
+router.post("/content/media/upload-url", requireAdmin, asyncRoute(controller.mediaUploadUrl));
+router.post("/content/media/complete", requireAdmin, asyncRoute(controller.completeMediaUpload));
 router.post("/content", requireAdmin, asyncRoute(controller.createContent));
 router.patch("/content/:contentId", requireAdmin, asyncRoute(controller.updateContent));
 router.delete("/content/:contentId", requireAdmin, asyncRoute(controller.deleteContent));
