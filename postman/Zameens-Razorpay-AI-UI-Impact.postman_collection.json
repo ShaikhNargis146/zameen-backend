@@ -1,0 +1,256 @@
+{
+  "info": {
+    "name": "Zameens — Razorpay Checkout & AI Quota (UI-impacting changes)",
+    "description": "Focused collection covering only what changed for the Razorpay redirect-checkout rework and the new AI monthly-question quota. Every request here either has a different request/response shape than before, or introduces new client-facing behavior the frontend has not built against yet. Companion doc: docs/razorpay-client-integration-guide.md (full narrative walkthrough + the /payments/result page spec). Set accessToken after OTP verification; adminAccessToken needs an ADMIN-role user for the Commerce Admin folder.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "paymentId", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "planId", "value": "" },
+    { "key": "serviceId", "value": "" },
+    { "key": "serviceRequestId", "value": "" },
+    { "key": "listingId", "value": "" },
+    { "key": "conversationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth (get a token to use below)",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}" },
+            "url": "{{baseUrl}}/auth/otp/request"
+          }
+        },
+        {
+          "name": "Verify OTP → copy accessToken into the collection variable",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"challengeId\": \"replace-with-challenge-id\",\n  \"otp\": \"replace-with-console-otp\"\n}" },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Catalog — read (UI change: new fields)",
+      "item": [
+        {
+          "name": "List plans",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/plans"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED:\n1. Each plan now returns `productId` — this is what you must send to POST /orders, NOT the plan's own `id`. This field did not exist before; if the UI was hardcoding or reverse-mapping a product id, remove that workaround.\n2. Each plan now returns `billingMode`: \"ONE_TIME\" or \"RECURRING\". Only show a purchase CTA for ONE_TIME plans right now — RECURRING plans have no working purchase flow yet (POST /orders will reject them with 409 PLAN_REQUIRES_SUBSCRIPTION). Hide or disable the buy button for RECURRING plans, or show a \"coming soon\" state.\n3. Each plan now returns `aiMonthlyQuota` (integer or null=unlimited) — if the plans/pricing page shows feature comparisons, this is the live source of truth for the AI question limit per plan, not a hardcoded number in the frontend."
+        },
+        {
+          "name": "List services",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/services"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED: each service now returns `productId` (new field) — required for POST /orders when purchasing this service. The service's own `id` is only for POST /service-requests, not for ordering."
+        },
+        {
+          "name": "Get service",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/services/{{serviceId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Checkout — the new redirect flow (UI change: full rebuild)",
+      "item": [
+        {
+          "name": "(Service purchase only) Create service request first",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"listingId\": \"{{listingId}}\",\n  \"customerNotes\": \"Please review before purchase.\",\n  \"contactPhone\": \"+919876543210\",\n  \"contactEmail\": \"buyer@example.com\"\n}" },
+            "url": "{{baseUrl}}/service-requests"
+          },
+          "response": [],
+          "description": "Unchanged endpoint, but now sits in front of a checkout: keep the returned `id` — it becomes `targetId` in the order below. Skip this step entirely for plans and promotions."
+        },
+        {
+          "name": "Create order — Plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"quantity\": 1 }\n  ]\n}" },
+            "url": "{{baseUrl}}/orders"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED: for a plan, send only productId/quantity — no targetType/targetId. New rejection to handle: 409 PLAN_REQUIRES_SUBSCRIPTION if the plan's billingMode is RECURRING (see the List Plans note)."
+        },
+        {
+          "name": "Create order — Promotion (boost a listing)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"targetType\": \"LISTING\", \"targetId\": \"{{listingId}}\" }\n  ]\n}" },
+            "url": "{{baseUrl}}/orders"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED: `targetType` must be the literal string \"LISTING\" (previously free text — anything else is now rejected with 400). `targetId` must be a listing the logged-in user owns, or the order is rejected with 409 TARGET_NOT_OWNED — the UI should only ever offer this action from the seller's own listing management screen, never let a listing id be typed in freely.\n\nNote: there is currently no public endpoint to discover promotion products (their productId/price/type) — confirm with backend how this screen sources that catalog before building it."
+        },
+        {
+          "name": "Create order — Paid service",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"targetType\": \"SERVICE_REQUEST\", \"targetId\": \"{{serviceRequestId}}\" }\n  ]\n}" },
+            "url": "{{baseUrl}}/orders"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED: `targetType` must be the literal string \"SERVICE_REQUEST\". `targetId` is the ServiceRequest id from the step above — it must belong to the current user and be unpaid, or this is rejected with 409 SERVICE_REQUEST_NOT_PAYABLE."
+        },
+        {
+          "name": "Create payment — returns a redirect URL, not a checkout payload",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"provider\": \"RAZORPAY\"\n}" },
+            "url": "{{baseUrl}}/payments/{{orderId}}/create"
+          },
+          "response": [],
+          "description": "BREAKING UI CHANGE — this is the core of the rework:\n\nOLD contract (no longer exists): response had `checkoutPayload` + `providerPublicKey`; the client loaded Razorpay Checkout.js and opened a modal with them.\n\nNEW contract: response is only `{ paymentId, provider, redirectUrl }`.\n\nRequired frontend changes:\n1. DELETE any Razorpay Checkout.js `<script>` tag / SDK import — it is never used.\n2. DELETE any `new Razorpay(options).open()` modal code.\n3. DELETE any client-side payment-success handler that called POST /payments/verify — that endpoint has been removed entirely, calling it now 404s.\n4. ADD: on receiving this response, do a full-page navigation — `window.location.href = redirectUrl` — not a popup, not an iframe.\n5. `returnUrl` is no longer an accepted field on this request (silently ignored if sent) — the redirect target is fixed by the server via COMMERCE_RETURN_BASE_URL, not per-request."
+        },
+        {
+          "name": "GET /orders/{orderId} — poll this after redirect, don't trust the URL alone",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/{{orderId}}"
+          },
+          "response": [],
+          "description": "Unchanged endpoint, but now load-bearing for the new flow: after the customer is redirected back to your /payments/result page, use this to confirm `status: \"PAID\"` rather than trusting the `?status=` query param alone for anything business-critical (e.g. don't unlock a feature purely because the URL said success)."
+        }
+      ]
+    },
+    {
+      "name": "3. Reference only — never called by the client directly",
+      "item": [
+        {
+          "name": "Payment callback (Razorpay redirects the BROWSER here)",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/payments/callback?razorpay_payment_id=pay_example&razorpay_payment_link_id=plink_example&razorpay_payment_link_reference_id=example-payment-id&razorpay_payment_link_status=paid&razorpay_signature=invalid-example-will-redirect-as-invalid"
+          },
+          "response": [],
+          "description": "NEW endpoint. The frontend never fetches this with XHR/fetch — Razorpay's hosted checkout page redirects the customer's browser here after payment, and this endpoint itself responds with an HTTP redirect (302) onward to `{frontend}/payments/result?orderId=...&status=...`.\n\nThe ONLY thing the frontend needs to build for this is the landing page at `/payments/result`, reading `orderId` and `status` from its own query string. See docs/razorpay-client-integration-guide.md section 5 for the full table of `status` values (success / pending / invalid / passthrough Razorpay statuses) and what to render for each — in particular the `pending` case, where the UI must poll GET /orders/{orderId} rather than assume failure."
+        },
+        {
+          "name": "Payment webhook (server-to-server, Razorpay → our server)",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-razorpay-signature", "value": "replace-with-webhook-signature" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_replace_with_id\",\n        \"notes\": {\n          \"internalOrderId\": \"replace-with-order-id\",\n          \"internalPaymentId\": \"replace-with-payment-id\"\n        }\n      }\n    }\n  }\n}" },
+            "url": "{{baseUrl}}/payments/webhook"
+          },
+          "response": [],
+          "description": "No UI relevance at all — included only so backend/QA can exercise it. The frontend should never call this."
+        }
+      ]
+    },
+    {
+      "name": "4. Commerce Admin — plan management (UI change: new fields)",
+      "item": [
+        {
+          "name": "Admin: Create plan",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"PREMIUM_30\",\n  \"name\": \"Premium 30 Days\",\n  \"planType\": \"PREMIUM\",\n  \"amountMinor\": 99900,\n  \"durationDays\": 30,\n  \"listingLimit\": 10,\n  \"featuredDays\": 7,\n  \"verificationIncluded\": true,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": 50\n}" },
+            "url": "{{baseUrl}}/admin/plans"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED for the admin panel's plan editor: two new fields to add to the form.\n- `billingMode`: \"ONE_TIME\" or \"RECURRING\" (defaults to ONE_TIME if omitted). Note RECURRING plans currently cannot actually be purchased by customers (Section 2) — the admin UI should probably warn about this until subscriptions ship.\n- `aiMonthlyQuota`: integer, or omit/null for unlimited AI Property Assistant questions per month on this plan."
+        },
+        {
+          "name": "Admin: Update plan (toggle billingMode / change AI quota)",
+          "request": {
+            "method": "PATCH",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"aiMonthlyQuota\": 100,\n  \"billingMode\": \"ONE_TIME\"\n}" },
+            "url": "{{baseUrl}}/admin/plans/{{planId}}"
+          },
+          "response": [],
+          "description": "Changing billingMode or aiMonthlyQuota only affects future purchases/usage windows — it does not retroactively alter a customer's already-granted entitlement or already-counted usage this month."
+        }
+      ]
+    },
+    {
+      "name": "5. AI Assistant — monthly quota (UI change: new error to handle)",
+      "item": [
+        {
+          "name": "Create conversation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"contextType\": \"GENERAL\"\n}" },
+            "url": "{{baseUrl}}/ai/conversations"
+          },
+          "response": [],
+          "description": "Unchanged. Does not itself consume any AI quota — creating a conversation (even with an initialQuery) generates no AI response and costs nothing."
+        },
+        {
+          "name": "Send message (SSE) — can now return AI_MONTHLY_QUOTA_EXCEEDED",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"content\": \"What's a good plot near Pune under 50 lakhs?\"\n}" },
+            "url": "{{baseUrl}}/ai/conversations/{{conversationId}}/messages"
+          },
+          "response": [],
+          "description": "UI CHANGE NEEDED. This is a Server-Sent Events response (Postman will show raw event lines, not a normal JSON body — that's expected, this endpoint is unchanged in transport). What's new is a possible event:\n\n  event: error\n  data: {\"error\":{\"code\":\"AI_MONTHLY_QUOTA_EXCEEDED\",\"message\":\"You have used all 5 AI Property Assistant questions included in your plan this month.\"}}\n\nThe frontend's SSE `error` event handler must recognize `AI_MONTHLY_QUOTA_EXCEEDED` specifically and show a clear \"you've used your monthly AI questions, upgrade your plan\" message (ideally linking to the pricing page) rather than a generic error toast. This is on the same SSE error channel already used for AI_CONTEXT_UNAVAILABLE etc., so if that channel is already handled generically, this is a new *code* to special-case, not a new *mechanism* to build.\n\nQuota resets on the calendar month and only counts questions that were actually answered — a rejected attempt never counts against it, so retrying after upgrading works immediately."
+        },
+        {
+          "name": "List conversations",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ai/conversations"
+          }
+        },
+        {
+          "name": "Get conversation",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ai/conversations/{{conversationId}}"
+          }
+        }
+      ]
+    }
+  ]
+}
