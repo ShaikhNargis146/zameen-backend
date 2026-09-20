@@ -13,6 +13,7 @@ const requireOwnedServiceRequest = requireOwnedResource({
 });
 
 router.get("/plans", asyncRoute(controller.plans));
+router.get("/plans/me", requireAuth, asyncRoute(controller.myPlan));
 
 router.post("/orders", requireAuth, asyncRoute(controller.createOrder));
 router.get("/orders/me", requireAuth, asyncRoute(controller.myOrders));
@@ -23,7 +24,9 @@ router.post(
   requireAuth,
   asyncRoute(controller.createPayment)
 );
-router.post("/payments/verify", requireAuth, asyncRoute(controller.verifyPayment));
+// Public: Razorpay redirects the customer's browser here after a Payment
+// Link attempt. No auth header is available on this request.
+router.get("/payments/callback", asyncRoute(controller.paymentCallback));
 router.post("/payments/webhook", asyncRoute(controller.webhook));
 
 router.get("/services", asyncRoute(controller.services));

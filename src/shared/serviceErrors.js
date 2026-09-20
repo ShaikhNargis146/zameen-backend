@@ -7,7 +7,10 @@ export const publicServiceErrorCodes = new Set([
   "AI_PROVIDER_INCOMPLETE",
   "AI_CONVERSATION_UNAVAILABLE",
   "STORAGE_UNCONFIGURED",
-  "STORAGE_UNAVAILABLE"
+  "STORAGE_UNAVAILABLE",
+  "PAYMENT_PROVIDER_TIMEOUT",
+  "PAYMENT_PROVIDER_UNAVAILABLE",
+  "PAYMENT_PROVIDER_ERROR"
 ]);
 
 export const isPublicServiceError = code => publicServiceErrorCodes.has(code);

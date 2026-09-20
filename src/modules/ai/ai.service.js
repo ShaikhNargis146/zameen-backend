@@ -35,6 +35,26 @@ const logChatFailure = (stage, error) =>
       `code=${safeLogValue(error?.code)}]`
   );
 
+// Applies when a user has no active plan_subscription at all — there is no
+// database row for the ambient "Free" tier, so its quota lives here.
+export const DEFAULT_FREE_AI_MONTHLY_QUOTA = 5;
+
+export const hasAiQuotaRemaining = ({ quota, usedThisMonth }) =>
+  quota === null || usedThisMonth < quota;
+
+const enforceAiQuota = async actorId => {
+  const plan = await repository.activePlanForUser(actorId);
+  const quota = plan ? plan.aiMonthlyQuota : DEFAULT_FREE_AI_MONTHLY_QUOTA;
+  if (quota === null) return;
+  const usedThisMonth = await repository.assistantMessageCountThisMonth(actorId);
+  if (!hasAiQuotaRemaining({ quota, usedThisMonth }))
+    throw new HttpError(
+      403,
+      "AI_MONTHLY_QUOTA_EXCEEDED",
+      `You have used all ${quota} AI Property Assistant questions included in your plan this month.`
+    );
+};
+
 const requireAccess = async ({ conversationId, actorId }) => {
   const conversation = await repository.conversation(conversationId);
   if (!conversation)
@@ -150,6 +170,9 @@ const messageContext = async ({ conversationId, actorId, input }) => {
     conversationId,
     actorId
   });
+  // Checked before any context assembly or provider call: a rejected
+  // question should cost nothing and leave no history.
+  await enforceAiQuota(actorId);
   const listing = conversation.listingId
     ? await repository.listingContext(conversation.listingId)
     : null;

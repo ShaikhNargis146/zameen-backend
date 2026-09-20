@@ -41,6 +41,37 @@ export const messages = conversationId =>
     `SELECT id, role, content, metadata, created_at AS "createdAt" FROM ai.messages WHERE conversation_id = $1 ORDER BY created_at, id`,
     [conversationId]
   );
+
+// The user's currently active plan (personal scope only — org-level plans do
+// not grant AI quota). null means the user has no active plan at all, i.e.
+// the ambient "Free" tier that has no row of its own anywhere.
+export const activePlanForUser = userId =>
+  run(
+    "oneOrNone",
+    `SELECT pl.ai_monthly_quota AS "aiMonthlyQuota"
+     FROM commerce.plan_subscriptions ps
+     JOIN commerce.plans pl ON pl.id = ps.plan_id
+     WHERE ps.user_id = $1 AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+     ORDER BY ps.ends_at DESC NULLS LAST
+     LIMIT 1`,
+    [userId]
+  );
+
+// Counts answered questions, not user messages sent — an unanswered/failed
+// attempt (e.g. AI_CONTEXT_UNAVAILABLE) never reaches this table's ASSISTANT
+// row, so it doesn't consume quota.
+export const assistantMessageCountThisMonth = async userId => {
+  const row = await run(
+    "one",
+    `SELECT count(*)::int AS count
+     FROM ai.messages m
+     JOIN ai.conversations c ON c.id = m.conversation_id
+     WHERE c.user_id = $1 AND m.role = 'ASSISTANT'
+       AND m.created_at >= date_trunc('month', now())`,
+    [userId]
+  );
+  return row.count;
+};
 export const conversationsForUser = (userId, { limit, offset }) =>
   run(
     "any",

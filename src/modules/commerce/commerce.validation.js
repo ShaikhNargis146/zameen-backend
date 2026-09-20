@@ -15,6 +15,7 @@ const orderStatuses = new Set([
 const providers = new Set(["RAZORPAY"]);
 const currencies = new Set(["INR"]);
 const maxOrderItems = 20;
+const targetTypes = new Set(["LISTING", "SERVICE_REQUEST"]);
 const e164Pattern = /^\+[1-9]\d{7,14}$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const serviceTypes = new Set([
@@ -33,6 +34,13 @@ const serviceRequestStatuses = new Set([
   "CANCELLED"
 ]);
 const maxFileSizeBytes = 50 * 1024 * 1024;
+// Mirrors the commerce.payments status CHECK constraint, not the narrower
+// `providers` set above — that one governs what a *new* payment can be
+// created with (Razorpay only, Phase 1); this covers whatever the schema
+// itself allows a payment row to already carry, for admin filtering.
+const paymentStatuses = new Set(["CREATED", "AUTHORIZED", "CAPTURED", "FAILED", "REFUNDED"]);
+const paymentProviders = new Set(["RAZORPAY", "STRIPE", "OTHER"]);
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
@@ -125,14 +133,11 @@ const optionalObject = (value, field) => {
 const optionalBoolean = (value, fallback) =>
   value === undefined || value === null ? fallback : Boolean(value);
 
-const optionalUrl = (value, field) => {
+const optionalDate = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  try {
-    // eslint-disable-next-line no-new
-    new URL(text);
-  } catch {
-    const message = `${field} must be a valid URL.`;
+  if (!datePattern.test(text)) {
+    const message = `${field} must be a date in YYYY-MM-DD format.`;
     throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
   }
   return text;
@@ -146,22 +151,38 @@ export const createOrder = body => {
     const message = `items must contain between 1 and ${maxOrderItems} entries.`;
     throw new HttpError(400, "INVALID_ITEMS", message, [{ field: "items", message }]);
   }
-  const items = body.items.map((item, index) => ({
-    productId: uuid(item?.productId, `items[${index}].productId`),
-    quantity:
-      optionalPositiveInteger(
-        item?.quantity,
-        `ITEMS_${index}_QUANTITY`,
-        `items[${index}].quantity`
-      ) ?? 1,
-    targetType: optionalString(
+  const items = body.items.map((item, index) => {
+    const targetType = optionalEnum(
       item?.targetType,
-      50,
+      targetTypes,
       `ITEMS_${index}_TARGET_TYPE`,
-      `items[${index}].targetType`
-    ),
-    targetId: optionalUuid(item?.targetId, `items[${index}].targetId`)
-  }));
+      "LISTING or SERVICE_REQUEST"
+    );
+    const targetId = optionalUuid(item?.targetId, `items[${index}].targetId`);
+    if (targetType && !targetId) {
+      const message = `items[${index}].targetId is required when targetType is set.`;
+      throw new HttpError(400, "TARGET_ID_REQUIRED", message, [
+        { field: `items[${index}].targetId`, message }
+      ]);
+    }
+    if (targetId && !targetType) {
+      const message = `items[${index}].targetType is required when targetId is set.`;
+      throw new HttpError(400, "TARGET_TYPE_REQUIRED", message, [
+        { field: `items[${index}].targetType`, message }
+      ]);
+    }
+    return {
+      productId: uuid(item?.productId, `items[${index}].productId`),
+      quantity:
+        optionalPositiveInteger(
+          item?.quantity,
+          `ITEMS_${index}_QUANTITY`,
+          `items[${index}].quantity`
+        ) ?? 1,
+      targetType,
+      targetId
+    };
+  });
 
   const couponCode = optionalString(body.couponCode, 50, "COUPON_CODE");
   if (couponCode)
@@ -183,15 +204,27 @@ export const orderListQuery = query => ({
 export const createPayment = body => ({
   provider: body?.provider
     ? requiredEnum(body.provider, providers, "PROVIDER", "RAZORPAY")
-    : "RAZORPAY",
-  returnUrl: optionalUrl(body?.returnUrl, "RETURN_URL")
+    : "RAZORPAY"
 });
 
-export const verifyPayment = body => ({
-  paymentId: uuid(body.paymentId, "paymentId"),
-  providerPaymentId: requiredString(body.providerPaymentId, 1, 255, "PROVIDER_PAYMENT_ID"),
-  providerOrderId: requiredString(body.providerOrderId, 1, 255, "PROVIDER_ORDER_ID"),
-  signature: requiredString(body.signature, 1, 512, "SIGNATURE")
+// Query params Razorpay appends when redirecting the customer's browser back
+// to our Payment Link callback URL. There is no Authorization header on this
+// request, and the handler using this must never throw into a JSON error
+// response — it always redirects, even on garbage input — so unlike the rest
+// of this file, this reads values defensively (a plain string-or-null cast)
+// instead of throwing on anything unexpected; an invalid/oversized value
+// simply fails the signature check downstream instead of blowing up here.
+const safeQueryString = (value, max) => {
+  if (typeof value !== "string" || !value) return null;
+  return value.length > max ? null : value;
+};
+
+export const paymentCallbackQuery = query => ({
+  paymentId: safeQueryString(query?.razorpay_payment_id, 255),
+  paymentLinkId: safeQueryString(query?.razorpay_payment_link_id, 255),
+  referenceId: safeQueryString(query?.razorpay_payment_link_reference_id, 255),
+  status: safeQueryString(query?.razorpay_payment_link_status, 50),
+  signature: safeQueryString(query?.razorpay_signature, 512)
 });
 
 const optionalStrictBoolean = (value, field) => {
@@ -221,7 +254,8 @@ export const createPlan = body => ({
   featuredDays: optionalNonNegativeInteger(body.featuredDays, "FEATURED_DAYS"),
   verificationIncluded: optionalBoolean(body.verificationIncluded, false),
   features: optionalObject(body.features, "FEATURES") || {},
-  isActive: optionalBoolean(body.isActive, true)
+  isActive: optionalBoolean(body.isActive, true),
+  aiMonthlyQuota: optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA")
 });
 
 export const updatePlan = body => {
@@ -247,6 +281,8 @@ export const updatePlan = body => {
   if (Object.hasOwn(body, "features"))
     changes.features = optionalObject(body.features, "FEATURES") || {};
   if (Object.hasOwn(body, "isActive")) changes.isActive = Boolean(body.isActive);
+  if (Object.hasOwn(body, "aiMonthlyQuota"))
+    changes.aiMonthlyQuota = optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA");
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;
@@ -304,6 +340,24 @@ export const createServiceRequest = body => ({
 export const serviceRequestListQuery = query => ({
   status: optionalEnum(query.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus")
 });
+
+export const adminPaymentListQuery = query => {
+  const fromDate = optionalDate(query.fromDate, "FROM_DATE");
+  const toDate = optionalDate(query.toDate, "TO_DATE");
+  if (fromDate && toDate && fromDate > toDate) {
+    const message = "fromDate must be on or before toDate.";
+    throw new HttpError(400, "INVALID_DATE_RANGE", message, [{ field: "fromDate", message }]);
+  }
+  return {
+    status: optionalEnum(query.status, paymentStatuses, "STATUS", "a valid PaymentStatus"),
+    provider: optionalEnum(query.provider, paymentProviders, "PROVIDER", "RAZORPAY, STRIPE, or OTHER"),
+    orderId: optionalUuid(query.orderId, "orderId"),
+    userId: optionalUuid(query.userId, "userId"),
+    search: optionalString(query.search, 200, "SEARCH"),
+    fromDate,
+    toDate
+  };
+};
 
 export const adminServiceRequestListQuery = query => ({
   status: optionalEnum(query.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus"),

@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
-import { hmacSha256Hex, randomToken, safeEqualHex, sha256 } from "../../utils/crypto.js";
+import { sha256 } from "../../utils/crypto.js";
 import {
   belongsToServiceReport,
   belongsToServiceRequest,
@@ -13,27 +13,49 @@ import {
 } from "../../utils/storage.js";
 import * as organizationsRepository from "../organizations/organizations.repository.js";
 import * as repository from "./commerce.repository.js";
+import * as razorpayProvider from "./providers/razorpay.provider.js";
 
-const razorpayKeyId = process.env.RAZORPAY_KEY_ID || null;
+const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "dev-razorpay-key-id";
 const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
 const razorpayWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || razorpayKeySecret;
-if (!isNonProductionEnv && !process.env.RAZORPAY_KEY_SECRET)
-  throw new Error("RAZORPAY_KEY_SECRET is required in production");
+const razorpayApiTimeoutMs = Number(process.env.RAZORPAY_API_TIMEOUT_MS || 10000);
+// The base URL Razorpay redirects the customer's browser to after payment —
+// must be our own deployed, publicly reachable API origin, not localhost, in
+// any environment Razorpay can actually call back to.
+const apiPublicBaseUrl = process.env.API_PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 8080}`;
+// Where we redirect the browser after handling the Payment Link callback.
+const commerceReturnBaseUrl = process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:3000";
+if (!isNonProductionEnv) {
+  for (const [name, value] of [
+    ["RAZORPAY_KEY_ID", process.env.RAZORPAY_KEY_ID],
+    ["RAZORPAY_KEY_SECRET", process.env.RAZORPAY_KEY_SECRET],
+    ["RAZORPAY_WEBHOOK_SECRET", process.env.RAZORPAY_WEBHOOK_SECRET],
+    ["API_PUBLIC_BASE_URL", process.env.API_PUBLIC_BASE_URL],
+    ["COMMERCE_RETURN_BASE_URL", process.env.COMMERCE_RETURN_BASE_URL]
+  ])
+    if (!value) throw new Error(`${name} is required in production`);
+}
 
 const orderNumber = () =>
   `ZMN-O-${randomUUID()
     .replace(/-/g, "")
     .slice(0, 12)
     .toUpperCase()}`;
-// Phase 1 has no live Razorpay account configured, so the provider order id is
-// self-issued here in the same shape Razorpay would return. Swapping in a real
-// `orders.create` API call later does not change downstream verification,
-// since that already implements Razorpay's actual HMAC signature scheme.
-const providerOrderId = () => `order_${randomToken(12)}`;
+
+const paymentResultUrl = ({ orderId, status }) => {
+  const url = new URL("/payments/result", commerceReturnBaseUrl);
+  if (orderId) url.searchParams.set("orderId", orderId);
+  url.searchParams.set("status", status);
+  return url.toString();
+};
 
 const toPlan = row =>
   row && {
     id: row.id,
+    // The commerce.products id — this is what POST /orders items[].productId
+    // must be, not this plan's own id. Public so a client can actually place
+    // an order without a separate admin-only lookup.
+    productId: row.productId,
     code: row.code,
     name: row.name,
     planType: row.planType,
@@ -45,13 +67,14 @@ const toPlan = row =>
     featuredDays: row.featuredDays,
     verificationIncluded: row.verificationIncluded,
     features: row.features || {},
-    isActive: row.isActive
+    isActive: row.isActive,
+    // NULL means unlimited AI Property Assistant questions for this plan.
+    aiMonthlyQuota: row.aiMonthlyQuota
   };
 
 const toPlanAdmin = row =>
   row && {
     ...toPlan(row),
-    productId: row.productId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -111,6 +134,24 @@ export const setPlanActive = async (planId, isActive) => {
   return getPlan(planId);
 };
 
+// What a logged-in user actually has right now — there was previously no
+// endpoint for this at all; plan entitlement was only ever checked
+// internally (e.g. ai.repository.activePlanForUser for AI quota), never
+// exposed to the buyer themselves. The client is expected to read `endsAt`
+// and decide for itself when to show an "expiring soon" banner — there is no
+// server-side push notification for this (see docs/razorpay-integration-plan.md).
+export const myPlanSubscription = async actorId => {
+  const row = await repository.findActiveSubscriptionForUser(actorId);
+  if (!row) return { hasActivePlan: false, plan: null, status: null, startsAt: null, endsAt: null };
+  return {
+    hasActivePlan: true,
+    plan: toPlan(row),
+    status: row.subscriptionStatus,
+    startsAt: row.startsAt,
+    endsAt: row.endsAt
+  };
+};
+
 const toOrders = async rows => {
   if (!rows.length) return [];
   const itemRows = await repository.itemsForOrders(rows.map(row => row.id));
@@ -133,6 +174,11 @@ const toOrders = async rows => {
     id: row.id,
     orderNumber: row.orderNumber,
     status: row.status,
+    // Distinguishes "still waiting on the current attempt" from "the last
+    // attempt failed, offer retry" while status itself stays PAYMENT_PENDING
+    // for both (retries reuse the same order). null before any payment
+    // attempt has been made.
+    latestPaymentStatus: row.latestPaymentStatus || null,
     items: itemsByOrder.get(row.id) || [],
     subtotalMinor: Number(row.subtotalMinor),
     taxMinor: Number(row.taxMinor),
@@ -143,6 +189,54 @@ const toOrders = async rows => {
   }));
 };
 const toOrder = async row => (await toOrders([row]))[0];
+
+// Validates one order item's target against the rules its product type requires
+// (docs/razorpay-integration-plan.md Section 7). This is the only point where
+// the buyer's identity and the target are both known ahead of any payment, so
+// ownership cannot be deferred to capture/webhook time.
+const validateOrderItemTarget = async ({ product, item, actorId, organizationId }) => {
+  if (product.type === "PLAN") {
+    if (item.targetType || item.targetId)
+      throw new HttpError(400, "INVALID_TARGET", "PLAN items must not include a target.");
+    return;
+  }
+  if (product.type === "PROMOTION") {
+    if (item.targetType !== "LISTING" || !item.targetId)
+      throw new HttpError(
+        400,
+        "INVALID_TARGET",
+        "PROMOTION items require targetType LISTING and a targetId."
+      );
+    if (!product.promotionType || !product.promotionDurationDays)
+      throw new HttpError(
+        500,
+        "PRODUCT_MISCONFIGURED",
+        "This promotion product has no catalog configuration."
+      );
+    const listing = await repository.findOwnedListingForPromotion(item.targetId, {
+      actorId,
+      organizationId
+    });
+    if (!listing)
+      throw new HttpError(409, "TARGET_NOT_OWNED", "You do not own the listing you are promoting.");
+    return;
+  }
+  if (product.type === "SERVICE") {
+    if (item.targetType !== "SERVICE_REQUEST" || !item.targetId)
+      throw new HttpError(
+        400,
+        "INVALID_TARGET",
+        "SERVICE items require targetType SERVICE_REQUEST and a targetId."
+      );
+    const serviceRequest = await repository.findPayableServiceRequest(item.targetId, actorId);
+    if (!serviceRequest)
+      throw new HttpError(
+        409,
+        "SERVICE_REQUEST_NOT_PAYABLE",
+        "This service request cannot be paid for."
+      );
+  }
+};
 
 export const createOrder = async ({ actorId, input }) => {
   if (input.organizationId) {
@@ -160,7 +254,8 @@ export const createOrder = async ({ actorId, input }) => {
   const productById = new Map(products.map(product => [product.id, product]));
 
   let subtotalMinor = 0;
-  const items = input.items.map(item => {
+  const items = [];
+  for (const item of input.items) {
     const product = productById.get(item.productId);
     if (!product || !product.isActive)
       throw new HttpError(
@@ -168,23 +263,35 @@ export const createOrder = async ({ actorId, input }) => {
         "INVALID_PRODUCT",
         `productId ${item.productId} is not a purchasable product.`
       );
+    await validateOrderItemTarget({ product, item, actorId, organizationId: input.organizationId });
     const unitAmountMinor = Number(product.amountMinor);
     const totalAmountMinor = unitAmountMinor * item.quantity;
     subtotalMinor += totalAmountMinor;
-    return { ...item, unitAmountMinor, totalAmountMinor };
-  });
+    items.push({ ...item, unitAmountMinor, totalAmountMinor });
+  }
 
   const taxMinor = 0;
-  const orderId = await repository.createOrder({
-    orderNumber: orderNumber(),
-    userId: actorId,
-    organizationId: input.organizationId,
-    subtotalMinor,
-    taxMinor,
-    totalMinor: subtotalMinor + taxMinor,
-    currency: "INR",
-    items
-  });
+  let orderId;
+  try {
+    orderId = await repository.createOrder({
+      orderNumber: orderNumber(),
+      userId: actorId,
+      organizationId: input.organizationId,
+      subtotalMinor,
+      taxMinor,
+      totalMinor: subtotalMinor + taxMinor,
+      currency: "INR",
+      items
+    });
+  } catch (error) {
+    if (error.code === "SERVICE_REQUEST_NOT_PAYABLE")
+      throw new HttpError(
+        409,
+        "SERVICE_REQUEST_NOT_PAYABLE",
+        "This service request cannot be paid for."
+      );
+    throw error;
+  }
   return getOrder(orderId);
 };
 
@@ -215,15 +322,6 @@ export const listMyOrders = async ({ actorId, filters, query }) => {
   return { data: await toOrders(rows), meta: paginationMeta({ page, limit, total }) };
 };
 
-const toPayment = row => ({
-  id: row.id,
-  orderId: row.orderId,
-  status: row.status,
-  amountMinor: Number(row.amountMinor),
-  currency: row.currency,
-  paidAt: row.paidAt
-});
-
 export const createPaymentIntent = async ({ actorId, orderId, input }) => {
   const order = await ownedOrderRow(orderId, actorId);
   if (order.status === "PAID")
@@ -235,10 +333,39 @@ export const createPaymentIntent = async ({ actorId, orderId, input }) => {
       "Order cannot accept payment in its current state."
     );
 
+  // Explicitly fail any still-open attempt before starting a fresh one,
+  // rather than trying to determine whether Razorpay still considers the old
+  // Payment Link usable (Section 8 of docs/razorpay-integration-plan.md).
+  await repository.failActivePaymentsForOrder(order.id);
+
+  // Generated up front so it can be embedded in the Payment Link's notes
+  // before the payments row exists — this is how the webhook/callback
+  // handlers resolve back to an internal payment without depending on
+  // Razorpay's exact order-id/payment-link-id field naming per event type.
+  const paymentId = randomUUID();
+  const link = await razorpayProvider.createPaymentLink({
+    keyId: razorpayKeyId,
+    keySecret: razorpayKeySecret,
+    timeoutMs: razorpayApiTimeoutMs,
+    amountMinor: Number(order.totalMinor),
+    currency: order.currency,
+    // Razorpay enforces reference_id uniqueness per account, so this must be
+    // unique per payment *attempt*, not per order — order.orderNumber would
+    // make every retry after the first fail with "reference_id already
+    // exists" (confirmed against the live API), defeating the fail-and-retry
+    // flow above. The internal payment id is fresh on every attempt and is
+    // never compared against anything downstream, so this is a safe swap.
+    referenceId: paymentId,
+    description: `Zameens order ${order.orderNumber}`,
+    callbackUrl: `${apiPublicBaseUrl}/api/v1/payments/callback`,
+    notes: { internalOrderId: order.id, internalPaymentId: paymentId }
+  });
+
   const payment = await repository.createPayment({
+    id: paymentId,
     orderId: order.id,
     provider: input.provider,
-    providerOrderId: providerOrderId(),
+    providerOrderId: link.id,
     amountMinor: Number(order.totalMinor),
     currency: order.currency
   });
@@ -247,77 +374,179 @@ export const createPaymentIntent = async ({ actorId, orderId, input }) => {
   return {
     paymentId: payment.id,
     provider: payment.provider,
-    providerOrderId: payment.providerOrderId,
-    amountMinor: Number(payment.amountMinor),
-    currency: payment.currency,
-    providerPublicKey: payment.provider === "RAZORPAY" ? razorpayKeyId : null,
-    checkoutPayload: {
-      orderId: payment.providerOrderId,
-      amount: Number(payment.amountMinor),
-      currency: payment.currency,
-      name: "Zameens",
-      notes: { internalOrderId: order.id, internalPaymentId: payment.id },
-      returnUrl: input.returnUrl || null
-    }
+    redirectUrl: link.shortUrl
   };
 };
 
-export const verifyPayment = async ({ actorId, input }) => {
-  const payment = await repository.findPaymentOwnedByUser(input.paymentId, actorId);
-  if (!payment) throw new HttpError(404, "PAYMENT_NOT_FOUND", "Payment was not found.");
-  if (payment.status === "CAPTURED") return toPayment(payment);
-  if (payment.providerOrderId !== input.providerOrderId)
-    throw new HttpError(
-      400,
-      "PAYMENT_ORDER_MISMATCH",
-      "providerOrderId does not match this payment."
-    );
+// Shared amount/currency/capture-state guard applied on both the Payment
+// Link callback and the webhook path (Phase 2 of
+// docs/razorpay-integration-plan.md) so neither path ever marks a payment
+// captured on the provider's word alone — what Razorpay reports for the
+// payment must match what we quoted when the Payment Link was created, and
+// Razorpay must actually consider it captured.
+export const paymentMatchesProvider = ({
+  payment,
+  providerAmountMinor,
+  providerCurrency,
+  providerStatus
+}) =>
+  providerStatus === "captured" &&
+  Number(providerAmountMinor) === Number(payment.amountMinor) &&
+  String(providerCurrency || "").toUpperCase() === String(payment.currency || "").toUpperCase();
 
-  if (payment.provider !== "RAZORPAY")
-    throw new HttpError(
-      400,
-      "PROVIDER_NOT_SUPPORTED",
-      "This payment provider does not support verification."
-    );
+// Handles the browser landing back on our Payment Link callback_url. Always
+// resolves to a redirect target, never throws — Razorpay/the browser is
+// making a plain GET here with no Authorization header, so there is no JSON
+// error response to usefully return (Section 10 of the integration plan).
+export const paymentCallback = async ({ query }) => {
+  const { paymentId, paymentLinkId, referenceId, status, signature } = query;
+  if (!paymentId || !paymentLinkId || !referenceId || !status || !signature)
+    return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
 
-  const verified = safeEqualHex(
-    input.signature,
-    hmacSha256Hex(`${input.providerOrderId}|${input.providerPaymentId}`, razorpayKeySecret)
-  );
+  const signatureValid = razorpayProvider.verifyPaymentLinkCallbackSignature({
+    query: {
+      razorpay_payment_id: paymentId,
+      razorpay_payment_link_id: paymentLinkId,
+      razorpay_payment_link_reference_id: referenceId,
+      razorpay_payment_link_status: status,
+      razorpay_signature: signature
+    },
+    keySecret: razorpayKeySecret
+  });
+  if (!signatureValid) return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
 
-  if (!verified) {
-    await repository.failPayment({
-      id: payment.id,
-      providerPayload: {
-        providerPaymentId: input.providerPaymentId,
-        providerOrderId: input.providerOrderId,
-        reason: "SIGNATURE_MISMATCH"
-      }
-    });
-    throw new HttpError(
-      400,
-      "PAYMENT_SIGNATURE_INVALID",
-      "Payment signature could not be verified."
-    );
+  const payment = await repository.findPaymentByProviderOrderId("RAZORPAY", paymentLinkId);
+  if (!payment) return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
+
+  if (payment.status !== "CAPTURED" && status === "paid") {
+    try {
+      // The callback query carries no amount/currency, only a signed status
+      // — fetch the payment itself from Razorpay so this path cannot capture
+      // on a client-supplied status alone (Section 16/18 of the integration
+      // plan: "no client-controlled amount can be charged or marked paid").
+      const providerPayment = await razorpayProvider.fetchPayment({
+        keyId: razorpayKeyId,
+        keySecret: razorpayKeySecret,
+        timeoutMs: razorpayApiTimeoutMs,
+        providerPaymentId: paymentId
+      });
+      if (
+        !paymentMatchesProvider({
+          payment,
+          providerAmountMinor: providerPayment?.amount,
+          providerCurrency: providerPayment?.currency,
+          providerStatus: providerPayment?.status
+        })
+      )
+        return { redirectUrl: paymentResultUrl({ orderId: payment.orderId, status: "pending" }) };
+
+      await repository.capturePaymentAndApplyEntitlements({
+        id: payment.id,
+        orderId: payment.orderId,
+        providerPaymentId: paymentId,
+        providerPayload: { source: "payment_link_callback", query, providerPayment }
+      });
+    } catch {
+      // The webhook is authoritative and will retry this independently — the
+      // browser must still get a redirect, not a raw error page, so surface
+      // a "pending" status rather than letting this throw out of the handler.
+      return { redirectUrl: paymentResultUrl({ orderId: payment.orderId, status: "pending" }) };
+    }
   }
 
-  const captured = await repository.capturePaymentAndMarkOrderPaid({
-    id: payment.id,
-    orderId: payment.orderId,
-    providerPaymentId: input.providerPaymentId,
-    providerPayload: {
-      providerOrderId: input.providerOrderId,
-      providerPaymentId: input.providerPaymentId,
-      signature: input.signature
-    }
-  });
-  return toPayment(captured);
+  return {
+    redirectUrl: paymentResultUrl({
+      orderId: payment.orderId,
+      status: status === "paid" ? "success" : status
+    })
+  };
 };
+
+const toPaymentAdmin = row =>
+  row && {
+    id: row.id,
+    orderId: row.orderId,
+    orderNumber: row.orderNumber,
+    orderStatus: row.orderStatus,
+    provider: row.provider,
+    providerOrderId: row.providerOrderId,
+    providerPaymentId: row.providerPaymentId,
+    status: row.status,
+    amountMinor: Number(row.amountMinor),
+    currency: row.currency,
+    paidAt: row.paidAt,
+    createdAt: row.createdAt,
+    organizationId: row.organizationId,
+    buyer: {
+      userId: row.userId,
+      name: row.buyerName,
+      phone: row.buyerPhone,
+      email: row.buyerEmail
+    }
+  };
+
+// Full detail view: everything the list gives plus the raw provider payload
+// (the gateway's own last-known response), the order's line items, and the
+// full webhook delivery trace for this payment — so an admin never has to
+// cross-reference commerce.orders or re-parse payment_webhook_events
+// payloads separately to see exactly what was bought and what the gateway
+// actually sent, in order, including deliveries that failed to process.
+const toPaymentAdminDetail = async row => {
+  const [itemRows, webhookEvents] = await Promise.all([
+    repository.itemsForOrders([row.orderId]),
+    repository.findWebhookEventsByPaymentId(row.id)
+  ]);
+  return {
+    ...toPaymentAdmin(row),
+    updatedAt: row.updatedAt,
+    providerPayload: row.providerPayload || null,
+    order: {
+      subtotalMinor: Number(row.orderSubtotalMinor),
+      taxMinor: Number(row.orderTaxMinor),
+      totalMinor: Number(row.orderTotalMinor),
+      items: itemRows.map(item => ({
+        productId: item.productId,
+        code: item.code,
+        name: item.name,
+        quantity: item.quantity,
+        unitAmountMinor: Number(item.unitAmountMinor),
+        totalAmountMinor: Number(item.totalAmountMinor)
+      }))
+    },
+    webhookEvents: webhookEvents.map(event => ({
+      id: event.id,
+      eventType: event.eventType,
+      receivedAt: event.receivedAt,
+      processedAt: event.processedAt,
+      processingError: event.processingError,
+      payload: event.payload
+    }))
+  };
+};
+
+export const adminListPayments = async ({ filters, query }) => {
+  const { page, limit, offset } = parsePagination(query);
+  const counted = await repository.listPaymentsAdmin(filters, { limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
+  return { data: rows.map(toPaymentAdmin), meta: paginationMeta({ page, limit, total }) };
+};
+
+export const adminGetPayment = async paymentId => {
+  const row = await repository.findPaymentByIdAdmin(paymentId);
+  if (!row) throw new HttpError(404, "PAYMENT_NOT_FOUND", "Payment was not found.");
+  return toPaymentAdminDetail(row);
+};
+
+const capturableWebhookEvents = new Set(["payment.captured", "payment_link.paid"]);
 
 export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   const provider = "RAZORPAY";
-  const expectedSignature = hmacSha256Hex(rawBody, razorpayWebhookSecret);
-  if (!signatureHeader || !safeEqualHex(signatureHeader, expectedSignature))
+  const signatureValid = razorpayProvider.verifyWebhookSignature({
+    rawBody,
+    signature: signatureHeader,
+    secret: razorpayWebhookSecret
+  });
+  if (!signatureValid)
     throw new HttpError(
       400,
       "WEBHOOK_SIGNATURE_INVALID",
@@ -326,26 +555,53 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
 
   const eventType = body?.event || "UNKNOWN";
   const eventId = body?.id || sha256(rawBody?.length ? rawBody : JSON.stringify(body || {}));
-  const event = await repository.insertWebhookEvent({ provider, eventId, eventType, payload: body });
+  // Resolved via the notes we set ourselves at Payment Link creation time,
+  // not via order_id/payment_link_id field names on the webhook payload —
+  // those differ by event type in ways not worth depending on here. Resolved
+  // once, up front, so the same lookup both links this delivery to its
+  // payment row (commerce.payment_webhook_events.payment_id, for admin
+  // traceability) and is reused in the capture/fail branches below instead
+  // of querying twice.
+  const paymentEntity = body?.payload?.payment?.entity;
+  const internalPaymentId = paymentEntity?.notes?.internalPaymentId || null;
+  const payment = internalPaymentId ? await repository.findPaymentById(internalPaymentId) : null;
+
+  const event = await repository.insertWebhookEvent({
+    provider,
+    eventId,
+    eventType,
+    payload: body,
+    paymentId: payment?.id ?? null
+  });
   if (!event) return { received: true, duplicate: true };
 
   try {
-    const paymentEntity = body?.payload?.payment?.entity;
-    if (paymentEntity?.order_id) {
-      const payment = await repository.findPaymentByProviderOrderId(provider, paymentEntity.order_id);
-      if (payment && payment.status !== "CAPTURED") {
-        if (eventType === "payment.captured") {
-          await repository.capturePaymentAndMarkOrderPaid({
-            id: payment.id,
-            orderId: payment.orderId,
-            providerPaymentId: paymentEntity.id,
-            providerPayload: body
-          });
-        } else if (eventType === "payment.failed") {
-          const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
-          if (!failed.ok) throw failed.error;
-        }
-      }
+    if (payment && capturableWebhookEvents.has(eventType) && payment.status !== "CAPTURED") {
+      // Never trust the event type alone — confirm the payment entity's own
+      // amount, currency, and status against what we quoted when the
+      // Payment Link was created before marking anything captured.
+      if (
+        !paymentMatchesProvider({
+          payment,
+          providerAmountMinor: paymentEntity?.amount,
+          providerCurrency: paymentEntity?.currency,
+          providerStatus: paymentEntity?.status
+        })
+      )
+        throw new HttpError(
+          409,
+          "PAYMENT_MISMATCH",
+          "Webhook payment amount, currency, or status does not match the recorded payment."
+        );
+      await repository.capturePaymentAndApplyEntitlements({
+        id: payment.id,
+        orderId: payment.orderId,
+        providerPaymentId: paymentEntity.id,
+        providerPayload: body
+      });
+    } else if (payment && eventType === "payment.failed" && payment.status === "CREATED") {
+      const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
+      if (!failed.ok) throw failed.error;
     }
     await repository.markWebhookProcessed(event.id);
   } catch (error) {
@@ -359,6 +615,9 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
 const toServiceItem = row =>
   row && {
     id: row.id,
+    // The commerce.products id — this is what POST /orders items[].productId
+    // must be, not this service catalog entry's own id.
+    productId: row.productId,
     code: row.code,
     serviceType: row.serviceType,
     name: row.name,

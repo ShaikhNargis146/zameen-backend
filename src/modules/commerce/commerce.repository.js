@@ -11,6 +11,7 @@ const planColumns = `
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
   pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
+  pl.ai_monthly_quota AS "aiMonthlyQuota",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
 
@@ -65,6 +66,25 @@ export const planHasOrders = planId =>
     [planId]
   ).then(Boolean);
 
+// The buyer's own currently-active personal plan (organization-scoped plans
+// are out of scope here, same restriction as ai.repository's activePlanForUser).
+// No background sweep flips a lapsed row's status to EXPIRED, so this filters
+// on ends_at lazily, at read time, rather than trusting status = 'ACTIVE' alone.
+export const findActiveSubscriptionForUser = userId =>
+  run(
+    "oneOrNone",
+    `SELECT ps.status AS "subscriptionStatus", ps.starts_at AS "startsAt", ps.ends_at AS "endsAt",
+            ${planColumns}
+     FROM commerce.plan_subscriptions ps
+     JOIN commerce.plans pl ON pl.id = ps.plan_id
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE ps.user_id = $1 AND ps.organization_id IS NULL
+       AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+     ORDER BY ps.ends_at DESC NULLS LAST
+     LIMIT 1`,
+    [userId]
+  );
+
 export const createPlan = ({
   code,
   name,
@@ -77,7 +97,8 @@ export const createPlan = ({
   listingLimit,
   featuredDays,
   verificationIncluded,
-  features
+  features,
+  aiMonthlyQuota
 }) =>
   runTx(async t => {
     const product = await t.one(
@@ -86,8 +107,8 @@ export const createPlan = ({
       [code, name, description, amountMinor, currency, isActive]
     );
     const plan = await t.one(
-      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id`,
+      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING id`,
       [
         product.id,
         planType,
@@ -95,7 +116,8 @@ export const createPlan = ({
         listingLimit,
         featuredDays,
         verificationIncluded,
-        JSON.stringify(features || {})
+        JSON.stringify(features || {}),
+        aiMonthlyQuota ?? null
       ]
     );
     return plan.id;
@@ -115,7 +137,8 @@ const planColumnMap = {
   listingLimit: "listing_limit",
   featuredDays: "featured_days",
   verificationIncluded: "verification_included",
-  features: "features"
+  features: "features",
+  aiMonthlyQuota: "ai_monthly_quota"
 };
 
 export const updatePlan = ({ productId, planId, changes }) =>
@@ -161,9 +184,36 @@ export const setPlanActive = (planId, isActive) =>
 export const findProductsByIds = ids =>
   run(
     "any",
-    `SELECT id, code, name, amount_minor AS "amountMinor", currency, is_active AS "isActive"
-     FROM commerce.products WHERE id = ANY($1::uuid[])`,
+    `SELECT p.id, p.code, p.name, p.type, p.amount_minor AS "amountMinor", p.currency, p.is_active AS "isActive",
+            pl.id AS "planId",
+            promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
+     FROM commerce.products p
+     LEFT JOIN commerce.plans pl ON pl.product_id = p.id
+     LEFT JOIN commerce.promotion_catalog promo ON promo.product_id = p.id
+     WHERE p.id = ANY($1::uuid[])`,
     [ids]
+  );
+
+// Ownership check for a PROMOTION order item's targetId (Section 7 of
+// docs/razorpay-integration-plan.md) — the listing must belong to the buyer
+// or their purchasing organization.
+export const findOwnedListingForPromotion = (listingId, { actorId, organizationId }) =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM marketplace.listings
+     WHERE id = $1 AND deleted_at IS NULL
+       AND (seller_user_id = $2 OR ($3::uuid IS NOT NULL AND seller_organization_id = $3))`,
+    [listingId, actorId, organizationId || null]
+  );
+
+// Ownership + payability check for a SERVICE order item's targetId. The
+// service request must belong to the buyer and not already be paid for.
+export const findPayableServiceRequest = (serviceRequestId, actorId) =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM commerce.service_requests
+     WHERE id = $1 AND user_id = $2 AND status = 'REQUESTED' AND order_id IS NULL`,
+    [serviceRequestId, actorId]
   );
 
 const orderColumns = `
@@ -171,7 +221,14 @@ const orderColumns = `
   o.status, o.subtotal_minor AS "subtotalMinor", o.tax_minor AS "taxMinor", o.total_minor AS "totalMinor",
   o.currency, o.created_at AS "createdAt",
   (SELECT p.paid_at FROM commerce.payments p WHERE p.order_id = o.id AND p.status = 'CAPTURED'
-   ORDER BY p.paid_at DESC LIMIT 1) AS "paidAt"
+   ORDER BY p.paid_at DESC LIMIT 1) AS "paidAt",
+  -- o.status alone cannot distinguish "waiting on the current payment
+  -- attempt" from "the last attempt failed, retry needed" — both leave the
+  -- order in PAYMENT_PENDING so a same-order retry stays allowed (see
+  -- createPaymentIntent). Surfacing the most recent payment's own status
+  -- lets the result page tell the two apart instead of polling forever.
+  (SELECT p.status FROM commerce.payments p WHERE p.order_id = o.id
+   ORDER BY p.created_at DESC LIMIT 1) AS "latestPaymentStatus"
 `;
 
 export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor, taxMinor, totalMinor, currency, items }) =>
@@ -194,6 +251,23 @@ export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor
           JSON.stringify({ targetType: item.targetType || null, targetId: item.targetId || null })
         ]
       );
+      // Re-claim the service request inside the transaction, not just at the
+      // pre-check in commerce.service.js — closes the race where two
+      // concurrent orders are created for the same unpaid service request.
+      if (item.targetType === "SERVICE_REQUEST") {
+        const claimed = await t.oneOrNone(
+          `UPDATE commerce.service_requests
+           SET status = 'PAYMENT_PENDING', order_id = $2
+           WHERE id = $1 AND user_id = $3 AND status = 'REQUESTED' AND order_id IS NULL
+           RETURNING id`,
+          [item.targetId, order.id, userId]
+        );
+        if (!claimed) {
+          const error = new Error("Service request is no longer payable.");
+          error.code = "SERVICE_REQUEST_NOT_PAYABLE";
+          throw error;
+        }
+      }
     }
     return order.id;
   });
@@ -240,23 +314,20 @@ const paymentSelectColumns = `
 `;
 const paymentInsertColumns = paymentSelectColumns.replace(/pay\./g, "");
 
-export const createPayment = ({ orderId, provider, providerOrderId, amountMinor, currency }) =>
+// `id` is generated by the caller (not left to the column default) so it can
+// be embedded in the Razorpay Payment Link's notes before this row exists —
+// see commerce.service.js createPaymentIntent.
+export const createPayment = ({ id, orderId, provider, providerOrderId, amountMinor, currency }) =>
   run(
     "one",
-    `INSERT INTO commerce.payments (order_id, provider, provider_order_id, status, amount_minor, currency)
-     VALUES ($1,$2,$3,'CREATED',$4,$5)
+    `INSERT INTO commerce.payments (id, order_id, provider, provider_order_id, status, amount_minor, currency)
+     VALUES ($1,$2,$3,$4,'CREATED',$5,$6)
      RETURNING ${paymentInsertColumns}`,
-    [orderId, provider, providerOrderId, amountMinor, currency]
+    [id, orderId, provider, providerOrderId, amountMinor, currency]
   );
 
-export const findPaymentOwnedByUser = (id, userId) =>
-  run(
-    "oneOrNone",
-    `SELECT ${paymentSelectColumns} FROM commerce.payments pay
-     JOIN commerce.orders o ON o.id = pay.order_id
-     WHERE pay.id = $1 AND o.user_id = $2`,
-    [id, userId]
-  );
+export const findPaymentById = id =>
+  run("oneOrNone", `SELECT ${paymentSelectColumns} FROM commerce.payments pay WHERE pay.id = $1`, [id]);
 
 export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
   run(
@@ -266,33 +337,70 @@ export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
     [provider, providerOrderId]
   );
 
-export const capturePayment = ({ id, providerPaymentId, providerPayload }) =>
-  pg.updateWhere({
-    table: "commerce.payments",
-    set: {
-      status: "CAPTURED",
-      paid_at: new Date(),
-      provider_payment_id: providerPaymentId,
-      provider_payload: providerPayload
-    },
-    where: "id = ${id}",
-    params: { id },
-    returning: paymentInsertColumns,
-    jsonbCols: ["provider_payload"]
-  });
+// Joined with the owning order and buyer so admin list/detail views never
+// need a second round trip to answer "whose payment is this, for what order".
+const paymentAdminJoinColumns = `
+  o.order_number AS "orderNumber", o.status AS "orderStatus", o.user_id AS "userId",
+  o.organization_id AS "organizationId", o.subtotal_minor AS "orderSubtotalMinor",
+  o.tax_minor AS "orderTaxMinor", o.total_minor AS "orderTotalMinor",
+  u.display_name AS "buyerName", u.phone_e164 AS "buyerPhone", u.email::text AS "buyerEmail"
+`;
 
-export const capturePaymentAndMarkOrderPaid = ({ id, orderId, providerPaymentId, providerPayload }) =>
-  runTx(async t => {
-    const payment = await t.one(
-      `UPDATE commerce.payments
-       SET status = 'CAPTURED', paid_at = now(), provider_payment_id = $2, provider_payload = $3::jsonb
-       WHERE id = $1
-       RETURNING ${paymentInsertColumns}`,
-      [id, providerPaymentId, JSON.stringify(providerPayload || {})]
-    );
-    await t.none(`UPDATE commerce.orders SET status = 'PAID' WHERE id = $1`, [orderId]);
-    return payment;
-  });
+export const listPaymentsAdmin = (
+  { status, provider, orderId, userId, search, fromDate, toDate },
+  { limit, offset }
+) =>
+  run(
+    "any",
+    `SELECT ${paymentSelectColumns}, ${paymentAdminJoinColumns}, count(*) OVER()::int AS total
+     FROM commerce.payments pay
+     JOIN commerce.orders o ON o.id = pay.order_id
+     JOIN auth.users u ON u.id = o.user_id
+     WHERE ($1::varchar IS NULL OR pay.status = $1)
+       AND ($2::varchar IS NULL OR pay.provider = $2)
+       AND ($3::uuid IS NULL OR pay.order_id = $3)
+       AND ($4::uuid IS NULL OR o.user_id = $4)
+       AND ($5::varchar IS NULL OR o.order_number ILIKE $5 OR u.display_name ILIKE $5
+            OR u.phone_e164 ILIKE $5 OR u.email::text ILIKE $5
+            OR pay.provider_order_id ILIKE $5 OR pay.provider_payment_id ILIKE $5)
+       AND ($6::date IS NULL OR pay.created_at >= $6)
+       AND ($7::date IS NULL OR pay.created_at < ($7::date + INTERVAL '1 day'))
+     ORDER BY pay.created_at DESC LIMIT $8 OFFSET $9`,
+    [
+      status || null,
+      provider || null,
+      orderId || null,
+      userId || null,
+      search ? `%${search}%` : null,
+      fromDate || null,
+      toDate || null,
+      limit,
+      offset
+    ]
+  );
+
+export const findPaymentByIdAdmin = id =>
+  run(
+    "oneOrNone",
+    `SELECT ${paymentSelectColumns}, pay.updated_at AS "updatedAt",
+            pay.provider_payload AS "providerPayload", ${paymentAdminJoinColumns}
+     FROM commerce.payments pay
+     JOIN commerce.orders o ON o.id = pay.order_id
+     JOIN auth.users u ON u.id = o.user_id
+     WHERE pay.id = $1`,
+    [id]
+  );
+
+// Explicitly fails any non-terminal payment attempt still open for this order
+// before a fresh Payment Link is created for a retried /payments/:orderId/create
+// call, per Section 8 of docs/razorpay-integration-plan.md.
+export const failActivePaymentsForOrder = orderId =>
+  run(
+    "none",
+    `UPDATE commerce.payments SET status = 'FAILED'
+     WHERE order_id = $1 AND status IN ('CREATED','AUTHORIZED')`,
+    [orderId]
+  );
 
 export const failPayment = ({ id, providerPayload }) =>
   pg.updateWhere({
@@ -302,6 +410,107 @@ export const failPayment = ({ id, providerPayload }) =>
     params: { id },
     returning: paymentInsertColumns,
     jsonbCols: ["provider_payload"]
+  });
+
+// Extends an existing plan_subscriptions.ends_at, or starts a fresh window
+// from `now` if there is no still-active existing entitlement to extend.
+// Exported for unit testing independent of the database.
+export const computePlanEndsAt = ({ existingEndsAt, durationDays, now }) => {
+  if (durationDays == null) return null;
+  const existingMs = existingEndsAt ? new Date(existingEndsAt).getTime() : 0;
+  const base = existingMs > now.getTime() ? existingMs : now.getTime();
+  return new Date(base + durationDays * 24 * 60 * 60 * 1000);
+};
+
+// Captures the payment, marks the order paid, and applies whatever product
+// entitlement each order item grants — all in one transaction, so a payment
+// is never left CAPTURED without its entitlement effect (or vice versa).
+// Shared by both the Payment Link callback handler and the webhook handler
+// (Sections 10-11 of docs/razorpay-integration-plan.md) so the two paths
+// cannot disagree; each entitlement write is independently idempotent so
+// calling this twice for the same payment is harmless.
+export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymentId, providerPayload }) =>
+  runTx(async t => {
+    const payment = await t.one(
+      `UPDATE commerce.payments
+       SET status = 'CAPTURED', paid_at = now(), provider_payment_id = $2, provider_payload = $3::jsonb
+       WHERE id = $1
+       RETURNING ${paymentInsertColumns}`,
+      [id, providerPaymentId, JSON.stringify(providerPayload || {})]
+    );
+    const order = await t.one(
+      `UPDATE commerce.orders SET status = 'PAID' WHERE id = $1
+       RETURNING user_id AS "userId", organization_id AS "organizationId"`,
+      [orderId]
+    );
+    const items = await t.any(
+      `SELECT oi.id AS "orderItemId", oi.metadata, p.type,
+              pl.id AS "planId", pl.duration_days AS "durationDays",
+              promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
+       FROM commerce.order_items oi
+       JOIN commerce.products p ON p.id = oi.product_id
+       LEFT JOIN commerce.plans pl ON pl.product_id = p.id
+       LEFT JOIN commerce.promotion_catalog promo ON promo.product_id = p.id
+       WHERE oi.order_id = $1`,
+      [orderId]
+    );
+
+    const now = new Date();
+    for (const item of items) {
+      if (item.type === "PLAN") {
+        const already = await t.oneOrNone(
+          `SELECT id FROM commerce.plan_subscriptions WHERE order_item_id = $1`,
+          [item.orderItemId]
+        );
+        if (already) continue;
+        // Scoped to exactly this purchase's owner — a personal purchase
+        // (organizationId null) must never match or expire an organization's
+        // plan, and vice versa, even when the same person is on both sides.
+        const existing = await t.oneOrNone(
+          `SELECT id, ends_at AS "endsAt" FROM commerce.plan_subscriptions
+           WHERE status = 'ACTIVE'
+             AND (
+               ($2::uuid IS NULL AND user_id = $1 AND organization_id IS NULL)
+               OR ($2::uuid IS NOT NULL AND organization_id = $2)
+             )
+           ORDER BY ends_at DESC NULLS LAST LIMIT 1`,
+          [order.userId, order.organizationId]
+        );
+        if (existing)
+          await t.none(`UPDATE commerce.plan_subscriptions SET status = 'EXPIRED' WHERE id = $1`, [
+            existing.id
+          ]);
+        const endsAt = computePlanEndsAt({
+          existingEndsAt: existing?.endsAt,
+          durationDays: item.durationDays,
+          now
+        });
+        await t.none(
+          `INSERT INTO commerce.plan_subscriptions
+             (user_id, organization_id, plan_id, order_item_id, starts_at, ends_at, status)
+           VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')
+           ON CONFLICT (order_item_id) DO NOTHING`,
+          [order.userId, order.organizationId, item.planId, item.orderItemId, now, endsAt]
+        );
+      } else if (item.type === "PROMOTION") {
+        const endsAt = new Date(now.getTime() + item.promotionDurationDays * 24 * 60 * 60 * 1000);
+        await t.none(
+          `INSERT INTO marketplace.listing_promotions
+             (listing_id, promotion_type, order_item_id, starts_at, ends_at, status)
+           VALUES ($1,$2,$3,$4,$5,'ACTIVE')
+           ON CONFLICT (order_item_id) WHERE order_item_id IS NOT NULL DO NOTHING`,
+          [item.metadata?.targetId, item.promotionType, item.orderItemId, now, endsAt]
+        );
+      } else if (item.type === "SERVICE") {
+        await t.none(
+          `UPDATE commerce.service_requests SET status = 'IN_PROGRESS'
+           WHERE id = $1 AND order_id = $2 AND status = 'PAYMENT_PENDING'`,
+          [item.metadata?.targetId, orderId]
+        );
+      }
+    }
+
+    return payment;
   });
 
 // The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)
@@ -314,18 +523,19 @@ export const failPayment = ({ id, providerPayload }) =>
 // and fails the WHERE clause instead of racing it to run capture/fail side
 // effects twice. Postgres holds the row lock for the conflicting key while
 // evaluating this, so concurrent deliveries for the same event serialize on it.
-export const insertWebhookEvent = ({ provider, eventId, eventType, payload }) =>
+export const insertWebhookEvent = ({ provider, eventId, eventType, payload, paymentId }) =>
   run(
     "oneOrNone",
-    `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload)
-     VALUES ($1,$2,$3,$4::jsonb)
+    `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload, payment_id)
+     VALUES ($1,$2,$3,$4::jsonb,$5)
      ON CONFLICT (provider, event_id) DO UPDATE
        SET event_type = EXCLUDED.event_type,
+           payment_id = EXCLUDED.payment_id,
            processed_at = NULL,
            processing_error = NULL
        WHERE commerce.payment_webhook_events.processing_error IS NOT NULL
      RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
-    [provider, eventId, eventType, JSON.stringify(payload || {})]
+    [provider, eventId, eventType, JSON.stringify(payload || {}), paymentId || null]
   );
 
 export const markWebhookProcessed = (id, error = null) =>
@@ -335,8 +545,24 @@ export const markWebhookProcessed = (id, error = null) =>
     [id, error]
   );
 
+// The webhook trace for a single payment — what Razorpay actually sent, in
+// delivery order — for the admin payment detail view (GET
+// /admin/payments/:paymentId). Requires the payment_id backfill from
+// 007_payment_webhook_event_payment_link.sql; deliveries received before
+// that migration ran have no linkage and will not appear here.
+export const findWebhookEventsByPaymentId = paymentId =>
+  run(
+    "any",
+    `SELECT id, provider, event_id AS "eventId", event_type AS "eventType", payload,
+            received_at AS "receivedAt", processed_at AS "processedAt", processing_error AS "processingError"
+     FROM commerce.payment_webhook_events
+     WHERE payment_id = $1
+     ORDER BY received_at DESC`,
+    [paymentId]
+  );
+
 const serviceColumns = `
-  sc.id, pr.code, sc.service_type AS "serviceType", pr.name, pr.description,
+  sc.id, pr.id AS "productId", pr.code, sc.service_type AS "serviceType", pr.name, pr.description,
   pr.amount_minor AS "amountMinor", sc.requires_property AS "requiresProperty",
   sc.requires_documents AS "requiresDocuments", pr.is_active AS "isActive"
 `;

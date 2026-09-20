@@ -470,6 +470,10 @@ CREATE TABLE marketplace.listing_promotions (
   created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT chk_listing_promotion_dates CHECK (ends_at IS NULL OR ends_at > starts_at)
 );
 CREATE INDEX idx_marketplace_listing_promotions_active ON marketplace.listing_promotions(listing_id, ends_at) WHERE status = 'ACTIVE';
+-- Makes promotion entitlement application idempotent per purchase: a retried
+-- capture (callback racing a webhook, or a redelivered webhook) can only ever
+-- insert one promotion row for a given order item.
+CREATE UNIQUE INDEX uq_marketplace_listing_promotions_order_item ON marketplace.listing_promotions(order_item_id) WHERE order_item_id IS NOT NULL;
 
 CREATE TABLE marketplace.favorites (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
@@ -563,6 +567,10 @@ CREATE TABLE commerce.plans (
   plan_type varchar(30) NOT NULL CHECK (plan_type IN ('FREE','PREMIUM','BROKER')), duration_days integer CHECK (duration_days IS NULL OR duration_days > 0),
   listing_limit integer CHECK (listing_limit IS NULL OR listing_limit >= 0), featured_days integer CHECK (featured_days IS NULL OR featured_days >= 0),
   verification_included boolean NOT NULL DEFAULT false, features jsonb,
+  -- NULL means unlimited. A user with no active plan_subscription at all
+  -- (never purchased anything) is not represented by any row here — that
+  -- ambient "Free" state's quota is a constant in ai.service.js, not a row.
+  ai_monthly_quota integer CHECK (ai_monthly_quota IS NULL OR ai_monthly_quota >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE commerce.orders (
@@ -583,6 +591,25 @@ CREATE INDEX idx_commerce_order_items_order ON commerce.order_items(order_id);
 ALTER TABLE marketplace.listing_promotions
   ADD CONSTRAINT fk_marketplace_listing_promotions_order_item
   FOREIGN KEY (order_item_id) REFERENCES commerce.order_items(id) ON DELETE SET NULL;
+
+-- Records that a specific user or organization currently holds (or has held)
+-- an active plan. commerce.plans is only the catalog; this is the actual
+-- entitlement. One row per one-time purchase/grant.
+CREATE TABLE commerce.plan_subscriptions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
+  organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
+  plan_id uuid NOT NULL REFERENCES commerce.plans(id) ON DELETE RESTRICT,
+  order_item_id uuid NOT NULL UNIQUE REFERENCES commerce.order_items(id) ON DELETE RESTRICT,
+  starts_at timestamptz NOT NULL DEFAULT now(),
+  ends_at timestamptz,
+  status varchar(30) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CANCELLED','EXPIRED')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_plan_subscription_owner CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+);
+CREATE INDEX idx_commerce_plan_subscriptions_user_active ON commerce.plan_subscriptions(user_id, ends_at) WHERE status = 'ACTIVE';
+CREATE INDEX idx_commerce_plan_subscriptions_org_active ON commerce.plan_subscriptions(organization_id, ends_at) WHERE status = 'ACTIVE';
+
 CREATE TABLE commerce.payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES commerce.orders(id) ON DELETE RESTRICT,
   provider varchar(30) NOT NULL CHECK (provider IN ('RAZORPAY','STRIPE','OTHER')), provider_order_id varchar(255), provider_payment_id varchar(255),
@@ -591,6 +618,10 @@ CREATE TABLE commerce.payments (
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX uq_commerce_payment_provider_id ON commerce.payments(provider, provider_payment_id) WHERE provider_payment_id IS NOT NULL;
+-- For the redirect flow this holds the Razorpay Payment Link id (plink_...),
+-- not a Razorpay Order id — it is whatever reference we created up front and
+-- look the payment up by by when the callback/webhook arrives.
+CREATE UNIQUE INDEX uq_commerce_payment_provider_order_id ON commerce.payments(provider, provider_order_id) WHERE provider_order_id IS NOT NULL;
 CREATE INDEX idx_commerce_payments_order ON commerce.payments(order_id, created_at DESC);
 CREATE TABLE commerce.payment_webhook_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -598,6 +629,10 @@ CREATE TABLE commerce.payment_webhook_events (
   event_id varchar(255) NOT NULL,
   event_type varchar(100) NOT NULL,
   payload jsonb NOT NULL,
+  -- The internal payment this delivery resolved to (see commerce.service.js
+  -- handleWebhook), for admin traceability. Null when the payload's
+  -- notes.internalPaymentId is missing or does not match any payment.
+  payment_id uuid REFERENCES commerce.payments(id) ON DELETE RESTRICT,
   received_at timestamptz NOT NULL DEFAULT now(),
   processed_at timestamptz,
   processing_error text,
@@ -607,6 +642,8 @@ CREATE TABLE commerce.payment_webhook_events (
 );
 CREATE INDEX idx_commerce_webhook_events_unprocessed
   ON commerce.payment_webhook_events(provider, received_at) WHERE processed_at IS NULL;
+CREATE INDEX idx_commerce_webhook_events_payment
+  ON commerce.payment_webhook_events(payment_id) WHERE payment_id IS NOT NULL;
 CREATE TABLE commerce.payment_refunds (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   payment_id uuid NOT NULL REFERENCES commerce.payments(id) ON DELETE RESTRICT,
@@ -619,6 +656,15 @@ CREATE TABLE commerce.payment_refunds (
 );
 CREATE UNIQUE INDEX uq_commerce_payment_refund_provider
   ON commerce.payment_refunds(provider_refund_id) WHERE provider_refund_id IS NOT NULL;
+-- Mirrors commerce.plans / commerce.service_catalog: a PROMOTION product's
+-- catalog configuration (which marketplace.listing_promotions.promotion_type
+-- it grants and for how long) lives here rather than on commerce.products.
+CREATE TABLE commerce.promotion_catalog (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), product_id uuid NOT NULL UNIQUE REFERENCES commerce.products(id) ON DELETE RESTRICT,
+  promotion_type varchar(30) NOT NULL CHECK (promotion_type IN ('PREMIUM','FEATURED','VERIFIED_BADGE','TOP_SEARCH')),
+  duration_days integer NOT NULL CHECK (duration_days > 0),
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE commerce.service_catalog (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), product_id uuid NOT NULL UNIQUE REFERENCES commerce.products(id) ON DELETE RESTRICT,
   code varchar(100) NOT NULL UNIQUE, service_type varchar(50) NOT NULL CHECK (service_type IN ('LEGAL_REVIEW','TITLE_SEARCH','VALUATION','LOAN_ASSISTANCE','REGISTRATION')),
