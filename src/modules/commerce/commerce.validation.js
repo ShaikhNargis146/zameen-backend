@@ -241,7 +241,8 @@ export const createPlan = body => ({
   isActive: optionalBoolean(body.isActive, true),
   billingMode: body.billingMode
     ? requiredEnum(body.billingMode, billingModes, "BILLING_MODE", "ONE_TIME or RECURRING")
-    : "ONE_TIME"
+    : "ONE_TIME",
+  aiMonthlyQuota: optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA")
 });
 
 export const updatePlan = body => {
@@ -274,6 +275,8 @@ export const updatePlan = body => {
       "BILLING_MODE",
       "ONE_TIME or RECURRING"
     );
+  if (Object.hasOwn(body, "aiMonthlyQuota"))
+    changes.aiMonthlyQuota = optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA");
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;

@@ -12,6 +12,7 @@ const planColumns = `
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
   pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
   pl.billing_mode AS "billingMode", pl.provider_plan_id AS "providerPlanId",
+  pl.ai_monthly_quota AS "aiMonthlyQuota",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
 
@@ -79,7 +80,8 @@ export const createPlan = ({
   featuredDays,
   verificationIncluded,
   features,
-  billingMode
+  billingMode,
+  aiMonthlyQuota
 }) =>
   runTx(async t => {
     const product = await t.one(
@@ -88,8 +90,8 @@ export const createPlan = ({
       [code, name, description, amountMinor, currency, isActive]
     );
     const plan = await t.one(
-      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, billing_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING id`,
+      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, billing_mode, ai_monthly_quota)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9) RETURNING id`,
       [
         product.id,
         planType,
@@ -98,7 +100,8 @@ export const createPlan = ({
         featuredDays,
         verificationIncluded,
         JSON.stringify(features || {}),
-        billingMode || "ONE_TIME"
+        billingMode || "ONE_TIME",
+        aiMonthlyQuota ?? null
       ]
     );
     return plan.id;
@@ -119,7 +122,8 @@ const planColumnMap = {
   featuredDays: "featured_days",
   verificationIncluded: "verification_included",
   features: "features",
-  billingMode: "billing_mode"
+  billingMode: "billing_mode",
+  aiMonthlyQuota: "ai_monthly_quota"
 };
 
 export const updatePlan = ({ productId, planId, changes }) =>

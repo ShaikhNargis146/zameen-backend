@@ -569,6 +569,10 @@ CREATE TABLE commerce.plans (
   verification_included boolean NOT NULL DEFAULT false, features jsonb,
   billing_mode varchar(20) NOT NULL DEFAULT 'ONE_TIME' CHECK (billing_mode IN ('ONE_TIME','RECURRING')),
   provider_plan_id varchar(255),
+  -- NULL means unlimited. A user with no active plan_subscription at all
+  -- (never purchased anything) is not represented by any row here — that
+  -- ambient "Free" state's quota is a constant in ai.service.js, not a row.
+  ai_monthly_quota integer CHECK (ai_monthly_quota IS NULL OR ai_monthly_quota >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE commerce.orders (

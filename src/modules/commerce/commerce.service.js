@@ -68,7 +68,9 @@ const toPlan = row =>
     verificationIncluded: row.verificationIncluded,
     features: row.features || {},
     isActive: row.isActive,
-    billingMode: row.billingMode
+    billingMode: row.billingMode,
+    // NULL means unlimited AI Property Assistant questions for this plan.
+    aiMonthlyQuota: row.aiMonthlyQuota
   };
 
 const toPlanAdmin = row =>
