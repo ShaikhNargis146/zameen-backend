@@ -1,5 +1,11 @@
 import { pg, run } from "../../shared/db.js";
 
+const runTx = async fn => {
+  const result = await pg.tx(fn);
+  if (!result.ok) throw result.error;
+  return result.data;
+};
+
 const conversationColumns = `id, user_id AS "userId", context_type AS "contextType", listing_id AS "listingId", title, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const listedConversationColumns = `conversation.id, conversation.user_id AS "userId", conversation.context_type AS "contextType", conversation.listing_id AS "listingId", conversation.title, conversation.created_at AS "createdAt", conversation.updated_at AS "updatedAt"`;
 export const createConversation = ({ userId, contextType, listingId, title }) =>
@@ -35,6 +41,14 @@ export const addMessage = ({
      SELECT id, role, content, metadata, created_at AS "createdAt" FROM inserted`,
     [conversationId, role, content, metadata ? JSON.stringify(metadata) : null]
   );
+// Only ever called on a failed/aborted chat attempt (see ai.service.js
+// streamMessage's finally block) — the USER row this attempt saved must not
+// linger as an unanswered turn that a later request's `messages.slice(-20)`
+// would replay into the model's context, or that GET
+// /ai/conversations/:id would show with no reply. role = 'USER' is a
+// defensive scope, never intended to delete an ASSISTANT/SYSTEM row.
+export const deleteMessage = id =>
+  run("none", `DELETE FROM ai.messages WHERE id = $1 AND role = 'USER'`, [id]);
 export const messages = conversationId =>
   run(
     "any",
@@ -63,21 +77,41 @@ export const activePlanForUser = userId =>
     [userId]
   );
 
-// Counts answered questions, not user messages sent — an unanswered/failed
-// attempt (e.g. AI_CONTEXT_UNAVAILABLE) never reaches this table's ASSISTANT
-// row, so it doesn't consume quota.
-export const assistantMessageCountThisMonth = async userId => {
-  const row = await run(
-    "one",
-    `SELECT count(*)::int AS count
-     FROM ai.messages m
-     JOIN ai.conversations c ON c.id = m.conversation_id
-     WHERE c.user_id = $1 AND m.role = 'ASSISTANT'
-       AND m.created_at >= date_trunc('month', now())`,
-    [userId]
-  );
-  return row.count;
-};
+// Atomically reserves one unit of this user's monthly AI quota — chat
+// answers, /ai/search and /ai/listing/generate all draw from the same pool
+// (see migrations/008_ai_usage_events.sql). The advisory lock serializes
+// concurrent callers for the same user, so two requests started at once
+// against a quota of 1 can't both pass the count check before either's
+// reservation lands — the second sees the first's still-open reservation
+// and is correctly blocked. Returns the reservation id, or null if quota is
+// already used up.
+export const reserveAiQuotaUsage = (userId, quota, kind) =>
+  runTx(async t => {
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [userId]);
+    const usage = await t.one(
+      `SELECT count(*)::int AS used FROM ai.usage_events
+       WHERE user_id = $1 AND reserved_at >= date_trunc('month', now())
+         AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
+      [userId]
+    );
+    if (usage.used >= quota) return null;
+    const row = await t.one(
+      `INSERT INTO ai.usage_events (user_id, kind) VALUES ($1, $2) RETURNING id`,
+      [userId, kind]
+    );
+    return row.id;
+  });
+
+// Converts a reservation into permanent usage for the rest of the month —
+// called once the reserved attempt actually produced a billable result.
+export const confirmAiQuotaUsage = id =>
+  run("none", `UPDATE ai.usage_events SET confirmed_at = now() WHERE id = $1`, [id]);
+
+// Releases a reservation that didn't pan out (failed/aborted attempt) so it
+// never counts against quota, matching the pre-existing "answered questions
+// only" invariant.
+export const releaseAiQuotaUsage = id =>
+  run("none", `DELETE FROM ai.usage_events WHERE id = $1`, [id]);
 export const conversationsForUser = (userId, { limit, offset }) =>
   run(
     "any",

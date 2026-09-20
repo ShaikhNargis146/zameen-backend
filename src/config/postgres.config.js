@@ -37,6 +37,16 @@ const cn = {
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
 
+  // ✅ Bounds how long any single query may run. Without this, a handful of
+  // concurrent expensive-but-valid queries (e.g. the live-regex listing
+  // search in discovery.repository.js) can hold connections open long
+  // enough to exhaust the 20-connection pool above, stalling every other
+  // module sharing it — not just the endpoint that issued them.
+  // statement_timeout is enforced by Postgres itself (cancels the query
+  // server-side); query_timeout is the client-side counterpart.
+  statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15000),
+  query_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS || 15000),
+
   ssl:
     process.env.DB_SSL === "true"
       ? {

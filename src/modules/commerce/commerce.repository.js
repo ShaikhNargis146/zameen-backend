@@ -514,7 +514,10 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
       }
     }
 
-    return payment;
+    // userId/organizationId are returned alongside the payment so the
+    // caller can notify the buyer without a second round trip — payments
+    // rows carry no user reference of their own, only orders do.
+    return { ...payment, userId: order.userId, organizationId: order.organizationId };
   });
 
 // The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)

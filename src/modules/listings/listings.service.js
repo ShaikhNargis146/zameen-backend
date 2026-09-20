@@ -3,6 +3,7 @@ import { HttpError } from "../../shared/http.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import logger from "../../utils/logger.js";
 import { signedReadUrl } from "../../utils/storage.js";
+import * as notifications from "../notifications/notifications.service.js";
 import {
   ownedProperty,
   passport as propertyPassport,
@@ -10,6 +11,16 @@ import {
   verificationSummary
 } from "../properties/properties.service.js";
 import * as repository from "./listings.repository.js";
+
+// Applied when an admin approves a listing without an explicit expiresAt —
+// the documented AdminApproveListing contract says "otherwise backend
+// plan/default decides" (docs/Zameen_API_PLAN_FULL.md), but no default ever
+// existed, so an approval that omitted expiresAt (a fully optional field)
+// left the listing PUBLISHED forever, immune to the expiry sweep
+// (repository.expirePublished only touches rows with expires_at set).
+const DEFAULT_LISTING_DURATION_DAYS = 90;
+const defaultListingExpiry = () =>
+  new Date(Date.now() + DEFAULT_LISTING_DURATION_DAYS * 24 * 60 * 60 * 1000);
 
 const listingCode = () =>
   `ZMN-L-${randomUUID()
@@ -96,7 +107,10 @@ export const remove = async listing => {
     );
 };
 export const submit = async listing => {
-  if (!["DRAFT", "REJECTED"].includes(listing.review_status))
+  if (
+    !["DRAFT", "REJECTED"].includes(listing.review_status) ||
+    listing.status !== "INACTIVE"
+  )
     throw new HttpError(
       409,
       "INVALID_TRANSITION",
@@ -385,9 +399,14 @@ export const adminListing = async id => {
 };
 export const approve = async ({ id, approval, actorId }) => {
   const before = await repository.summary(id);
+  // Preserve an existing expiry if the listing already had one (e.g. a
+  // second approval cycle), otherwise fall back to the 90-day default — the
+  // repository's own COALESCE(new, existing) only covers the first of
+  // those two cases, never actually setting a value the very first time.
+  const expiresAt = approval.expiresAt || before?.expiresAt || defaultListingExpiry();
   const result = await repository.approve({
     id,
-    expiresAt: approval.expiresAt
+    expiresAt
   });
   if (!result)
     throw new HttpError(
@@ -403,6 +422,12 @@ export const approve = async ({ id, approval, actorId }) => {
     before,
     after: listing,
     note: approval.note
+  });
+  await notifications.notifySeller(result.id, {
+    type: "LISTING_APPROVED",
+    title: "Your listing was approved",
+    body: "Your listing is now live and visible to buyers.",
+    data: { listingId: result.id }
   });
   return approval.note ? { ...listing, approvalNote: approval.note } : listing;
 };
@@ -423,6 +448,12 @@ export const reject = async ({ id, reason, actorId }) => {
     before,
     after: listing,
     note: reason
+  });
+  await notifications.notifySeller(result.id, {
+    type: "LISTING_REJECTED",
+    title: "Your listing was rejected",
+    body: reason || "Your listing was rejected during review.",
+    data: { listingId: result.id, reason }
   });
   return listing;
 };
@@ -446,6 +477,12 @@ export const suspend = async ({ id, reason, actorId }) => {
     after: listing,
     note: reason
   });
+  await notifications.notifySeller(result.id, {
+    type: "LISTING_SUSPENDED",
+    title: "Your listing was suspended",
+    body: reason || "Your listing was suspended by an administrator.",
+    data: { listingId: result.id, reason }
+  });
   return listing;
 };
 export const reinstate = async ({ id, reason, actorId }) => {
@@ -467,6 +504,12 @@ export const reinstate = async ({ id, reason, actorId }) => {
     before,
     after: listing,
     note: reason
+  });
+  await notifications.notifySeller(result.id, {
+    type: "LISTING_REINSTATED",
+    title: "Your listing was reinstated",
+    body: "Your listing is active again.",
+    data: { listingId: result.id }
   });
   return listing;
 };

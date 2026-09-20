@@ -84,6 +84,18 @@ export const addMember = async (req, res) =>
     })
   );
 
+export const acceptMembership = async (req, res) =>
+  ok(
+    res,
+    await service.acceptMembership({
+      organizationId: validation.uuid(
+        req.params.organizationId,
+        "organizationId"
+      ),
+      actorId: req.actor.id
+    })
+  );
+
 export const removeMember = async (req, res) => {
   await service.removeMember({
     organizationId: validation.uuid(

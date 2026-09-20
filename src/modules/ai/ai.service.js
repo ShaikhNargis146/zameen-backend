@@ -39,20 +39,31 @@ const logChatFailure = (stage, error) =>
 // database row for the ambient "Free" tier, so its quota lives here.
 export const DEFAULT_FREE_AI_MONTHLY_QUOTA = 5;
 
-export const hasAiQuotaRemaining = ({ quota, usedThisMonth }) =>
-  quota === null || usedThisMonth < quota;
+const noopRelease = async () => {};
 
-const enforceAiQuota = async actorId => {
+// Reserves one unit of the caller's monthly AI quota before the paid LLM
+// call starts. Chat answers, /ai/search and /ai/listing/generate all draw
+// from the same pool (see ai.repository.js reserveAiQuotaUsage) — a rejected
+// question must cost nothing and a caller must never be able to exceed
+// quota by racing concurrent requests. Returns a release function the
+// caller MUST invoke exactly once when its own work finishes: `true`
+// converts the reservation into permanent usage, `false` (the default, for
+// any failure/abort) deletes it so a failed attempt never costs quota.
+const reserveAiQuota = async (actorId, kind) => {
   const plan = await repository.activePlanForUser(actorId);
   const quota = plan ? plan.aiMonthlyQuota : DEFAULT_FREE_AI_MONTHLY_QUOTA;
-  if (quota === null) return;
-  const usedThisMonth = await repository.assistantMessageCountThisMonth(actorId);
-  if (!hasAiQuotaRemaining({ quota, usedThisMonth }))
+  if (quota === null) return noopRelease;
+  const reservationId = await repository.reserveAiQuotaUsage(actorId, quota, kind);
+  if (reservationId === null)
     throw new HttpError(
       403,
       "AI_MONTHLY_QUOTA_EXCEEDED",
       `You have used all ${quota} AI Property Assistant questions included in your plan this month.`
     );
+  return async (succeeded = false) =>
+    succeeded
+      ? repository.confirmAiQuotaUsage(reservationId)
+      : repository.releaseAiQuotaUsage(reservationId);
 };
 
 const requireAccess = async ({ conversationId, actorId }) => {
@@ -72,62 +83,72 @@ const requireAccess = async ({ conversationId, actorId }) => {
 };
 
 export const search = async ({ input, actorId }) => {
-  const intent = await provider.searchIntent({
-    query: input.query,
-    language: input.language,
-    catalog: await repository.searchCatalog()
-  });
-  const references = await repository.resolveSearchReferences(intent);
-  if (
-    (intent.minArea !== null || intent.maxArea !== null) &&
-    !references.areaUnitId
-  )
-    throw new HttpError(
-      502,
-      "AI_PROVIDER_INVALID_RESPONSE",
-      "AI service returned an unusable response."
-    );
-  const filters = validateListingSearch({
-    locationIds: references.locationIds,
-    propertyTypeIds: references.propertyTypeIds,
-    transactionTypes: intent.transactionTypes,
-    minPriceMinor: intent.minPriceMinor,
-    maxPriceMinor: intent.maxPriceMinor,
-    minArea: intent.minArea,
-    maxArea: intent.maxArea,
-    areaUnitId: references.areaUnitId,
-    verifiedOnly: intent.verifiedOnly,
-    minRoadWidthM: intent.minRoadWidthM,
-    facing: intent.facing,
-    cornerPlot: intent.cornerPlot,
-    sellerType: intent.sellerType,
-    sort: intent.sort,
-    page: input.page,
-    limit: input.limit
-  });
-  const result = await discovery.search({ filters, actorId });
-  const isAmbiguous =
-    !filters.locationIds.length &&
-    !filters.propertyTypeIds.length &&
-    !filters.transactionTypes.length &&
-    filters.minPriceMinor === null &&
-    filters.maxPriceMinor === null &&
-    filters.minArea === null &&
-    filters.maxArea === null;
-  const clarificationNeeded = intent.clarificationNeeded || isAmbiguous;
-  const clarificationQuestion = clarificationNeeded
-    ? snippet(intent.clarificationQuestion).slice(0, 500) ||
-      "What location, property type, budget, or area do you have in mind?"
-    : null;
-  const { offset, ...parsedFilters } = filters;
-  return {
-    normalizedQuery: snippet(input.query),
-    parsedFilters,
-    clarificationNeeded,
-    clarificationQuestion,
-    results: result.data,
-    meta: result.meta
-  };
+  // Anonymous callers (optionalAuth) have no plan to meter against, so this
+  // only reserves for a logged-in actor — the same rate limit that already
+  // applies to this route is the only guard for anonymous traffic.
+  const releaseQuota = actorId ? await reserveAiQuota(actorId, "SEARCH") : noopRelease;
+  let succeeded = false;
+  try {
+    const intent = await provider.searchIntent({
+      query: input.query,
+      language: input.language,
+      catalog: await repository.searchCatalog()
+    });
+    const references = await repository.resolveSearchReferences(intent);
+    if (
+      (intent.minArea !== null || intent.maxArea !== null) &&
+      !references.areaUnitId
+    )
+      throw new HttpError(
+        502,
+        "AI_PROVIDER_INVALID_RESPONSE",
+        "AI service returned an unusable response."
+      );
+    const filters = validateListingSearch({
+      locationIds: references.locationIds,
+      propertyTypeIds: references.propertyTypeIds,
+      transactionTypes: intent.transactionTypes,
+      minPriceMinor: intent.minPriceMinor,
+      maxPriceMinor: intent.maxPriceMinor,
+      minArea: intent.minArea,
+      maxArea: intent.maxArea,
+      areaUnitId: references.areaUnitId,
+      verifiedOnly: intent.verifiedOnly,
+      minRoadWidthM: intent.minRoadWidthM,
+      facing: intent.facing,
+      cornerPlot: intent.cornerPlot,
+      sellerType: intent.sellerType,
+      sort: intent.sort,
+      page: input.page,
+      limit: input.limit
+    });
+    const result = await discovery.search({ filters, actorId });
+    const isAmbiguous =
+      !filters.locationIds.length &&
+      !filters.propertyTypeIds.length &&
+      !filters.transactionTypes.length &&
+      filters.minPriceMinor === null &&
+      filters.maxPriceMinor === null &&
+      filters.minArea === null &&
+      filters.maxArea === null;
+    const clarificationNeeded = intent.clarificationNeeded || isAmbiguous;
+    const clarificationQuestion = clarificationNeeded
+      ? snippet(intent.clarificationQuestion).slice(0, 500) ||
+        "What location, property type, budget, or area do you have in mind?"
+      : null;
+    const { offset, ...parsedFilters } = filters;
+    succeeded = true;
+    return {
+      normalizedQuery: snippet(input.query),
+      parsedFilters,
+      clarificationNeeded,
+      clarificationQuestion,
+      results: result.data,
+      meta: result.meta
+    };
+  } finally {
+    await releaseQuota(succeeded);
+  }
 };
 export const createConversation = async ({ actorId, input }) => {
   if (input.listingId && !(await repository.listingContext(input.listingId)))
@@ -170,89 +191,101 @@ const messageContext = async ({ conversationId, actorId, input }) => {
     conversationId,
     actorId
   });
-  // Checked before any context assembly or provider call: a rejected
-  // question should cost nothing and leave no history.
-  await enforceAiQuota(actorId);
-  const listing = conversation.listingId
-    ? await repository.listingContext(conversation.listingId)
-    : null;
-  let catalog;
-  let content;
-  let trends;
-  let investments;
+  // Reserved before any context assembly or provider call: a rejected
+  // question should cost nothing and leave no history. The reservation is
+  // released by streamMessage's finally block once this attempt's outcome
+  // is known.
+  const releaseQuota = await reserveAiQuota(actorId, "CHAT");
   try {
-    [catalog, content, trends, investments] = await Promise.all([
-      repository.searchCatalog(),
-      repository.publishedContentContext({
-        language: input.language,
-        locationId: listing?.locationId || null,
-        query: input.content
-      }),
-      repository.marketTrendContext({
-        locationId: listing?.locationId || null,
-        propertyTypeId: listing?.propertyTypeId || null
-      }),
-      repository.publishedInvestmentContext({
-        locationId: listing?.locationId || null,
-        propertyId: listing?.propertyId || null,
-        query: input.content
-      })
-    ]);
-  } catch (error) {
-    // Context is database-derived. Do not save a user message if assembling it
-    // failed, otherwise retries create duplicate history entries.
-    logChatFailure("context", error);
-    throw new HttpError(
-      503,
-      "AI_CONTEXT_UNAVAILABLE",
-      "AI chat context is temporarily unavailable."
-    );
-  }
-  const saved = await repository.addMessage({
-    conversationId,
-    role: "USER",
-    content: input.content
-  });
-  if (!saved.ok) throw saved.error;
-  const messages = await repository.messages(conversationId);
-  return {
-    providerInput: {
-      language: input.language,
-      listing,
-      catalog,
-      content: content.map(item => ({
-        id: item.id,
-        title: item.title,
-        summary: item.summary
-      })),
-      trends,
-      investments,
-      messages: messages.slice(-20).map(item => ({
-        role: item.role,
-        content: item.content
-      }))
-    },
-    metadata: {
-      sources: [
-        ...(listing
-          ? [{ type: "LISTING", listingId: conversation.listingId }]
-          : []),
-        ...content.map(item => ({
-          type: "CONTENT",
-          contentId: item.id,
-          slug: item.slug
-        })),
-        ...trends.map(item => ({
-          type: "MARKET_TREND",
-          trendSeriesId: item.id
-        })),
-        ...investments.map(item => ({
-          type: "INVESTMENT_OPPORTUNITY",
-          opportunityId: item.id
-        }))
-      ]
+    const listing = conversation.listingId
+      ? await repository.listingContext(conversation.listingId)
+      : null;
+    let catalog;
+    let content;
+    let trends;
+    let investments;
+    try {
+      [catalog, content, trends, investments] = await Promise.all([
+        repository.searchCatalog(),
+        repository.publishedContentContext({
+          language: input.language,
+          locationId: listing?.locationId || null,
+          query: input.content
+        }),
+        repository.marketTrendContext({
+          locationId: listing?.locationId || null,
+          propertyTypeId: listing?.propertyTypeId || null
+        }),
+        repository.publishedInvestmentContext({
+          locationId: listing?.locationId || null,
+          propertyId: listing?.propertyId || null,
+          query: input.content
+        })
+      ]);
+    } catch (error) {
+      // Context is database-derived. Do not save a user message if assembling it
+      // failed, otherwise retries create duplicate history entries.
+      logChatFailure("context", error);
+      throw new HttpError(
+        503,
+        "AI_CONTEXT_UNAVAILABLE",
+        "AI chat context is temporarily unavailable."
+      );
     }
-  };
+    const saved = await repository.addMessage({
+      conversationId,
+      role: "USER",
+      content: input.content
+    });
+    if (!saved.ok) throw saved.error;
+    const messages = await repository.messages(conversationId);
+    return {
+      providerInput: {
+        language: input.language,
+        listing,
+        catalog,
+        content: content.map(item => ({
+          id: item.id,
+          title: item.title,
+          summary: item.summary
+        })),
+        trends,
+        investments,
+        messages: messages.slice(-20).map(item => ({
+          role: item.role,
+          content: item.content
+        }))
+      },
+      metadata: {
+        sources: [
+          ...(listing
+            ? [{ type: "LISTING", listingId: conversation.listingId }]
+            : []),
+          ...content.map(item => ({
+            type: "CONTENT",
+            contentId: item.id,
+            slug: item.slug
+          })),
+          ...trends.map(item => ({
+            type: "MARKET_TREND",
+            trendSeriesId: item.id
+          })),
+          ...investments.map(item => ({
+            type: "INVESTMENT_OPPORTUNITY",
+            opportunityId: item.id
+          }))
+        ]
+      },
+      // Handed back so streamMessage's finally block can release the quota
+      // reservation and, on failure, delete this USER row — once this
+      // attempt's real outcome (answered vs. failed) is known.
+      releaseQuota,
+      userMessageId: saved.data.id
+    };
+  } catch (error) {
+    await releaseQuota(false);
+    throw error;
+  }
 };
 
 export const streamMessage = async ({ signal, ...params }) => {
@@ -263,45 +296,59 @@ export const streamMessage = async ({ signal, ...params }) => {
       // database context failures that happen before the OpenAI request.
       const context = await messageContext(params);
       let content = "";
+      let succeeded = false;
       try {
-        for await (const delta of provider.streamConversationReply({
-          ...context.providerInput,
-          signal
-        })) {
-          content += delta;
-          yield { type: "delta", delta };
+        try {
+          for await (const delta of provider.streamConversationReply({
+            ...context.providerInput,
+            signal
+          })) {
+            content += delta;
+            yield { type: "delta", delta };
+          }
+        } catch (error) {
+          logChatFailure("provider-stream", error);
+          throw error;
         }
-      } catch (error) {
-        logChatFailure("provider-stream", error);
-        throw error;
+        // Keep the persisted message byte-for-byte aligned with rendered deltas,
+        // except for inconsequential leading/trailing whitespace.
+        const response = content.trim();
+        if (!response) {
+          const error = new HttpError(
+            502,
+            "AI_PROVIDER_INVALID_RESPONSE",
+            "AI service returned an unusable response."
+          );
+          logChatFailure("provider-stream-empty", error);
+          throw error;
+        }
+        const answer = await repository.addMessage({
+          conversationId: params.conversationId,
+          role: "ASSISTANT",
+          content: response,
+          metadata: context.metadata
+        });
+        if (!answer.ok) {
+          logChatFailure("assistant-message-save", answer.error);
+          throw new HttpError(
+            503,
+            "AI_CONVERSATION_UNAVAILABLE",
+            "AI chat history is temporarily unavailable."
+          );
+        }
+        succeeded = true;
+        yield { type: "completed", message: messageResponse(answer.data) };
+      } finally {
+        await context.releaseQuota(succeeded);
+        // A failed/aborted attempt (provider error, empty response, save
+        // failure, client disconnect) must not leave its USER row behind —
+        // otherwise it sits as an unanswered turn in the conversation, and
+        // a later attempt's `messages.slice(-20)` context would replay it.
+        if (!succeeded)
+          await repository.deleteMessage(context.userMessageId).catch(error => {
+            logChatFailure("orphaned-user-message-cleanup", error);
+          });
       }
-      // Keep the persisted message byte-for-byte aligned with rendered deltas,
-      // except for inconsequential leading/trailing whitespace.
-      const response = content.trim();
-      if (!response) {
-        const error = new HttpError(
-          502,
-          "AI_PROVIDER_INVALID_RESPONSE",
-          "AI service returned an unusable response."
-        );
-        logChatFailure("provider-stream-empty", error);
-        throw error;
-      }
-      const answer = await repository.addMessage({
-        conversationId: params.conversationId,
-        role: "ASSISTANT",
-        content: response,
-        metadata: context.metadata
-      });
-      if (!answer.ok) {
-        logChatFailure("assistant-message-save", answer.error);
-        throw new HttpError(
-          503,
-          "AI_CONVERSATION_UNAVAILABLE",
-          "AI chat history is temporarily unavailable."
-        );
-      }
-      yield { type: "completed", message: messageResponse(answer.data) };
     }
   };
 };
@@ -319,27 +366,34 @@ export const getConversation = async ({ conversationId, actorId }) => {
   };
 };
 export const generateListing = async ({ actorId, input }) => {
-  const property = input.propertyId
-    ? await repository.ownedPropertyContext(input.propertyId, actorId)
-    : null;
-  if (input.propertyId && !property)
-    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
-  const propertyType = input.propertyTypeId
-    ? await repository.propertyType(input.propertyTypeId)
-    : null;
-  const draft = provider.normalizeListingDraft(
-    await provider.listingDraft({
-      language: input.language,
-      property,
-      input: {
-        ...input,
-        propertyTypeName: propertyType?.name || null
-      }
-    })
-  );
-  return {
-    ...draft,
-    disclaimer:
-      "AI-generated draft. Review all property, location, legal and price details before publishing."
-  };
+  const releaseQuota = await reserveAiQuota(actorId, "LISTING_GENERATE");
+  let succeeded = false;
+  try {
+    const property = input.propertyId
+      ? await repository.ownedPropertyContext(input.propertyId, actorId)
+      : null;
+    if (input.propertyId && !property)
+      throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+    const propertyType = input.propertyTypeId
+      ? await repository.propertyType(input.propertyTypeId)
+      : null;
+    const draft = provider.normalizeListingDraft(
+      await provider.listingDraft({
+        language: input.language,
+        property,
+        input: {
+          ...input,
+          propertyTypeName: propertyType?.name || null
+        }
+      })
+    );
+    succeeded = true;
+    return {
+      ...draft,
+      disclaimer:
+        "AI-generated draft. Review all property, location, legal and price details before publishing."
+    };
+  } finally {
+    await releaseQuota(succeeded);
+  }
 };

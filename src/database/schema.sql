@@ -102,6 +102,10 @@ CREATE TABLE auth.refresh_sessions (
   revoked_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   last_used_at timestamptz,
+  -- The session this one was rotated into, set at rotation time — lets a
+  -- same-token retry within a short grace window be recovered instead of
+  -- treated as theft. See migrations/011_refresh_session_rotation_chain.sql.
+  replaced_by_session_id uuid REFERENCES auth.refresh_sessions(id) ON DELETE SET NULL,
   CONSTRAINT chk_refresh_expiry CHECK (expires_at > created_at)
 );
 CREATE INDEX idx_auth_refresh_sessions_active ON auth.refresh_sessions(user_id, expires_at) WHERE revoked_at IS NULL;
@@ -196,7 +200,8 @@ CREATE TABLE account.organization_members (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   role varchar(30) NOT NULL CHECK (role IN ('OWNER','ADMIN','MEMBER')),
   status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INVITED','REMOVED')),
-  joined_at timestamptz NOT NULL DEFAULT now(),
+  -- Null while INVITED (not yet accepted) — see migrations/009_organization_member_invite.sql.
+  joined_at timestamptz,
   PRIMARY KEY (organization_id, user_id)
 );
 CREATE INDEX idx_account_organization_members_user ON account.organization_members(user_id, organization_id);
@@ -746,6 +751,10 @@ CREATE TABLE content.investment_interests (
   status varchar(20) NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','CONTACTED','CLOSED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- At most one open (not yet CLOSED) lead per investor per opportunity —
+-- see migrations/010_investment_interest_dedup.sql.
+CREATE UNIQUE INDEX uq_content_investment_interests_open
+  ON content.investment_interests(opportunity_id, user_id) WHERE status IN ('NEW','CONTACTED');
 CREATE TABLE content.ads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(255) NOT NULL,
   placement varchar(50) NOT NULL CHECK (placement IN ('HOME_TOP','SEARCH_TOP','PROPERTY_SIDEBAR','CONTENT')),
@@ -813,6 +822,15 @@ CREATE TABLE ai.messages (
   latency_ms integer CHECK (latency_ms IS NULL OR latency_ms >= 0), metadata jsonb, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_ai_messages_conversation ON ai.messages(conversation_id, created_at);
+
+-- Unified monthly AI-quota ledger shared by chat answers, /ai/search and
+-- /ai/listing/generate. See migrations/008_ai_usage_events.sql.
+CREATE TABLE ai.usage_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  kind varchar(30) NOT NULL CHECK (kind IN ('CHAT','SEARCH','LISTING_GENERATE')),
+  reserved_at timestamptz NOT NULL DEFAULT now(), confirmed_at timestamptz
+);
+CREATE INDEX idx_ai_usage_events_user_month ON ai.usage_events(user_id, reserved_at);
 
 -- Land Passport and Scanner Lite are deterministic read models, not AI or
 -- legal opinions. They are recalculated from the canonical property records.

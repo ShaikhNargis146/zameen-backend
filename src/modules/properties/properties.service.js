@@ -9,6 +9,7 @@ import {
   signedWriteUrl
 } from "../../utils/storage.js";
 import { verificationSummaryForChecks } from "../../shared/verification.js";
+import { liveListingForProperty } from "../listings/listings.repository.js";
 import * as repository from "./properties.repository.js";
 
 const propertyCode = () =>
@@ -76,7 +77,22 @@ export const create = async ({ actorId, input }) => {
   }
 };
 export const get = propertyId => repository.summary(propertyId);
-export const remove = propertyId => repository.archive(propertyId);
+// A property with a still-live listing (pending review or published) must
+// not be archived out from under it — repository.archive has no interlock
+// of its own, and listings.repository.publishedDetail/listingCard both
+// filter on the property's deleted_at, so an unguarded delete here leaves a
+// permanently-404 "ghost" listing that still occupies favorites/search
+// results instead of being withdrawn first (mirrors
+// listings.service.js remove(), which blocks the reverse direction).
+export const remove = async propertyId => {
+  if (await liveListingForProperty(propertyId))
+    throw new HttpError(
+      409,
+      "LIVE_LISTING_EXISTS",
+      "This property has a live listing. Withdraw the listing before deleting the property."
+    );
+  await repository.archive(propertyId);
+};
 export const listMine = async ({ actorId, input }) => {
   const offset = (input.page - 1) * input.limit;
   const [ids, count] = await Promise.all([
@@ -131,7 +147,17 @@ export const saveLocation = async ({ propertyId, input }) => {
 };
 export const getAmenities = repository.amenities;
 export const saveAmenities = async ({ propertyId, amenities }) => {
-  await repository.replaceAmenities(propertyId, amenities);
+  try {
+    await repository.replaceAmenities(propertyId, amenities);
+  } catch (error) {
+    if (error?.code === "23503")
+      throw new HttpError(
+        400,
+        "INVALID_AMENITY",
+        "One or more amenityId values do not exist."
+      );
+    throw error;
+  }
   return repository.amenities(propertyId);
 };
 export const getIdentifiers = repository.identifiers;

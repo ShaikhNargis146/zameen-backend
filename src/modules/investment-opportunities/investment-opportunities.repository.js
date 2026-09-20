@@ -80,10 +80,25 @@ export const audit = ({ actorId, action, opportunityId, before, after, note }) =
 
 const interestColumns = `id, opportunity_id AS "opportunityId", status, created_at AS "createdAt"`;
 
+// Returns null (does not insert) when the user already has an open
+// (NEW/CONTACTED) lead on this opportunity — the partial unique index is
+// the arbiter, so a retried/double-clicked call can't create a duplicate.
+// The service falls back to findOpenInterest to return that existing lead.
 export const createInterest = ({ opportunityId, userId, organizationId, contactPhone, contactEmail, message }) =>
   run(
-    "one",
+    "oneOrNone",
     `INSERT INTO content.investment_interests (opportunity_id, user_id, organization_id, contact_phone, contact_email, message)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${interestColumns}`,
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (opportunity_id, user_id) WHERE status IN ('NEW','CONTACTED') DO NOTHING
+     RETURNING ${interestColumns}`,
     [opportunityId, userId, organizationId, contactPhone, contactEmail, message]
+  );
+
+export const findOpenInterest = (opportunityId, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT ${interestColumns} FROM content.investment_interests
+     WHERE opportunity_id = $1 AND user_id = $2 AND status IN ('NEW','CONTACTED')
+     ORDER BY created_at DESC LIMIT 1`,
+    [opportunityId, userId]
   );

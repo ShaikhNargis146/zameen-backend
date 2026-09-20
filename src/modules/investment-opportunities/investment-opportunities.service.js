@@ -116,7 +116,12 @@ export const createInterest = async ({ opportunityId, actorId, input }) => {
   const opportunity = await repository.findById(opportunityId);
   if (!opportunity || opportunity.status !== "PUBLISHED") throw notFound();
   try {
-    const row = await repository.createInterest({ opportunityId, userId: actorId, ...input });
+    // A retried/double-clicked call hits the partial unique index and gets
+    // null back rather than a duplicate row — fall back to the existing
+    // open lead so the caller sees the same interest either way.
+    const row =
+      (await repository.createInterest({ opportunityId, userId: actorId, ...input })) ||
+      (await repository.findOpenInterest(opportunityId, actorId));
     return { id: row.id, opportunityId: row.opportunityId, status: row.status, createdAt: row.createdAt };
   } catch (error) {
     if (error?.code === "23503")

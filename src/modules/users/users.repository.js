@@ -25,6 +25,15 @@ export const updateProfile = (id, changes) =>
     where: "id = ${id} AND deleted_at IS NULL",
     params: { id }
   });
+// Only ever called after users.service.js confirmEmailChange has verified
+// an OTP sent to `email` — never from the general updateProfile path.
+export const setVerifiedEmail = (id, email) =>
+  pg.updateWhere({
+    table: "auth.users",
+    set: { email, email_verified_at: new Date() },
+    where: "id = ${id} AND deleted_at IS NULL",
+    params: { id }
+  });
 export const setUserStatus = (id, status) =>
   run(
     "oneOrNone",

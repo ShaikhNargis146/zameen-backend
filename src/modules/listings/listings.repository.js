@@ -66,11 +66,17 @@ export const archive = id =>
      WHERE id = $1 AND deleted_at IS NULL AND status <> 'PUBLISHED' RETURNING id`,
     [id]
   );
+// status = 'INACTIVE' (not just the review_status check) is required here —
+// a SUSPENDED listing can also have review_status DRAFT or REJECTED
+// (whatever it was when an admin suspended it), and without this a seller
+// could resubmit straight past that suspension with no admin involved,
+// since DRAFT/REJECTED alone doesn't distinguish "never submitted" from
+// "suspended while in that review state".
 export const submit = id =>
   run(
     "oneOrNone",
     `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
-     WHERE id = $1 AND deleted_at IS NULL AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
+     WHERE id = $1 AND deleted_at IS NULL AND status = 'INACTIVE' AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
     [id]
   );
 export const transition = ({

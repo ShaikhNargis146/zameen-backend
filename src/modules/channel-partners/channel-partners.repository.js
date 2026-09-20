@@ -31,16 +31,46 @@ export const listAdmin = ({ status, locationId, search, limit, offset }) =>
        AND ($3::varchar IS NULL OR u.display_name ILIKE $3 OR o.name ILIKE $3)
      ORDER BY cp.created_at DESC
      LIMIT $4 OFFSET $5`,
-    [status, locationId, search, limit, offset]
+    [status, locationId, search ? `%${search}%` : null, limit, offset]
   );
 
+// A REJECTED applicant gets no way back in without this: user_id is the
+// table's PRIMARY KEY, so a plain INSERT hits a unique violation and
+// mapReferenceError turns that into 409 ALREADY_APPLIED forever, with no
+// REJECTED -> PENDING transition anywhere and no re-apply endpoint. The
+// ON CONFLICT here re-opens a REJECTED profile as a fresh PENDING
+// application (clearing the prior approval fields); a conflict on any
+// other status (already PENDING/APPROVED/SUSPENDED) is left untouched by
+// the WHERE clause, and the null RETURNING is turned back into the same
+// 23505 mapReferenceError already maps to ALREADY_APPLIED, so that case is
+// unchanged.
 export const createProfile = ({ userId, organizationId, reraNumber, experienceYears, about, locationIds }) =>
   runTx(async t => {
-    await t.none(
+    const result = await t.oneOrNone(
       `INSERT INTO account.channel_partner_profiles (user_id, organization_id, rera_number, about, experience_years)
-       VALUES ($1,$2,$3,$4,$5)`,
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id) DO UPDATE SET
+         organization_id = EXCLUDED.organization_id,
+         rera_number = EXCLUDED.rera_number,
+         about = EXCLUDED.about,
+         experience_years = EXCLUDED.experience_years,
+         status = 'PENDING',
+         approved_at = NULL,
+         approved_by_user_id = NULL,
+         updated_at = now()
+       WHERE account.channel_partner_profiles.status = 'REJECTED'
+       RETURNING user_id`,
       [userId, organizationId, reraNumber, about, experienceYears]
     );
+    if (!result) {
+      const alreadyApplied = new Error("A channel partner application already exists for this user.");
+      alreadyApplied.code = "23505";
+      throw alreadyApplied;
+    }
+    // Re-applying replaces the location set rather than adding to the
+    // REJECTED profile's old one — otherwise re-inserting a location the
+    // applicant kept from before would hit the composite PK.
+    await t.none(`DELETE FROM account.channel_partner_locations WHERE channel_partner_user_id = $1`, [userId]);
     for (const locationId of locationIds)
       await t.none(
         `INSERT INTO account.channel_partner_locations (channel_partner_user_id, location_id) VALUES ($1,$2)`,

@@ -6,6 +6,12 @@ const run = async (method, sql, params = []) => {
   return result.data;
 };
 
+const runTx = async fn => {
+  const result = await pg.tx(fn);
+  if (!result.ok) throw result.error;
+  return result.data;
+};
+
 const organizationColumns = `id, name, type, slug, phone, email, gst_number AS "gstNumber", rera_number AS "reraNumber", logo_storage_key AS "logoStorageKey", status`;
 
 export const createWithOwner = async ({
@@ -147,30 +153,78 @@ export const findUserSummary = userId =>
     [userId]
   );
 
-export const addMember = (organizationId, userId, role) =>
-  run(
-    "one",
-    `INSERT INTO account.organization_members (organization_id, user_id, role, status, joined_at)
-     VALUES ($1,$2,$3,'ACTIVE',now())
-     ON CONFLICT (organization_id, user_id)
-     DO UPDATE SET role = EXCLUDED.role, status = 'ACTIVE', joined_at = now()
-     RETURNING role, status, joined_at AS "joinedAt"`,
-    [organizationId, userId, role]
-  );
+// Both addMember and removeMember take a per-organization advisory lock
+// before reading the current active-owner count — without it, two
+// concurrent operations that would each individually leave >=1 owner (e.g.
+// two owners removing each other at once) can both read "count > 1" before
+// either commits, leaving the organization with zero active owners and no
+// way to re-grant OWNER (only an existing owner may do that).
+const ownerCountLockKey = organizationId => `${organizationId}:organization-owner-count`;
 
-export const removeMember = (organizationId, userId) =>
-  run(
-    "oneOrNone",
-    `UPDATE account.organization_members SET status = 'REMOVED'
-     WHERE organization_id = $1 AND user_id = $2 AND status <> 'REMOVED'
-     RETURNING user_id AS "userId"`,
-    [organizationId, userId]
-  );
-
-export const countActiveOwners = organizationId =>
-  run(
-    "one",
+const activeOwnerCount = (t, organizationId) =>
+  t.one(
     `SELECT count(*)::int AS count FROM account.organization_members
      WHERE organization_id = $1 AND role = 'OWNER' AND status = 'ACTIVE'`,
     [organizationId]
   );
+
+// A brand-new invite (or re-inviting someone previously REMOVED) starts
+// INVITED, not ACTIVE — the target must accept it themselves
+// (see acceptInvite) before they're really a member. An already-ACTIVE
+// member keeps their ACTIVE status and joined_at when only their role
+// changes (no re-consent needed for a role change to someone already in
+// the org). Re-inviting someone still INVITED just refreshes their role.
+export const addMember = (organizationId, userId, role) =>
+  runTx(async t => {
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [ownerCountLockKey(organizationId)]);
+    const existing = await t.oneOrNone(
+      `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
+      [organizationId, userId]
+    );
+    if (existing?.role === "OWNER" && existing.status === "ACTIVE" && role !== "OWNER") {
+      const owners = await activeOwnerCount(t, organizationId);
+      if (owners.count <= 1) return { membership: null, reason: "LAST_OWNER" };
+    }
+    const membership = await t.one(
+      `INSERT INTO account.organization_members (organization_id, user_id, role, status)
+       VALUES ($1,$2,$3,'INVITED')
+       ON CONFLICT (organization_id, user_id) DO UPDATE
+         SET role = EXCLUDED.role,
+             status = CASE WHEN account.organization_members.status = 'ACTIVE' THEN 'ACTIVE' ELSE 'INVITED' END,
+             joined_at = CASE WHEN account.organization_members.status = 'ACTIVE' THEN account.organization_members.joined_at ELSE NULL END
+       RETURNING role, status, joined_at AS "joinedAt"`,
+      [organizationId, userId, role]
+    );
+    return { membership, reason: null };
+  });
+
+// Called by the invited user themselves — the only way a membership ever
+// becomes ACTIVE from INVITED (see organizations.service.js acceptMembership).
+export const acceptInvite = (organizationId, userId) =>
+  run(
+    "oneOrNone",
+    `UPDATE account.organization_members SET status = 'ACTIVE', joined_at = now()
+     WHERE organization_id = $1 AND user_id = $2 AND status = 'INVITED'
+     RETURNING role, status, joined_at AS "joinedAt"`,
+    [organizationId, userId]
+  );
+
+export const removeMember = (organizationId, userId) =>
+  runTx(async t => {
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [ownerCountLockKey(organizationId)]);
+    const target = await t.oneOrNone(
+      `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
+      [organizationId, userId]
+    );
+    if (!target || target.status === "REMOVED") return { removed: null, reason: "NOT_FOUND" };
+    if (target.role === "OWNER" && target.status === "ACTIVE") {
+      const owners = await activeOwnerCount(t, organizationId);
+      if (owners.count <= 1) return { removed: null, reason: "LAST_OWNER" };
+    }
+    const removed = await t.one(
+      `UPDATE account.organization_members SET status = 'REMOVED'
+       WHERE organization_id = $1 AND user_id = $2 RETURNING user_id AS "userId"`,
+      [organizationId, userId]
+    );
+    return { removed, reason: null };
+  });

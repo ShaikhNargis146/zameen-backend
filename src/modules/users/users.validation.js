@@ -33,14 +33,23 @@ export const profileChanges = body => {
     changes.first_name = nullableText(body.firstName, "firstName", 100);
   if (Object.hasOwn(body, "lastName"))
     changes.last_name = nullableText(body.lastName, "lastName", 100);
-  if (Object.hasOwn(body, "email")) {
-    const email = nullableText(body.email, "email", 255);
-    if (email && !emailPattern.test(email))
-      throw new HttpError(400, "INVALID_EMAIL", "email must be valid.", [
-        { field: "email", message: "email must be valid." }
-      ]);
-    changes.email = email?.toLowerCase() || null;
-  }
+  // email is deliberately NOT accepted here — see emailChangeRequest /
+  // emailChangeConfirm below. Setting it directly with no proof of ownership
+  // of the new address let one account claim an email nobody there had
+  // verified; a later legitimate OTP login to that address would then land
+  // in this account instead of the real owner's.
+  if (Object.hasOwn(body, "email"))
+    throw new HttpError(
+      400,
+      "EMAIL_CHANGE_REQUIRES_VERIFICATION",
+      "email cannot be changed here — use POST /users/me/email/change to verify the new address first.",
+      [
+        {
+          field: "email",
+          message: "email cannot be changed here — use POST /users/me/email/change."
+        }
+      ]
+    );
   if (Object.hasOwn(body, "preferredLanguage")) {
     const language = String(body.preferredLanguage || "").trim();
     if (!languages.has(language))
@@ -52,6 +61,28 @@ export const profileChanges = body => {
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;
+};
+
+export const emailChangeRequest = body => {
+  const email = nullableText(body.email, "email", 255)?.toLowerCase();
+  if (!email || !emailPattern.test(email))
+    throw new HttpError(400, "INVALID_EMAIL", "email must be valid.", [
+      { field: "email", message: "email must be valid." }
+    ]);
+  return { email };
+};
+
+export const emailChangeConfirm = body => {
+  const challengeId = String(body.challengeId || "").trim();
+  const otp = String(body.otp || "").trim();
+  if (!challengeId || !otp)
+    throw new HttpError(
+      400,
+      "INVALID_OTP",
+      "challengeId and otp are required.",
+      [{ field: "otp", message: "challengeId and otp are required." }]
+    );
+  return { challengeId, otp };
 };
 
 export const selfRole = body => {

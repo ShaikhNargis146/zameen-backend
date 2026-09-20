@@ -13,6 +13,7 @@ import {
   signedWriteUrl
 } from "../../utils/storage.js";
 import * as organizationsRepository from "../organizations/organizations.repository.js";
+import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./commerce.repository.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
 
@@ -419,6 +420,18 @@ export const paymentMatchesProvider = ({
   Number(providerAmountMinor) === Number(payment.amountMinor) &&
   String(providerCurrency || "").toUpperCase() === String(payment.currency || "").toUpperCase();
 
+// Fired once a payment is actually captured, from both the callback and
+// webhook paths — previously neither notified the buyer at all.
+// notifications.notifyUser is itself best-effort (never throws), matching
+// the existing convention elsewhere (enquiries/site-visits notifications).
+const notifyPaymentCaptured = captured =>
+  notifications.notifyUser(captured.userId, {
+    type: "PAYMENT_CAPTURED",
+    title: "Payment successful",
+    body: "Your payment was received and your order is now active.",
+    data: { paymentId: captured.id, orderId: captured.orderId }
+  });
+
 // Handles the browser landing back on our Payment Link callback_url. Always
 // resolves to a redirect target, never throws — Razorpay/the browser is
 // making a plain GET here with no Authorization header, so there is no JSON
@@ -465,12 +478,13 @@ export const paymentCallback = async ({ query }) => {
       )
         return { redirectUrl: paymentResultUrl({ orderId: payment.orderId, status: "pending" }) };
 
-      await repository.capturePaymentAndApplyEntitlements({
+      const captured = await repository.capturePaymentAndApplyEntitlements({
         id: payment.id,
         orderId: payment.orderId,
         providerPaymentId: paymentId,
         providerPayload: { source: "payment_link_callback", query, providerPayment }
       });
+      await notifyPaymentCaptured(captured);
     } catch {
       // The webhook is authoritative and will retry this independently — the
       // browser must still get a redirect, not a raw error page, so surface
@@ -618,12 +632,13 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
           "PAYMENT_MISMATCH",
           "Webhook payment amount, currency, or status does not match the recorded payment."
         );
-      await repository.capturePaymentAndApplyEntitlements({
+      const captured = await repository.capturePaymentAndApplyEntitlements({
         id: payment.id,
         orderId: payment.orderId,
         providerPaymentId: paymentEntity.id,
         providerPayload: body
       });
+      await notifyPaymentCaptured(captured);
     } else if (payment && eventType === "payment.failed" && payment.status === "CREATED") {
       const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
       if (!failed.ok) throw failed.error;
