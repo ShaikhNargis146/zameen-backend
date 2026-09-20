@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zameens — Commerce, Plans & Razorpay Checkout",
-    "description": "Single source of truth for the commerce module: plan/service catalog, the ONE_TIME redirect-checkout flow (orders → Razorpay Payment Link → callback/webhook → entitlement), plan entitlement + expiry (GET /plans/me, the background expiry sweep and its notifications), plan administration, and the AI monthly-quota interaction with plans. Consolidates the former 'Zameens — Pricing Plans' and 'Zameens — Razorpay Checkout & AI Quota' collections into one, re-verified against the current route/controller/validation code in src/modules/commerce and src/modules/ai (2026-09-20, including the amount/currency/status re-verification on callback+webhook, the `latestPaymentStatus` order field, and the plan-expiry sweep added the same day). See docs/razorpay-integration-plan.md (design) and docs/razorpay-client-integration-guide.md (frontend walkthrough + full /payments/result status table).\n\nSetup: run 'Auth' to get accessToken (any logged-in user). adminAccessToken needs a separate ADMIN-role user for the Admin folders — this backend has no self-service admin signup, so get one from whoever seeds ADMIN accounts in your environment.",
+    "description": "Single source of truth for the commerce module: plan/service catalog, the ONE_TIME redirect-checkout flow (orders → Razorpay Payment Link → callback/webhook → entitlement), plan administration, and the AI monthly-quota interaction with plans. Consolidates the former 'Zameens — Pricing Plans' and 'Zameens — Razorpay Checkout & AI Quota' collections into one, re-verified against the current route/controller/validation code in src/modules/commerce and src/modules/ai (2026-09-20, including the amount/currency/status re-verification on callback+webhook and the `latestPaymentStatus` order field). See docs/razorpay-integration-plan.md (design) and docs/razorpay-client-integration-guide.md (frontend walkthrough + full /payments/result status table).\n\nSetup: run 'Auth' to get accessToken (any logged-in user). adminAccessToken needs a separate ADMIN-role user for the Admin folders — this backend has no self-service admin signup, so get one from whoever seeds ADMIN accounts in your environment.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -72,7 +72,7 @@
             "url": "{{baseUrl}}/plans"
           },
           "response": [],
-          "description": "This is the pricing page's data source and the only place a client should read plan prices/limits from.\n\n- Each plan returns `productId` — this, not the plan's own `id`, is what POST /orders needs.\n- `billingMode` is \"ONE_TIME\" or \"RECURRING\". Only ONE_TIME plans can actually be purchased today — POST /orders rejects a RECURRING plan with 409 PLAN_REQUIRES_SUBSCRIPTION (subscriptions are not implemented yet). Hide/disable the buy CTA for RECURRING plans.\n- `aiMonthlyQuota` (integer, or null = unlimited) is the live source of truth for the AI Property Assistant's monthly question limit on that plan — don't hardcode this in the frontend."
+          "description": "This is the pricing page's data source and the only place a client should read plan prices/limits from.\n\n- Each plan returns `productId` — this, not the plan's own `id`, is what POST /orders needs.\n- `aiMonthlyQuota` (integer, or null = unlimited) is the live source of truth for the AI Property Assistant's monthly question limit on that plan — don't hardcode this in the frontend."
         },
         {
           "name": "List services",
@@ -112,7 +112,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 0,\n  \"verificationIncluded\": false,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"propertyPhotosLimit\": 8,\n    \"videoUploadsPerProperty\": 0,\n    \"buyerEnquiries\": \"LIMITED\",\n    \"aiAssistantTier\": \"BASIC\",\n    \"featuredListingsPerMonth\": 0,\n    \"searchPriority\": \"STANDARD\",\n    \"listingAnalyticsTier\": \"BASIC\",\n    \"verifiedBadge\": false,\n    \"leadDashboard\": false,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"NONE\",\n    \"listingDurationDays\": 30,\n    \"billingCadence\": \"NONE\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 0,\n  \"verificationIncluded\": false,\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"propertyPhotosLimit\": 8,\n    \"videoUploadsPerProperty\": 0,\n    \"buyerEnquiries\": \"LIMITED\",\n    \"aiAssistantTier\": \"BASIC\",\n    \"featuredListingsPerMonth\": 0,\n    \"searchPriority\": \"STANDARD\",\n    \"listingAnalyticsTier\": \"BASIC\",\n    \"verifiedBadge\": false,\n    \"leadDashboard\": false,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"NONE\",\n    \"listingDurationDays\": 30,\n    \"billingCadence\": \"NONE\"\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -130,7 +130,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_PRO_MONTHLY\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 49900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 10,\n  \"verificationIncluded\": true,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 20,\n    \"videoUploadsPerProperty\": 1,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 2,\n    \"searchPriority\": \"HIGHER\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"PRIORITY\",\n    \"listingDurationDays\": 90,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_PRO_MONTHLY\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 49900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 10,\n  \"verificationIncluded\": true,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 20,\n    \"videoUploadsPerProperty\": 1,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 2,\n    \"searchPriority\": \"HIGHER\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"PRIORITY\",\n    \"listingDurationDays\": 90,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -148,7 +148,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_BUSINESS_MONTHLY\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies/brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 149900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 50,\n  \"verificationIncluded\": true,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 30,\n    \"videoUploadsPerProperty\": 3,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 10,\n    \"searchPriority\": \"HIGHEST\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 5,\n    \"bulkPropertyUpload\": true,\n    \"supportTier\": \"DEDICATED\",\n    \"listingDurationDays\": null,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_BUSINESS_MONTHLY\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies/brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 149900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 50,\n  \"verificationIncluded\": true,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 30,\n    \"videoUploadsPerProperty\": 3,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 10,\n    \"searchPriority\": \"HIGHEST\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 5,\n    \"bulkPropertyUpload\": true,\n    \"supportTier\": \"DEDICATED\",\n    \"listingDurationDays\": null,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -176,19 +176,19 @@
           "response": []
         },
         {
-          "name": "Admin: update plan (toggle billingMode / change AI quota)",
+          "name": "Admin: update plan (change AI quota)",
           "request": {
             "method": "PATCH",
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"aiMonthlyQuota\": 100,\n  \"billingMode\": \"ONE_TIME\"\n}"
+              "raw": "{\n  \"aiMonthlyQuota\": 100\n}"
             },
             "url": "{{baseUrl}}/admin/plans/{{planId}}"
           },
           "response": [],
-          "description": "Changing billingMode or aiMonthlyQuota only affects future purchases/usage windows — it never retroactively alters a customer's already-granted entitlement or already-counted usage this month. Note: `code` cannot be changed once the plan has any orders against it (409 PLAN_CODE_LOCKED)."
+          "description": "Changing aiMonthlyQuota only affects future usage windows — it never retroactively alters a customer's already-counted usage this month. Note: `code` cannot be changed once the plan has any orders against it (409 PLAN_CODE_LOCKED)."
         },
         {
           "name": "Admin: activate plan",
@@ -240,7 +240,7 @@
             "url": "{{baseUrl}}/orders"
           },
           "response": [],
-          "description": "For a plan, send only productId/quantity — no targetType/targetId (a PLAN item with a target is rejected with 400 INVALID_TARGET). A RECURRING plan is rejected with 409 PLAN_REQUIRES_SUBSCRIPTION.\n\nResponse is the Order: `id`, `orderNumber`, `status: \"CREATED\"`, `items[]`, `subtotalMinor`, `taxMinor`, `totalMinor`, `currency`, `createdAt`, `paidAt`. The server always computes the price from the product row — nothing about price is client-controlled. Copy `id` → `orderId`. For the Pro plan above, expect `totalMinor: 49900`."
+          "description": "For a plan, send only productId/quantity — no targetType/targetId (a PLAN item with a target is rejected with 400 INVALID_TARGET).\n\nResponse is the Order: `id`, `orderNumber`, `status: \"CREATED\"`, `items[]`, `subtotalMinor`, `taxMinor`, `totalMinor`, `currency`, `createdAt`, `paidAt`. The server always computes the price from the product row — nothing about price is client-controlled. Copy `id` → `orderId`. For the Pro plan above, expect `totalMinor: 49900`."
         },
         {
           "name": "Create order — Promotion (boost a listing)",
@@ -309,7 +309,7 @@
             "url": "{{baseUrl}}/plans/me"
           },
           "response": [],
-          "description": "New endpoint — previously there was no way for a logged-in user to ask \"what plan am I on and when does it end?\" at all; plan entitlement was only ever checked internally (e.g. for gating the AI Assistant's monthly quota).\n\nResponse when the user has an active personal plan:\n```json\n{\n  \"hasActivePlan\": true,\n  \"plan\": { \"id\": \"...\", \"productId\": \"...\", \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", ... },\n  \"status\": \"ACTIVE\",\n  \"startsAt\": \"2026-09-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-10-01T00:00:00.000Z\"\n}\n```\nWhen there's no active plan (never purchased one, or it already lapsed): `{ \"hasActivePlan\": false, \"plan\": null, \"status\": null, \"startsAt\": null, \"endsAt\": null }`.\n\nOrganization-scoped plans are not returned here (personal plans only, same restriction as the AI-quota check) — there is no equivalent \"my org's plan\" endpoint yet.\n\nSee folder 6 for how the user finds out `endsAt` is approaching or has passed without having to poll this endpoint themselves."
+          "description": "Answers \"what plan am I on and when does it end?\" — previously only checked internally (e.g. for gating the AI Assistant's monthly quota), never exposed to the buyer.\n\nResponse when the user has an active personal plan:\n```json\n{\n  \"hasActivePlan\": true,\n  \"plan\": { \"id\": \"...\", \"productId\": \"...\", \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", ... },\n  \"status\": \"ACTIVE\",\n  \"startsAt\": \"2026-09-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-10-01T00:00:00.000Z\"\n}\n```\nWhen there's no active plan (never purchased one, or it already lapsed): `{ \"hasActivePlan\": false, \"plan\": null, \"status\": null, \"startsAt\": null, \"endsAt\": null }`.\n\nThere is no background sweep and no notification behind this — the query filters on `endsAt` lazily at read time, so a lapsed plan just stops being returned. The client is expected to read `endsAt` and decide for itself when to show \"expiring soon\"/\"expired\" messaging.\n\nOrganization-scoped plans are not returned here (personal plans only, same restriction as the AI-quota check) — there is no equivalent \"my org's plan\" endpoint yet."
         }
       ]
     },
@@ -395,20 +395,6 @@
             "url": "{{baseUrl}}/ai/conversations/{{conversationId}}"
           },
           "response": []
-        }
-      ]
-    },
-    {
-      "name": "6. Plan expiry — background sweep, reference only",
-      "item": [
-        {
-          "name": "GET my notifications (see PLAN_EXPIRING_SOON / PLAN_EXPIRED)",
-          "request": {
-            "method": "GET",
-            "url": "{{baseUrl}}/notifications?type=PLAN_EXPIRING_SOON"
-          },
-          "response": [],
-          "description": "No client action triggers these — a background sweep (every 15 minutes, wired up in src/index.js alongside the existing listing-expiry sweep) does two things to commerce.plan_subscriptions:\n\n1. Flips any row whose `endsAt` has passed from ACTIVE to EXPIRED — previously this only happened lazily, at the moment the same user bought a *new* plan, so a lapsed plan's status could sit at ACTIVE indefinitely if they never repurchased.\n2. Creates an in-app notification through the same /notifications system used everywhere else in the app:\n   - `PLAN_EXPIRING_SOON` — sent once, `PLAN_EXPIRY_REMINDER_DAYS` (default 3) days before `endsAt`. Deduplicated by checking whether one was already sent for that plan_subscription id, so it fires exactly once per subscription regardless of how many sweep runs see it in that window.\n   - `PLAN_EXPIRED` — sent once, at the moment the sweep flips that row to EXPIRED.\n\nBoth are **in-app only**. There is no email/SMS/push sending implemented anywhere in this codebase yet, so a user who never opens Notifications will not otherwise be told their plan lapsed. Change the `type` query param to `PLAN_EXPIRED`, or drop it entirely, to see the other type / everything."
         }
       ]
     }

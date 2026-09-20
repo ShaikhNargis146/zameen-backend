@@ -3,7 +3,6 @@ import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { sha256 } from "../../utils/crypto.js";
-import logger from "../../utils/logger.js";
 import {
   belongsToServiceReport,
   belongsToServiceRequest,
@@ -12,13 +11,9 @@ import {
   signedReadUrl,
   signedWriteUrl
 } from "../../utils/storage.js";
-import * as notifications from "../notifications/notifications.service.js";
 import * as organizationsRepository from "../organizations/organizations.repository.js";
 import * as repository from "./commerce.repository.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
-
-// How long before a plan's endsAt to send the one-time "expiring soon" reminder.
-const planExpiryReminderDays = Number(process.env.PLAN_EXPIRY_REMINDER_DAYS || 3);
 
 const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "dev-razorpay-key-id";
 const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
@@ -73,7 +68,6 @@ const toPlan = row =>
     verificationIncluded: row.verificationIncluded,
     features: row.features || {},
     isActive: row.isActive,
-    billingMode: row.billingMode,
     // NULL means unlimited AI Property Assistant questions for this plan.
     aiMonthlyQuota: row.aiMonthlyQuota
   };
@@ -143,7 +137,9 @@ export const setPlanActive = async (planId, isActive) => {
 // What a logged-in user actually has right now — there was previously no
 // endpoint for this at all; plan entitlement was only ever checked
 // internally (e.g. ai.repository.activePlanForUser for AI quota), never
-// exposed to the buyer themselves.
+// exposed to the buyer themselves. The client is expected to read `endsAt`
+// and decide for itself when to show an "expiring soon" banner — there is no
+// server-side push notification for this (see docs/razorpay-integration-plan.md).
 export const myPlanSubscription = async actorId => {
   const row = await repository.findActiveSubscriptionForUser(actorId);
   if (!row) return { hasActivePlan: false, plan: null, status: null, startsAt: null, endsAt: null };
@@ -154,53 +150,6 @@ export const myPlanSubscription = async actorId => {
     startsAt: row.startsAt,
     endsAt: row.endsAt
   };
-};
-
-// Moves lapsed subscriptions from ACTIVE to EXPIRED and tells the user it
-// happened. Run on a timer (see src/index.js) rather than only at the next
-// purchase, since a user who never repurchases would otherwise never be told.
-export const expirePlanSubscriptions = async () => {
-  const expired = await repository.expireLapsedPlanSubscriptions();
-  await Promise.all(
-    expired.map(row =>
-      notifications.notifyUser(row.userId, {
-        type: "PLAN_EXPIRED",
-        title: "Your plan has expired",
-        body: `Your ${row.planName} plan has expired. Renew to keep your plan benefits active.`,
-        data: { planSubscriptionId: row.id }
-      })
-    )
-  );
-  if (expired.length)
-    logger.info(`Expired ${expired.length} plan subscription(s) past their endsAt.`);
-  return expired.length;
-};
-
-// One-time heads-up before a plan lapses, so expiry isn't the first the user
-// hears of it. Idempotent across runs — see findExpiringSoonSubscriptions.
-export const remindExpiringPlanSubscriptions = async () => {
-  const expiringSoon = await repository.findExpiringSoonSubscriptions(planExpiryReminderDays);
-  await Promise.all(
-    expiringSoon.map(row =>
-      notifications.notifyUser(row.userId, {
-        type: "PLAN_EXPIRING_SOON",
-        title: "Your plan is expiring soon",
-        body: `Your ${row.planName} plan expires on ${new Date(row.endsAt).toDateString()}. Renew to avoid interruption.`,
-        data: { planSubscriptionId: row.id, endsAt: row.endsAt }
-      })
-    )
-  );
-  if (expiringSoon.length)
-    logger.info(`Sent expiring-soon reminder for ${expiringSoon.length} plan subscription(s).`);
-  return expiringSoon.length;
-};
-
-export const sweepPlanSubscriptions = async () => {
-  const [expiredCount, remindedCount] = await Promise.all([
-    expirePlanSubscriptions(),
-    remindExpiringPlanSubscriptions()
-  ]);
-  return { expiredCount, remindedCount };
 };
 
 const toOrders = async rows => {
@@ -249,12 +198,6 @@ const validateOrderItemTarget = async ({ product, item, actorId, organizationId 
   if (product.type === "PLAN") {
     if (item.targetType || item.targetId)
       throw new HttpError(400, "INVALID_TARGET", "PLAN items must not include a target.");
-    if (product.billingMode === "RECURRING")
-      throw new HttpError(
-        409,
-        "PLAN_REQUIRES_SUBSCRIPTION",
-        "This plan is billed as a recurring subscription and cannot be purchased as a one-time order."
-      );
     return;
   }
   if (product.type === "PROMOTION") {

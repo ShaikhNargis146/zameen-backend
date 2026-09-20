@@ -53,21 +53,6 @@ test("createPayment no longer accepts a returnUrl (redirect target is fixed by t
   });
 });
 
-test("createPlan defaults billingMode to ONE_TIME and accepts RECURRING explicitly", () => {
-  const base = {
-    code: "PRO",
-    name: "Pro",
-    planType: "PREMIUM",
-    amountMinor: 49900
-  };
-  assert.equal(validation.createPlan(base).billingMode, "ONE_TIME");
-  assert.equal(validation.createPlan({ ...base, billingMode: "recurring" }).billingMode, "RECURRING");
-  assert.throws(
-    () => validation.createPlan({ ...base, billingMode: "WEEKLY" }),
-    error => error.code === "INVALID_BILLING_MODE"
-  );
-});
-
 test("paymentCallbackQuery reads Razorpay's redirect query params by name", () => {
   const result = validation.paymentCallbackQuery({
     razorpay_payment_id: "pay_1",

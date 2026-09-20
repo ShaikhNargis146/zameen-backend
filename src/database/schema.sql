@@ -567,8 +567,6 @@ CREATE TABLE commerce.plans (
   plan_type varchar(30) NOT NULL CHECK (plan_type IN ('FREE','PREMIUM','BROKER')), duration_days integer CHECK (duration_days IS NULL OR duration_days > 0),
   listing_limit integer CHECK (listing_limit IS NULL OR listing_limit >= 0), featured_days integer CHECK (featured_days IS NULL OR featured_days >= 0),
   verification_included boolean NOT NULL DEFAULT false, features jsonb,
-  billing_mode varchar(20) NOT NULL DEFAULT 'ONE_TIME' CHECK (billing_mode IN ('ONE_TIME','RECURRING')),
-  provider_plan_id varchar(255),
   -- NULL means unlimited. A user with no active plan_subscription at all
   -- (never purchased anything) is not represented by any row here — that
   -- ambient "Free" state's quota is a constant in ai.service.js, not a row.
@@ -596,44 +594,21 @@ ALTER TABLE marketplace.listing_promotions
 
 -- Records that a specific user or organization currently holds (or has held)
 -- an active plan. commerce.plans is only the catalog; this is the actual
--- entitlement. One row per purchase/grant (ONE_TIME) or per subscription
--- lifecycle (RECURRING) — see commerce.subscription_charges for individual
--- recurring renewal charges against a RECURRING row.
+-- entitlement. One row per one-time purchase/grant.
 CREATE TABLE commerce.plan_subscriptions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
   organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
   plan_id uuid NOT NULL REFERENCES commerce.plans(id) ON DELETE RESTRICT,
   order_item_id uuid NOT NULL UNIQUE REFERENCES commerce.order_items(id) ON DELETE RESTRICT,
-  billing_mode varchar(20) NOT NULL CHECK (billing_mode IN ('ONE_TIME','RECURRING')),
-  provider_subscription_id varchar(255),
   starts_at timestamptz NOT NULL DEFAULT now(),
   ends_at timestamptz,
-  status varchar(30) NOT NULL DEFAULT 'ACTIVE'
-    CHECK (status IN ('PENDING_AUTHORIZATION','ACTIVE','PAST_DUE','PAUSED','CANCELLED','EXPIRED','COMPLETED')),
+  status varchar(30) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CANCELLED','EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT chk_plan_subscription_owner CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL),
-  CONSTRAINT chk_plan_subscription_provider_id CHECK (billing_mode = 'ONE_TIME' OR provider_subscription_id IS NOT NULL)
+  CONSTRAINT chk_plan_subscription_owner CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
 );
-CREATE UNIQUE INDEX uq_commerce_plan_subscriptions_provider ON commerce.plan_subscriptions(provider_subscription_id) WHERE provider_subscription_id IS NOT NULL;
 CREATE INDEX idx_commerce_plan_subscriptions_user_active ON commerce.plan_subscriptions(user_id, ends_at) WHERE status = 'ACTIVE';
 CREATE INDEX idx_commerce_plan_subscriptions_org_active ON commerce.plan_subscriptions(organization_id, ends_at) WHERE status = 'ACTIVE';
-
--- One row per individual recurring renewal charge (cycle 2+). The first
--- cycle's charge is captured as a normal commerce.payments row on the order
--- created alongside the subscription; renewals after that have no order of
--- their own, so they are recorded here instead.
-CREATE TABLE commerce.subscription_charges (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  plan_subscription_id uuid NOT NULL REFERENCES commerce.plan_subscriptions(id) ON DELETE RESTRICT,
-  provider_payment_id varchar(255) NOT NULL,
-  amount_minor bigint NOT NULL CHECK (amount_minor >= 0), currency char(3) NOT NULL DEFAULT 'INR',
-  billing_cycle_number integer NOT NULL CHECK (billing_cycle_number > 0),
-  charged_at timestamptz NOT NULL DEFAULT now(),
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX uq_commerce_subscription_charges_payment ON commerce.subscription_charges(provider_payment_id);
-CREATE INDEX idx_commerce_subscription_charges_subscription ON commerce.subscription_charges(plan_subscription_id, charged_at DESC);
 
 CREATE TABLE commerce.payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES commerce.orders(id) ON DELETE RESTRICT,

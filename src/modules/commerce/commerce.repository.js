@@ -11,7 +11,6 @@ const planColumns = `
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
   pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
-  pl.billing_mode AS "billingMode", pl.provider_plan_id AS "providerPlanId",
   pl.ai_monthly_quota AS "aiMonthlyQuota",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
@@ -69,6 +68,8 @@ export const planHasOrders = planId =>
 
 // The buyer's own currently-active personal plan (organization-scoped plans
 // are out of scope here, same restriction as ai.repository's activePlanForUser).
+// No background sweep flips a lapsed row's status to EXPIRED, so this filters
+// on ends_at lazily, at read time, rather than trusting status = 'ACTIVE' alone.
 export const findActiveSubscriptionForUser = userId =>
   run(
     "oneOrNone",
@@ -84,46 +85,6 @@ export const findActiveSubscriptionForUser = userId =>
     [userId]
   );
 
-// Flips subscriptions whose window has actually closed from ACTIVE to
-// EXPIRED. Previously this only happened lazily, inside
-// capturePaymentAndApplyEntitlements, at the moment the same user bought a
-// *new* plan — so a lapsed plan's status row could sit at ACTIVE indefinitely
-// with nothing to notify the user. Run on a timer (see src/index.js).
-export const expireLapsedPlanSubscriptions = () =>
-  run(
-    "any",
-    `UPDATE commerce.plan_subscriptions ps
-     SET status = 'EXPIRED'
-     FROM commerce.plans pl
-     JOIN commerce.products pr ON pr.id = pl.product_id
-     WHERE ps.plan_id = pl.id
-       AND ps.status = 'ACTIVE' AND ps.ends_at IS NOT NULL AND ps.ends_at <= now()
-     RETURNING ps.id, ps.user_id AS "userId", pr.name AS "planName"`,
-    []
-  );
-
-// Subscriptions entering their reminder window that have not already been
-// reminded. Dedup is keyed off the notifications table itself
-// (data->>'planSubscriptionId') rather than a new column on plan_subscriptions
-// — this only ever needs to fire once per subscription's ends_at, so a log of
-// "was it sent" is enough and avoids a schema migration for it.
-export const findExpiringSoonSubscriptions = reminderDays =>
-  run(
-    "any",
-    `SELECT ps.id, ps.user_id AS "userId", ps.ends_at AS "endsAt", pr.name AS "planName"
-     FROM commerce.plan_subscriptions ps
-     JOIN commerce.plans pl ON pl.id = ps.plan_id
-     JOIN commerce.products pr ON pr.id = pl.product_id
-     WHERE ps.status = 'ACTIVE' AND ps.ends_at IS NOT NULL
-       AND ps.ends_at > now() AND ps.ends_at <= now() + ($1 || ' days')::interval
-       AND NOT EXISTS (
-         SELECT 1 FROM ops.notifications n
-         WHERE n.user_id = ps.user_id AND n.type = 'PLAN_EXPIRING_SOON'
-           AND (n.data->>'planSubscriptionId') = ps.id::text
-       )`,
-    [reminderDays]
-  );
-
 export const createPlan = ({
   code,
   name,
@@ -137,7 +98,6 @@ export const createPlan = ({
   featuredDays,
   verificationIncluded,
   features,
-  billingMode,
   aiMonthlyQuota
 }) =>
   runTx(async t => {
@@ -147,8 +107,8 @@ export const createPlan = ({
       [code, name, description, amountMinor, currency, isActive]
     );
     const plan = await t.one(
-      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, billing_mode, ai_monthly_quota)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9) RETURNING id`,
+      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING id`,
       [
         product.id,
         planType,
@@ -157,7 +117,6 @@ export const createPlan = ({
         featuredDays,
         verificationIncluded,
         JSON.stringify(features || {}),
-        billingMode || "ONE_TIME",
         aiMonthlyQuota ?? null
       ]
     );
@@ -179,7 +138,6 @@ const planColumnMap = {
   featuredDays: "featured_days",
   verificationIncluded: "verification_included",
   features: "features",
-  billingMode: "billing_mode",
   aiMonthlyQuota: "ai_monthly_quota"
 };
 
@@ -227,7 +185,7 @@ export const findProductsByIds = ids =>
   run(
     "any",
     `SELECT p.id, p.code, p.name, p.type, p.amount_minor AS "amountMinor", p.currency, p.is_active AS "isActive",
-            pl.id AS "planId", pl.billing_mode AS "billingMode",
+            pl.id AS "planId",
             promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
      FROM commerce.products p
      LEFT JOIN commerce.plans pl ON pl.product_id = p.id
@@ -475,8 +433,8 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
         });
         await t.none(
           `INSERT INTO commerce.plan_subscriptions
-             (user_id, organization_id, plan_id, order_item_id, billing_mode, starts_at, ends_at, status)
-           VALUES ($1,$2,$3,$4,'ONE_TIME',$5,$6,'ACTIVE')
+             (user_id, organization_id, plan_id, order_item_id, starts_at, ends_at, status)
+           VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')
            ON CONFLICT (order_item_id) DO NOTHING`,
           [order.userId, order.organizationId, item.planId, item.orderItemId, now, endsAt]
         );

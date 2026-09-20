@@ -16,7 +16,6 @@ const providers = new Set(["RAZORPAY"]);
 const currencies = new Set(["INR"]);
 const maxOrderItems = 20;
 const targetTypes = new Set(["LISTING", "SERVICE_REQUEST"]);
-const billingModes = new Set(["ONE_TIME", "RECURRING"]);
 const e164Pattern = /^\+[1-9]\d{7,14}$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const serviceTypes = new Set([
@@ -239,9 +238,6 @@ export const createPlan = body => ({
   verificationIncluded: optionalBoolean(body.verificationIncluded, false),
   features: optionalObject(body.features, "FEATURES") || {},
   isActive: optionalBoolean(body.isActive, true),
-  billingMode: body.billingMode
-    ? requiredEnum(body.billingMode, billingModes, "BILLING_MODE", "ONE_TIME or RECURRING")
-    : "ONE_TIME",
   aiMonthlyQuota: optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA")
 });
 
@@ -268,13 +264,6 @@ export const updatePlan = body => {
   if (Object.hasOwn(body, "features"))
     changes.features = optionalObject(body.features, "FEATURES") || {};
   if (Object.hasOwn(body, "isActive")) changes.isActive = Boolean(body.isActive);
-  if (Object.hasOwn(body, "billingMode"))
-    changes.billingMode = requiredEnum(
-      body.billingMode,
-      billingModes,
-      "BILLING_MODE",
-      "ONE_TIME or RECURRING"
-    );
   if (Object.hasOwn(body, "aiMonthlyQuota"))
     changes.aiMonthlyQuota = optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA");
   if (!Object.keys(changes).length)
