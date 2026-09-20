@@ -67,6 +67,63 @@ export const planHasOrders = planId =>
     [planId]
   ).then(Boolean);
 
+// The buyer's own currently-active personal plan (organization-scoped plans
+// are out of scope here, same restriction as ai.repository's activePlanForUser).
+export const findActiveSubscriptionForUser = userId =>
+  run(
+    "oneOrNone",
+    `SELECT ps.status AS "subscriptionStatus", ps.starts_at AS "startsAt", ps.ends_at AS "endsAt",
+            ${planColumns}
+     FROM commerce.plan_subscriptions ps
+     JOIN commerce.plans pl ON pl.id = ps.plan_id
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE ps.user_id = $1 AND ps.organization_id IS NULL
+       AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+     ORDER BY ps.ends_at DESC NULLS LAST
+     LIMIT 1`,
+    [userId]
+  );
+
+// Flips subscriptions whose window has actually closed from ACTIVE to
+// EXPIRED. Previously this only happened lazily, inside
+// capturePaymentAndApplyEntitlements, at the moment the same user bought a
+// *new* plan — so a lapsed plan's status row could sit at ACTIVE indefinitely
+// with nothing to notify the user. Run on a timer (see src/index.js).
+export const expireLapsedPlanSubscriptions = () =>
+  run(
+    "any",
+    `UPDATE commerce.plan_subscriptions ps
+     SET status = 'EXPIRED'
+     FROM commerce.plans pl
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE ps.plan_id = pl.id
+       AND ps.status = 'ACTIVE' AND ps.ends_at IS NOT NULL AND ps.ends_at <= now()
+     RETURNING ps.id, ps.user_id AS "userId", pr.name AS "planName"`,
+    []
+  );
+
+// Subscriptions entering their reminder window that have not already been
+// reminded. Dedup is keyed off the notifications table itself
+// (data->>'planSubscriptionId') rather than a new column on plan_subscriptions
+// — this only ever needs to fire once per subscription's ends_at, so a log of
+// "was it sent" is enough and avoids a schema migration for it.
+export const findExpiringSoonSubscriptions = reminderDays =>
+  run(
+    "any",
+    `SELECT ps.id, ps.user_id AS "userId", ps.ends_at AS "endsAt", pr.name AS "planName"
+     FROM commerce.plan_subscriptions ps
+     JOIN commerce.plans pl ON pl.id = ps.plan_id
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE ps.status = 'ACTIVE' AND ps.ends_at IS NOT NULL
+       AND ps.ends_at > now() AND ps.ends_at <= now() + ($1 || ' days')::interval
+       AND NOT EXISTS (
+         SELECT 1 FROM ops.notifications n
+         WHERE n.user_id = ps.user_id AND n.type = 'PLAN_EXPIRING_SOON'
+           AND (n.data->>'planSubscriptionId') = ps.id::text
+       )`,
+    [reminderDays]
+  );
+
 export const createPlan = ({
   code,
   name,
@@ -206,7 +263,14 @@ const orderColumns = `
   o.status, o.subtotal_minor AS "subtotalMinor", o.tax_minor AS "taxMinor", o.total_minor AS "totalMinor",
   o.currency, o.created_at AS "createdAt",
   (SELECT p.paid_at FROM commerce.payments p WHERE p.order_id = o.id AND p.status = 'CAPTURED'
-   ORDER BY p.paid_at DESC LIMIT 1) AS "paidAt"
+   ORDER BY p.paid_at DESC LIMIT 1) AS "paidAt",
+  -- o.status alone cannot distinguish "waiting on the current payment
+  -- attempt" from "the last attempt failed, retry needed" — both leave the
+  -- order in PAYMENT_PENDING so a same-order retry stays allowed (see
+  -- createPaymentIntent). Surfacing the most recent payment's own status
+  -- lets the result page tell the two apart instead of polling forever.
+  (SELECT p.status FROM commerce.payments p WHERE p.order_id = o.id
+   ORDER BY p.created_at DESC LIMIT 1) AS "latestPaymentStatus"
 `;
 
 export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor, taxMinor, totalMinor, currency, items }) =>

@@ -13,6 +13,7 @@ const requireOwnedServiceRequest = requireOwnedResource({
 });
 
 router.get("/plans", asyncRoute(controller.plans));
+router.get("/plans/me", requireAuth, asyncRoute(controller.myPlan));
 
 router.post("/orders", requireAuth, asyncRoute(controller.createOrder));
 router.get("/orders/me", requireAuth, asyncRoute(controller.myOrders));

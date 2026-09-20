@@ -1,7 +1,7 @@
 # Razorpay Checkout — Client Integration Guide
 
 **Audience:** Web/UI team integrating plan, promotion, and paid-service checkout.
-**Status:** One-time purchases (plans, promotions, services) are implemented and verified live against Razorpay's test API. Recurring subscriptions are **not** available yet — see Section 6.
+**Status:** One-time purchases (plans, promotions, services) are implemented and verified live against Razorpay's test API. Recurring subscriptions are **not** available yet — see Section 8.
 
 ## 1. What changed
 
@@ -65,7 +65,7 @@ Query: `?audience=FREE|PREMIUM|BROKER` (optional).
 
 **Use `productId`, not `id`, when placing an order** — `id` is the plan's own catalog row, `productId` is what `POST /orders` needs. (This field was missing from the public response until today; if you're reading an older capture of this endpoint's shape, re-check against a live call.)
 
-**Only show a "Buy" action for `billingMode: "ONE_TIME"` plans right now.** A `RECURRING` plan will be rejected by `POST /orders` (Section 6) — there's no purchase path for it yet.
+**Only show a "Buy" action for `billingMode: "ONE_TIME"` plans right now.** A `RECURRING` plan will be rejected by `POST /orders` (Section 8) — there's no purchase path for it yet.
 
 ### 3.2 `GET /services` / `GET /services/{serviceId}` — public
 
@@ -127,11 +127,11 @@ Response is a `ServiceRequest` with `status: "REQUESTED"` and `orderId: null`. K
 
 `targetType` and `targetId` must be sent together or not at all — sending one without the other is a 400.
 
-Response is the `Order` (id, orderNumber, status `CREATED`, items, subtotalMinor/taxMinor/totalMinor, currency, createdAt, paidAt). The server computes every amount — nothing about price is client-controlled.
+Response is the `Order` (id, orderNumber, status `CREATED`, `latestPaymentStatus` (null until a payment attempt exists — see Section 4), items, subtotalMinor/taxMinor/totalMinor, currency, createdAt, paidAt). The server computes every amount — nothing about price is client-controlled.
 
 Notable rejections:
 - `400 INVALID_PRODUCT` — productId doesn't exist or isn't active.
-- `409 PLAN_REQUIRES_SUBSCRIPTION` — you tried to order a `RECURRING` plan through this endpoint (Section 6).
+- `409 PLAN_REQUIRES_SUBSCRIPTION` — you tried to order a `RECURRING` plan through this endpoint (Section 8).
 - `409 TARGET_NOT_OWNED` / `409 SERVICE_REQUEST_NOT_PAYABLE` — ownership checks above.
 - `403 ORGANIZATION_ACCESS_DENIED` — `organizationId` sent but you're not an active member.
 
@@ -184,6 +184,17 @@ Useful for the `pending` case (Section 5) or a "my orders" screen:
 
 `Order.status` becomes `PAID` once capture completes, whether that happened via the redirect or via the webhook racing ahead of it.
 
+**`latestPaymentStatus`** (added to both of the above) is the most recent payment *attempt's* own status (`CREATED`, `FAILED`, `CAPTURED`), separate from `Order.status`. This distinction matters because a failed payment attempt (e.g. a declined card) does **not** move the order out of `PAYMENT_PENDING` — the order deliberately stays retryable so the customer can call `POST /payments/{orderId}/create` again on the same `orderId` rather than starting over. That means `status: "PAYMENT_PENDING"` alone is ambiguous between "still waiting on the current attempt" and "the last attempt already failed." Use `latestPaymentStatus`:
+
+| `status` | `latestPaymentStatus` | Meaning | UI |
+|---|---|---|---|
+| `PAID` | `CAPTURED` | Done | Success screen |
+| `PAYMENT_PENDING` | `CREATED` (or no payment yet) | Attempt is in flight, capture hasn't landed | Keep polling |
+| `PAYMENT_PENDING` | `FAILED` | Last attempt was declined/failed | Show "Try Again" immediately — don't poll, it won't resolve on its own |
+| `CREATED` | — | No payment attempt started yet | Not usually seen on the result page |
+
+Note: `Order.status` itself never becomes `FAILED`/`CANCELLED`/`REFUNDED` in the current implementation (only `CREATED`/`PAYMENT_PENDING`/`PAID` are ever actually set), even though `GET /orders/me?status=` accepts those values as filters. Don't build UI branches keyed on an order reaching those statuses today.
+
 ## 5. Handling `/payments/result?status=...`
 
 | `status` value | Meaning | Suggested UI |
@@ -195,13 +206,47 @@ Useful for the `pending` case (Section 5) or a "my orders" screen:
 
 Never trust the query string alone to mean "paid" in your own business logic beyond driving which screen to show — always treat `GET /orders/{orderId}` as the source of truth if you need to gate anything (e.g. don't unlock a UI feature just because `status=success` was in the URL; confirm the order is `PAID` first).
 
-## 6. Not available yet — don't build against these
+For the `pending`/`cancelled`/`expired` cases above, check `latestPaymentStatus` on the `GET /orders/{orderId}` response (Section 4) before deciding whether to keep polling or show a retry prompt — `status=pending` in the URL and an order that's genuinely still `PAYMENT_PENDING` with a failed last attempt look identical from the query string alone.
+
+## 6. Your plan entitlement
+
+`GET /plans/me` — auth required. Answers "what plan does the logged-in user actually have right now, and when does it end?" This didn't exist until recently; plan entitlement was previously only checked internally (e.g. to gate the AI Assistant's monthly quota), never exposed to the buyer.
+
+```json
+// has an active plan
+{
+  "hasActivePlan": true,
+  "plan": { "id": "...", "productId": "...", "code": "PLAN_PRO_MONTHLY", "name": "Pro", "planType": "PREMIUM", "durationDays": 30, "listingLimit": 10, "featuredDays": 7, "aiMonthlyQuota": null, "...": "..." },
+  "status": "ACTIVE",
+  "startsAt": "2026-09-01T00:00:00.000Z",
+  "endsAt": "2026-10-01T00:00:00.000Z"
+}
+```
+```json
+// no active plan (never purchased, or already lapsed)
+{ "hasActivePlan": false, "plan": null, "status": null, "startsAt": null, "endsAt": null }
+```
+
+Use `endsAt` to render "renews/expires on <date>" or a countdown on an account/billing screen. This only covers the user's **personal** plan — organization-scoped plans have no equivalent "my org's plan" endpoint yet.
+
+## 7. How a user finds out their plan is expiring or has expired
+
+There is no email/SMS/push for this — delivery is **in-app notifications only**, through the same `GET /notifications` endpoint used for every other notification type in the app (site visits, enquiries, etc.). A background sweep on the server (every 15 minutes) does two things:
+
+1. **`PLAN_EXPIRING_SOON`** — sent once per subscription, `PLAN_EXPIRY_REMINDER_DAYS` (default 3) days before `endsAt`.
+2. **`PLAN_EXPIRED`** — sent once, at the moment the plan actually lapses (the sweep also flips the subscription's internal status from `ACTIVE` to `EXPIRED` at this point — before this existed, a lapsed plan's status could remain `ACTIVE` indefinitely until the user's next purchase).
+
+Both notification rows carry `data.planSubscriptionId` and, for the reminder, `data.endsAt`. If you want an in-app banner ("Your plan expires in 3 days") rather than relying on the user to check their notification bell, poll or fetch `GET /notifications?type=PLAN_EXPIRING_SOON` (and `PLAN_EXPIRED`) and surface it yourself — there's no separate "banner" API, this is the same notification feed.
+
+Since delivery is in-app only, a user who doesn't open the app in that window will not be reminded before it lapses — keep that in mind if you're relying on this for retention/renewal prompts.
+
+## 8. Not available yet — don't build against these
 
 - **Recurring/auto-charge plan subscriptions.** A plan's `billingMode` can be `RECURRING`, but there is no `POST /subscriptions` endpoint yet — ordering a `RECURRING` plan is rejected with `409 PLAN_REQUIRES_SUBSCRIPTION`. Only show `ONE_TIME` plans as purchasable for now.
 - **Refunds.** No client-facing refund endpoints exist yet.
 - **A "list promotions" endpoint.** There's currently no public API to discover promotion products (their `productId`, price, or which listing-boost types exist) — the checkout mechanics for promotions work (Section 3.4's table), but the catalog discovery endpoint doesn't exist yet. Confirm with backend how promotion product IDs will be surfaced before building that screen.
 
-## 7. Quick reference: full example (buying a plan)
+## 9. Quick reference: full example (buying a plan)
 
 ```js
 // 1. Discover
@@ -222,4 +267,4 @@ window.location.href = payment.data.redirectUrl;
 // 5. On /payments/result, read ?orderId & ?status and render per Section 5
 ```
 
-A working Postman collection with all of these calls (including the promotion/service target examples) is in `postman/Zameens-Dev2.postman_collection.json` under **Commerce**.
+A working Postman collection with all of these calls (including the promotion/service target examples, `GET /plans/me`, and the plan-expiry notifications) is `postman/Zameens-Commerce-Payments.postman_collection.json`.

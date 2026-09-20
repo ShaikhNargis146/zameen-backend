@@ -5,6 +5,8 @@ import * as validation from "./commerce.validation.js";
 export const plans = async (req, res) =>
   ok(res, await service.listPlans(validation.planAudience(req.query || {})));
 
+export const myPlan = async (req, res) => ok(res, await service.myPlanSubscription(req.actor.id));
+
 export const createOrder = async (req, res) =>
   created(
     res,

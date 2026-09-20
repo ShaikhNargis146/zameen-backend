@@ -1,5 +1,13 @@
 # Razorpay Integration Implementation Plan
 
+**Status (2026-09-20):** Phases 1–2 (one-time redirect flow + reconciliation hardening) and the one-time-plan slice of Phase 3 are implemented — see `src/modules/commerce/`. Recent additions beyond what this plan originally specified:
+
+- **Callback/webhook now re-verify against the provider, not just the event.** `commerce.service.paymentMatchesProvider` re-fetches the payment from Razorpay on the callback path and re-checks the webhook payment entity's own `amount`/`currency`/`status` against the stored payment before either path captures anything — a mismatch redirects with `status=pending` (callback) or rejects with `409 PAYMENT_MISMATCH` (webhook) instead of silently capturing. This satisfies Section 18's "no client-controlled amount can be charged or marked paid" more strictly than originally worded (the original callback design in Section 10 only re-verified the signature, not the payment's own amount/currency).
+- **`Order` responses now include `latestPaymentStatus`.** Order `status` deliberately never leaves `PAYMENT_PENDING` across a failed-then-retried payment attempt (see Section 8's retry rule) — see the API contract update in Section 15 and `docs/razorpay-client-integration-guide.md` Section 4 for why a second field was necessary instead of just using `status`.
+- **Plan expiry is no longer purely lazy.** Section 12 originally flagged that "a periodic sweep... should transition stale ACTIVE rows to EXPIRED" as an open TODO; this is now implemented (`commerce.service.sweepPlanSubscriptions`, run every 15 minutes from `src/index.js`), along with a `GET /plans/me` endpoint and `PLAN_EXPIRING_SOON`/`PLAN_EXPIRED` in-app notifications. See Section 13a.
+
+Recurring subscriptions (Phase 4), refunds (Phase 5), and org-scoped plan entitlement remain unimplemented as originally planned.
+
 ## 1. Objective
 
 Integrate Razorpay for Zameens plan subscriptions, promotions, and paid services using a **server-driven redirect flow**: the client sends only a purchase intent (product/plan selection), the server does all Razorpay API interaction, and the API response the client acts on is a redirect URL to a Razorpay-hosted payment page — never an embedded Razorpay Checkout.js modal, and the client never receives or submits a Razorpay signature directly.
@@ -264,7 +272,7 @@ For `POST /subscriptions` (used only for `RECURRING` plans):
 1. Verify `razorpay_signature` via `verifyPaymentLinkCallbackSignature` (HMAC of the documented field concatenation — confirm exact field order against current Razorpay docs at implementation time; see Section 19).
 2. Resolve the internal payment via `provider_order_id = razorpay_payment_link_id`.
 3. If the signature is invalid or the payment link id is unknown, redirect to `{COMMERCE_RETURN_BASE_URL}/payments/result?status=invalid` — do not change any state.
-4. If valid and `razorpay_payment_link_status = 'paid'`, capture the payment and mark the order paid + apply the entitlement in one transaction (same logic as the webhook path in Section 11 — factor this into one shared function so the callback and the webhook cannot diverge). If already captured (webhook won the race), this is a no-op read.
+4. If valid and `razorpay_payment_link_status = 'paid'`, **do not capture on the query string's word alone** — call Razorpay's `GET /payments/{id}` for the payment itself and re-check its `amount`/`currency`/`status` against the stored payment (implemented as `commerce.service.paymentMatchesProvider`, shared with the webhook check in Section 11). Only on a match, capture the payment and mark the order paid + apply the entitlement in one transaction (same logic as the webhook path in Section 11 — factor this into one shared function so the callback and the webhook cannot diverge). A mismatch, or a provider lookup failure, redirects with `status=pending` rather than capturing — the webhook remains authoritative and will resolve it independently. If already captured (webhook won the race), this is a no-op read.
 5. Respond with an HTTP redirect (302, `Location` header) to `{COMMERCE_RETURN_BASE_URL}/payments/result?orderId=...&status=...` — never a JSON body. This is the "page redirected as response from server" requirement: the browser lands on our callback URL and leaves with a redirect, not a page our server renders itself.
 
 This endpoint must be safe to call with a stale, replayed, or manipulated query string — it can only ever reach the same state the webhook would independently reach, never bypass a check the webhook enforces.
@@ -297,7 +305,7 @@ Processing sequence:
 3. Derive and persist the provider event ID before side effects.
 4. Return success for an already processed duplicate.
 5. Resolve the internal payment via `notes.internalPaymentId` on the event's payment entity, not via the provider's order id / payment link id fields — those are named and nested differently across event types (a `payment.captured` event for a Payment-Link-originated payment carries Razorpay's auto-created Order id, not the Payment Link id we stored as `provider_order_id`), while `notes` are ours and echoed back verbatim on every event regardless of type. Resolve subscription events via `provider_subscription_id` instead, since there is no order/payment-link id involved.
-6. Validate amount and currency before changing state.
+6. Validate amount, currency, **and that the provider considers the payment `captured`** before changing state (`commerce.service.paymentMatchesProvider`) — reject a mismatch with `409 PAYMENT_MISMATCH` and do not mark the webhook event processed with a captured side effect.
 7. Apply the state transition and entitlement transactionally, sharing the exact capture/entitlement function used by the callback handler (Section 10) so the two paths cannot disagree.
 8. Mark the event processed only after all side effects succeed.
 9. Store processing errors for retry/operations visibility.
@@ -352,7 +360,7 @@ Unknown but valid events should be persisted and acknowledged without changing p
     ON commerce.plan_subscriptions(organization_id, ends_at) WHERE status = 'ACTIVE';
   ```
 
-  "Does this user/org currently have an active plan" queries must filter `status = 'ACTIVE' AND (ends_at IS NULL OR ends_at > now())`, not `status = 'ACTIVE'` alone — a `ONE_TIME` row's status is not proactively flipped to `EXPIRED` the moment `ends_at` passes. A periodic sweep (or lazy check-and-update on read) should transition stale `ACTIVE` rows to `EXPIRED` so the partial index stays representative.
+  "Does this user/org currently have an active plan" queries must filter `status = 'ACTIVE' AND (ends_at IS NULL OR ends_at > now())`, not `status = 'ACTIVE'` alone, as defense in depth. **Implemented:** a periodic sweep (`commerce.service.expirePlanSubscriptions`, every 15 minutes from `src/index.js`) transitions stale `ACTIVE` rows to `EXPIRED` so the partial index stays representative and the row doesn't sit stale until the user's next purchase — see Section 13a.
 
 - **New table `commerce.subscription_charges`** — records each individual renewal charge for a recurring subscription (cycle 1's charge is captured through the normal `commerce.payments` row created alongside the order; cycles 2+ have no corresponding order and are recorded here instead):
 
@@ -389,6 +397,16 @@ Payment capture must trigger the product effect appropriate to the order item, i
 
 A failed entitlement transaction must roll back with the payment capture (same transaction) and leave the payment in a state visible for operational retry — `CAPTURED` with no corresponding entitlement effect is a detectable, alertable inconsistency. Do not mark the webhook event processed if this transaction fails.
 
+## 13a. Plan Expiry Sweep, `GET /plans/me`, and Notifications (implemented, 2026-09-20)
+
+Section 12 flagged that a `ONE_TIME` plan's `status` is not proactively flipped to `EXPIRED`, and there was previously no way for a buyer to even see their own entitlement. Both gaps are now closed:
+
+- **`GET /plans/me`** (auth, personal scope only — no organization equivalent yet) returns `{ hasActivePlan, plan, status, startsAt, endsAt }` for the caller's currently-active `plan_subscriptions` row, or `{ hasActivePlan: false, plan: null, ... }` if none. Backed by `commerce.repository.findActiveSubscriptionForUser`.
+- **`commerce.service.expirePlanSubscriptions`** runs on a 15-minute timer (`src/index.js`, mirroring the existing `expirePublishedListings` sweep) and flips `commerce.plan_subscriptions.status` from `ACTIVE` to `EXPIRED` once `ends_at` has passed (`commerce.repository.expireLapsedPlanSubscriptions`), then sends a `PLAN_EXPIRED` in-app notification via `notifications.notifyUser`.
+- **`commerce.service.remindExpiringPlanSubscriptions`** runs on the same timer and sends a one-time `PLAN_EXPIRING_SOON` notification `PLAN_EXPIRY_REMINDER_DAYS` (env var, default `3`) days before `ends_at` (`commerce.repository.findExpiringSoonSubscriptions`). Deduplication is done by checking the `ops.notifications` table itself for an existing `PLAN_EXPIRING_SOON` row with matching `data.planSubscriptionId`, rather than adding a new column to `plan_subscriptions` — a subscription's `ends_at` doesn't change after purchase, so "was this already sent" only ever needs a one-time check against the notification log, and this avoids a schema migration for it.
+- Both notification types are delivered **in-app only**, through the existing `ops.notifications` table/`GET /notifications` endpoint used by every other feature (site visits, enquiries, etc.). There is no email/SMS/push infrastructure anywhere in this codebase — if that's needed for retention, it's a separate, larger build with no existing sender to hook into.
+- Scope: personal plans only (`organization_id IS NULL`), matching the existing restriction in `ai.repository.activePlanForUser`. Org-scoped plan expiry/reminder is not implemented.
+
 ## 14. Refunds
 
 Add an admin-authorized refund workflow:
@@ -418,6 +436,8 @@ Partial refunds must remain separately auditable.
 - `POST /subscriptions/{id}/cancel` — **new**, owner-only.
 - `GET /plans` — `Plan` response gains `billingMode` (`ONE_TIME`/`RECURRING`) so the frontend knows which purchase endpoint to call.
 - `PATCH /admin/plans/{planId}` — gains `billingMode`.
+- `GET /plans/me` — **new, implemented**. Auth required. Returns the caller's active personal plan subscription (Section 13a).
+- `GET /orders/{orderId}`, `GET /orders/me` — **implemented**: `Order` response gains `latestPaymentStatus`, the most recent payment attempt's own status, so a client can distinguish "still waiting on this attempt" from "the last attempt failed, retry" without `Order.status` itself leaving `PAYMENT_PENDING` (which it deliberately does not, per the retry rule in Section 8).
 
 Recommended admin endpoints:
 

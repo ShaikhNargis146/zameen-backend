@@ -1,0 +1,416 @@
+{
+  "info": {
+    "name": "Zameens — Commerce, Plans & Razorpay Checkout",
+    "description": "Single source of truth for the commerce module: plan/service catalog, the ONE_TIME redirect-checkout flow (orders → Razorpay Payment Link → callback/webhook → entitlement), plan entitlement + expiry (GET /plans/me, the background expiry sweep and its notifications), plan administration, and the AI monthly-quota interaction with plans. Consolidates the former 'Zameens — Pricing Plans' and 'Zameens — Razorpay Checkout & AI Quota' collections into one, re-verified against the current route/controller/validation code in src/modules/commerce and src/modules/ai (2026-09-20, including the amount/currency/status re-verification on callback+webhook, the `latestPaymentStatus` order field, and the plan-expiry sweep added the same day). See docs/razorpay-integration-plan.md (design) and docs/razorpay-client-integration-guide.md (frontend walkthrough + full /payments/result status table).\n\nSetup: run 'Auth' to get accessToken (any logged-in user). adminAccessToken needs a separate ADMIN-role user for the Admin folders — this backend has no self-service admin signup, so get one from whoever seeds ADMIN accounts in your environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "freePlanId", "value": "" },
+    { "key": "freeProductId", "value": "" },
+    { "key": "proPlanId", "value": "" },
+    { "key": "proProductId", "value": "" },
+    { "key": "businessPlanId", "value": "" },
+    { "key": "businessProductId", "value": "" },
+    { "key": "planId", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "serviceId", "value": "" },
+    { "key": "serviceRequestId", "value": "" },
+    { "key": "listingId", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "paymentId", "value": "" },
+    { "key": "conversationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0. Auth (get a token to use below)",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/request"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify OTP → copy accessToken into the collection variable",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"replace-with-challenge-id\",\n  \"otp\": \"replace-with-console-otp\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. Catalog — plans & services (public)",
+      "item": [
+        {
+          "name": "List plans",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/plans"
+          },
+          "response": [],
+          "description": "This is the pricing page's data source and the only place a client should read plan prices/limits from.\n\n- Each plan returns `productId` — this, not the plan's own `id`, is what POST /orders needs.\n- `billingMode` is \"ONE_TIME\" or \"RECURRING\". Only ONE_TIME plans can actually be purchased today — POST /orders rejects a RECURRING plan with 409 PLAN_REQUIRES_SUBSCRIPTION (subscriptions are not implemented yet). Hide/disable the buy CTA for RECURRING plans.\n- `aiMonthlyQuota` (integer, or null = unlimited) is the live source of truth for the AI Property Assistant's monthly question limit on that plan — don't hardcode this in the frontend."
+        },
+        {
+          "name": "List services",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/services"
+          },
+          "response": [],
+          "description": "Each service returns `productId` — required for POST /orders when purchasing it. The service's own `id` is only used for POST /service-requests, never for ordering.\n\nNote: there is currently no public endpoint to discover PROMOTION products (their productId/price) — confirm with backend how a listing-boost screen should source that catalog before building it."
+        },
+        {
+          "name": "Get service",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/services/{{serviceId}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Admin — plan catalog",
+      "item": [
+        {
+          "name": "Seed the 3 pricing-table plans",
+          "item": [
+            {
+              "name": "Create Free plan",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }]
+                },
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 0,\n  \"verificationIncluded\": false,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"propertyPhotosLimit\": 8,\n    \"videoUploadsPerProperty\": 0,\n    \"buyerEnquiries\": \"LIMITED\",\n    \"aiAssistantTier\": \"BASIC\",\n    \"featuredListingsPerMonth\": 0,\n    \"searchPriority\": \"STANDARD\",\n    \"listingAnalyticsTier\": \"BASIC\",\n    \"verifiedBadge\": false,\n    \"leadDashboard\": false,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"NONE\",\n    \"listingDurationDays\": 30,\n    \"billingCadence\": \"NONE\"\n  }\n}"
+                },
+                "url": "{{baseUrl}}/admin/plans"
+              },
+              "response": [],
+              "description": "amountMinor is 0 — catalog/display only. Do not run this through POST /orders → POST /payments/create; a ₹0 Razorpay Payment Link request fails. Copy the response's `id` → `freePlanId`, `productId` → `freeProductId`."
+            },
+            {
+              "name": "Create Pro plan",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }]
+                },
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"PLAN_PRO_MONTHLY\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 49900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 10,\n  \"verificationIncluded\": true,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 20,\n    \"videoUploadsPerProperty\": 1,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 2,\n    \"searchPriority\": \"HIGHER\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"PRIORITY\",\n    \"listingDurationDays\": 90,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                },
+                "url": "{{baseUrl}}/admin/plans"
+              },
+              "response": [],
+              "description": "Modeled as ONE_TIME (30-day pass, manually repurchased) because recurring subscriptions (POST /subscriptions) are not implemented in this codebase — see docs/razorpay-integration-plan.md Section 9/17 Phase 4. Copy `id` → `proPlanId`, `productId` → `proProductId`."
+            },
+            {
+              "name": "Create Business plan",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }]
+                },
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"PLAN_BUSINESS_MONTHLY\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies/brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 149900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 50,\n  \"verificationIncluded\": true,\n  \"billingMode\": \"ONE_TIME\",\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 30,\n    \"videoUploadsPerProperty\": 3,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 10,\n    \"searchPriority\": \"HIGHEST\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 5,\n    \"bulkPropertyUpload\": true,\n    \"supportTier\": \"DEDICATED\",\n    \"listingDurationDays\": null,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                },
+                "url": "{{baseUrl}}/admin/plans"
+              },
+              "response": [],
+              "description": "planType is forced to \"BROKER\" — commerce.plans.plan_type only allows FREE/PREMIUM/BROKER, and Business's team-member/bulk-upload features fit the existing BROKER tier best. Copy `id` → `businessPlanId`, `productId` → `businessProductId`."
+            }
+          ]
+        },
+        {
+          "name": "Admin: list plans",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/admin/plans"
+          },
+          "response": []
+        },
+        {
+          "name": "Admin: get plan",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/admin/plans/{{planId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Admin: update plan (toggle billingMode / change AI quota)",
+          "request": {
+            "method": "PATCH",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"aiMonthlyQuota\": 100,\n  \"billingMode\": \"ONE_TIME\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/plans/{{planId}}"
+          },
+          "response": [],
+          "description": "Changing billingMode or aiMonthlyQuota only affects future purchases/usage windows — it never retroactively alters a customer's already-granted entitlement or already-counted usage this month. Note: `code` cannot be changed once the plan has any orders against it (409 PLAN_CODE_LOCKED)."
+        },
+        {
+          "name": "Admin: activate plan",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/admin/plans/{{planId}}/activate"
+          },
+          "response": []
+        },
+        {
+          "name": "Admin: deactivate plan",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/admin/plans/{{planId}}/deactivate"
+          },
+          "response": [],
+          "description": "Deactivated plans drop out of GET /plans and cannot be ordered, but do not affect anyone who already purchased them."
+        }
+      ]
+    },
+    {
+      "name": "3. Checkout — redirect flow (orders → Razorpay Payment Link)",
+      "item": [
+        {
+          "name": "(Service purchase only) Create service request first",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"listingId\": \"{{listingId}}\",\n  \"customerNotes\": \"Please review before purchase.\",\n  \"contactPhone\": \"+919876543210\",\n  \"contactEmail\": \"buyer@example.com\"\n}"
+            },
+            "url": "{{baseUrl}}/service-requests"
+          },
+          "response": [],
+          "description": "Only needed before purchasing a SERVICE product. Response is a ServiceRequest with `status: \"REQUESTED\"` and `orderId: null` — keep its `id`, it becomes `targetId` on the order below. Skip this step entirely for plans and promotions."
+        },
+        {
+          "name": "Create order — Plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"{{proProductId}}\", \"quantity\": 1 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          },
+          "response": [],
+          "description": "For a plan, send only productId/quantity — no targetType/targetId (a PLAN item with a target is rejected with 400 INVALID_TARGET). A RECURRING plan is rejected with 409 PLAN_REQUIRES_SUBSCRIPTION.\n\nResponse is the Order: `id`, `orderNumber`, `status: \"CREATED\"`, `items[]`, `subtotalMinor`, `taxMinor`, `totalMinor`, `currency`, `createdAt`, `paidAt`. The server always computes the price from the product row — nothing about price is client-controlled. Copy `id` → `orderId`. For the Pro plan above, expect `totalMinor: 49900`."
+        },
+        {
+          "name": "Create order — Promotion (boost a listing)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"targetType\": \"LISTING\", \"targetId\": \"{{listingId}}\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          },
+          "response": [],
+          "description": "`targetType` must be the literal string \"LISTING\" — anything else is rejected with 400. `targetId` must be a listing the logged-in user (or their organization) owns, or the order is rejected with 409 TARGET_NOT_OWNED. Only ever offer this action from the seller's own listing management screen."
+        },
+        {
+          "name": "Create order — Paid service",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"targetType\": \"SERVICE_REQUEST\", \"targetId\": \"{{serviceRequestId}}\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          },
+          "response": [],
+          "description": "`targetType` must be the literal string \"SERVICE_REQUEST\". `targetId` is the ServiceRequest id from the step above — it must belong to the current user and still be unpaid (`status: REQUESTED`, `orderId: null`), or this is rejected with 409 SERVICE_REQUEST_NOT_PAYABLE."
+        },
+        {
+          "name": "Create payment — returns a redirect URL, not a checkout payload",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"RAZORPAY\"\n}"
+            },
+            "url": "{{baseUrl}}/payments/{{orderId}}/create"
+          },
+          "response": [],
+          "description": "`provider` defaults to \"RAZORPAY\" if omitted; it's the only provider actually implemented. Requires the order to belong to the caller and be CREATED or PAYMENT_PENDING (409 ORDER_ALREADY_PAID / ORDER_NOT_PAYABLE otherwise).\n\nResponse is only `{ paymentId, provider, redirectUrl }` — there is no `checkoutPayload`/`providerPublicKey`, no Razorpay key, SDK, or signature on the client. `redirectUrl` is a Razorpay-hosted Payment Link.\n\nFrontend contract:\n1. Do NOT load Razorpay Checkout.js or open a modal/iframe.\n2. Do a full-page navigation: `window.location.href = redirectUrl`.\n3. There is no POST /payments/verify endpoint — it does not exist; do not call it.\n4. `returnUrl` is not an accepted field on this request — the redirect target is fixed server-side via COMMERCE_RETURN_BASE_URL.\n\nCalling this again for the same order (e.g. the customer went back and retried) is safe — the previous Payment Link attempt is invalidated server-side and a fresh one is issued. Copy `paymentId` → `paymentId`."
+        },
+        {
+          "name": "GET order — poll this after redirect, don't trust the URL alone",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/{{orderId}}"
+          },
+          "response": [],
+          "description": "After the customer lands back on your `/payments/result?orderId=...&status=...` page, use this to confirm `status: \"PAID\"` rather than trusting the `status` query param alone for anything business-critical (e.g. don't unlock a feature purely because the URL said success — the query param can only drive which screen to show).\n\n`/payments/result` status handling (docs/razorpay-client-integration-guide.md Section 5):\n- `success` — captured, entitlement applied. Show success.\n- `pending` — signature/lookup was fine but capture hasn't finished synchronously; poll this endpoint every few seconds (give up after ~30s) until `status: \"PAID\"`.\n- `invalid` — signature didn't verify or the reference is unknown. Treat as failed, offer to retry.\n- anything else (`cancelled`, `expired`, ...) — Razorpay's own status passed through as-is. Treat as not-paid, offer to retry via POST /payments/{orderId}/create again.\n\n**`latestPaymentStatus` (new field, sits alongside `status`)** is the most recent payment attempt's own status (`CREATED`, `FAILED`, `CAPTURED`, ...). `status` alone cannot tell \"still waiting on the current attempt\" apart from \"the last attempt failed, please retry\" — both leave `status: \"PAYMENT_PENDING\"` on purpose, so a retry (POST /payments/{orderId}/create again) can reuse the same order instead of the order dead-ending. Check `latestPaymentStatus === \"FAILED\"` to show a retry prompt immediately on the result page instead of polling for up to 30s first."
+        },
+        {
+          "name": "GET my orders",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/me?status=PAID"
+          },
+          "response": [],
+          "description": "Auth'd, paginated (`page`, `limit`), optional `status` filter (CREATED, PAYMENT_PENDING, PAID, FAILED, CANCELLED, REFUNDED — the validation layer accepts all six, but in practice no code path currently ever sets an order's own `status` to FAILED/CANCELLED/REFUNDED; a declined/expired payment attempt only ever shows up as that order's `latestPaymentStatus`, per the note above, while `status` stays PAYMENT_PENDING so the same order remains retryable)."
+        },
+        {
+          "name": "GET my current plan",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/plans/me"
+          },
+          "response": [],
+          "description": "New endpoint — previously there was no way for a logged-in user to ask \"what plan am I on and when does it end?\" at all; plan entitlement was only ever checked internally (e.g. for gating the AI Assistant's monthly quota).\n\nResponse when the user has an active personal plan:\n```json\n{\n  \"hasActivePlan\": true,\n  \"plan\": { \"id\": \"...\", \"productId\": \"...\", \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", ... },\n  \"status\": \"ACTIVE\",\n  \"startsAt\": \"2026-09-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-10-01T00:00:00.000Z\"\n}\n```\nWhen there's no active plan (never purchased one, or it already lapsed): `{ \"hasActivePlan\": false, \"plan\": null, \"status\": null, \"startsAt\": null, \"endsAt\": null }`.\n\nOrganization-scoped plans are not returned here (personal plans only, same restriction as the AI-quota check) — there is no equivalent \"my org's plan\" endpoint yet.\n\nSee folder 6 for how the user finds out `endsAt` is approaching or has passed without having to poll this endpoint themselves."
+        }
+      ]
+    },
+    {
+      "name": "4. Reference only — never called by the client directly",
+      "item": [
+        {
+          "name": "Payment callback (Razorpay redirects the BROWSER here)",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": "{{baseUrl}}/payments/callback?razorpay_payment_id=pay_example&razorpay_payment_link_id=plink_example&razorpay_payment_link_reference_id=example-payment-id&razorpay_payment_link_status=paid&razorpay_signature=invalid-example-will-redirect-as-invalid"
+          },
+          "response": [],
+          "description": "The frontend never fetches this with XHR/fetch — Razorpay's hosted Payment Link page redirects the customer's browser here after payment, and this endpoint itself responds with an HTTP 302 onward to `{COMMERCE_RETURN_BASE_URL}/payments/result?orderId=...&status=...`.\n\nWith a real (valid) signature and `razorpay_payment_link_status=paid`, the handler additionally calls Razorpay's GET /payments/{id} to confirm the payment's amount, currency, and captured status match the recorded payment before marking anything PAID — a mismatch or lookup failure redirects with `status=pending` instead (the webhook remains authoritative and will resolve it independently)."
+        },
+        {
+          "name": "Payment webhook (server-to-server, Razorpay → our server)",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-razorpay-signature", "value": "replace-with-a-real-HMAC-of-the-body-using-RAZORPAY_WEBHOOK_SECRET" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_test_001\",\n        \"amount\": 49900,\n        \"currency\": \"INR\",\n        \"status\": \"captured\",\n        \"notes\": {\n          \"internalOrderId\": \"{{orderId}}\",\n          \"internalPaymentId\": \"{{paymentId}}\"\n        }\n      }\n    }\n  }\n}"
+            },
+            "url": "{{baseUrl}}/payments/webhook"
+          },
+          "response": [],
+          "description": "No UI relevance — included only so backend/QA can exercise the capture → entitlement path locally without a live Razorpay payment. The signature check rejects a fake header unless you compute a real HMAC-SHA256 of the exact raw body with your local RAZORPAY_WEBHOOK_SECRET (see .env).\n\n`payload.payment.entity.amount`, `.currency`, and `.status` must match the payment record exactly (amount in paise, currency case-insensitive, status literally \"captured\") — the handler now verifies all three against the stored payment before capturing, rejecting a mismatch with 409 PAYMENT_MISMATCH instead of silently marking the order paid. Set `amount` to the order's `totalMinor` and `status` to `\"captured\"` or this request will fail validation.\n\nDuplicate delivery of the same event id is a safe no-op (`{ received: true, duplicate: true }`), in either arrival order relative to the callback above."
+        }
+      ]
+    },
+    {
+      "name": "5. AI Assistant — monthly quota (driven by the plan)",
+      "item": [
+        {
+          "name": "Create conversation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contextType\": \"GENERAL\"\n}"
+            },
+            "url": "{{baseUrl}}/ai/conversations"
+          },
+          "response": [],
+          "description": "Creating a conversation (even with an initialQuery) consumes no AI quota — only an actually-answered message counts."
+        },
+        {
+          "name": "Send message (SSE) — can return AI_MONTHLY_QUOTA_EXCEEDED",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"What's a good plot near Pune under 50 lakhs?\"\n}"
+            },
+            "url": "{{baseUrl}}/ai/conversations/{{conversationId}}/messages"
+          },
+          "response": [],
+          "description": "Server-Sent Events response (Postman shows raw event lines, not a JSON body — expected). On exceeding the caller's plan's `aiMonthlyQuota` this emits:\n\n  event: error\n  data: {\"error\":{\"code\":\"AI_MONTHLY_QUOTA_EXCEEDED\",\"message\":\"You have used all N AI Property Assistant questions included in your plan this month.\"}}\n\nThe frontend's SSE `error` handler must special-case this code with a clear \"upgrade your plan\" message (ideally linking to the pricing page) rather than a generic error toast — same channel already used for AI_CONTEXT_UNAVAILABLE etc.\n\nQuota resets on the calendar month and only counts questions that were actually answered — a rejected attempt never counts against it, so retrying right after upgrading works immediately."
+        },
+        {
+          "name": "List conversations",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ai/conversations"
+          },
+          "response": []
+        },
+        {
+          "name": "Get conversation",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ai/conversations/{{conversationId}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Plan expiry — background sweep, reference only",
+      "item": [
+        {
+          "name": "GET my notifications (see PLAN_EXPIRING_SOON / PLAN_EXPIRED)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/notifications?type=PLAN_EXPIRING_SOON"
+          },
+          "response": [],
+          "description": "No client action triggers these — a background sweep (every 15 minutes, wired up in src/index.js alongside the existing listing-expiry sweep) does two things to commerce.plan_subscriptions:\n\n1. Flips any row whose `endsAt` has passed from ACTIVE to EXPIRED — previously this only happened lazily, at the moment the same user bought a *new* plan, so a lapsed plan's status could sit at ACTIVE indefinitely if they never repurchased.\n2. Creates an in-app notification through the same /notifications system used everywhere else in the app:\n   - `PLAN_EXPIRING_SOON` — sent once, `PLAN_EXPIRY_REMINDER_DAYS` (default 3) days before `endsAt`. Deduplicated by checking whether one was already sent for that plan_subscription id, so it fires exactly once per subscription regardless of how many sweep runs see it in that window.\n   - `PLAN_EXPIRED` — sent once, at the moment the sweep flips that row to EXPIRED.\n\nBoth are **in-app only**. There is no email/SMS/push sending implemented anywhere in this codebase yet, so a user who never opens Notifications will not otherwise be told their plan lapsed. Change the `type` query param to `PLAN_EXPIRED`, or drop it entirely, to see the other type / everything."
+        }
+      ]
+    }
+  ]
+}

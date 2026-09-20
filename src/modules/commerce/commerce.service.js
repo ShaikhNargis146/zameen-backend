@@ -3,6 +3,7 @@ import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { sha256 } from "../../utils/crypto.js";
+import logger from "../../utils/logger.js";
 import {
   belongsToServiceReport,
   belongsToServiceRequest,
@@ -11,9 +12,13 @@ import {
   signedReadUrl,
   signedWriteUrl
 } from "../../utils/storage.js";
+import * as notifications from "../notifications/notifications.service.js";
 import * as organizationsRepository from "../organizations/organizations.repository.js";
 import * as repository from "./commerce.repository.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
+
+// How long before a plan's endsAt to send the one-time "expiring soon" reminder.
+const planExpiryReminderDays = Number(process.env.PLAN_EXPIRY_REMINDER_DAYS || 3);
 
 const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "dev-razorpay-key-id";
 const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
@@ -135,6 +140,69 @@ export const setPlanActive = async (planId, isActive) => {
   return getPlan(planId);
 };
 
+// What a logged-in user actually has right now — there was previously no
+// endpoint for this at all; plan entitlement was only ever checked
+// internally (e.g. ai.repository.activePlanForUser for AI quota), never
+// exposed to the buyer themselves.
+export const myPlanSubscription = async actorId => {
+  const row = await repository.findActiveSubscriptionForUser(actorId);
+  if (!row) return { hasActivePlan: false, plan: null, status: null, startsAt: null, endsAt: null };
+  return {
+    hasActivePlan: true,
+    plan: toPlan(row),
+    status: row.subscriptionStatus,
+    startsAt: row.startsAt,
+    endsAt: row.endsAt
+  };
+};
+
+// Moves lapsed subscriptions from ACTIVE to EXPIRED and tells the user it
+// happened. Run on a timer (see src/index.js) rather than only at the next
+// purchase, since a user who never repurchases would otherwise never be told.
+export const expirePlanSubscriptions = async () => {
+  const expired = await repository.expireLapsedPlanSubscriptions();
+  await Promise.all(
+    expired.map(row =>
+      notifications.notifyUser(row.userId, {
+        type: "PLAN_EXPIRED",
+        title: "Your plan has expired",
+        body: `Your ${row.planName} plan has expired. Renew to keep your plan benefits active.`,
+        data: { planSubscriptionId: row.id }
+      })
+    )
+  );
+  if (expired.length)
+    logger.info(`Expired ${expired.length} plan subscription(s) past their endsAt.`);
+  return expired.length;
+};
+
+// One-time heads-up before a plan lapses, so expiry isn't the first the user
+// hears of it. Idempotent across runs — see findExpiringSoonSubscriptions.
+export const remindExpiringPlanSubscriptions = async () => {
+  const expiringSoon = await repository.findExpiringSoonSubscriptions(planExpiryReminderDays);
+  await Promise.all(
+    expiringSoon.map(row =>
+      notifications.notifyUser(row.userId, {
+        type: "PLAN_EXPIRING_SOON",
+        title: "Your plan is expiring soon",
+        body: `Your ${row.planName} plan expires on ${new Date(row.endsAt).toDateString()}. Renew to avoid interruption.`,
+        data: { planSubscriptionId: row.id, endsAt: row.endsAt }
+      })
+    )
+  );
+  if (expiringSoon.length)
+    logger.info(`Sent expiring-soon reminder for ${expiringSoon.length} plan subscription(s).`);
+  return expiringSoon.length;
+};
+
+export const sweepPlanSubscriptions = async () => {
+  const [expiredCount, remindedCount] = await Promise.all([
+    expirePlanSubscriptions(),
+    remindExpiringPlanSubscriptions()
+  ]);
+  return { expiredCount, remindedCount };
+};
+
 const toOrders = async rows => {
   if (!rows.length) return [];
   const itemRows = await repository.itemsForOrders(rows.map(row => row.id));
@@ -157,6 +225,11 @@ const toOrders = async rows => {
     id: row.id,
     orderNumber: row.orderNumber,
     status: row.status,
+    // Distinguishes "still waiting on the current attempt" from "the last
+    // attempt failed, offer retry" while status itself stays PAYMENT_PENDING
+    // for both (retries reuse the same order). null before any payment
+    // attempt has been made.
+    latestPaymentStatus: row.latestPaymentStatus || null,
     items: itemsByOrder.get(row.id) || [],
     subtotalMinor: Number(row.subtotalMinor),
     taxMinor: Number(row.taxMinor),
@@ -362,6 +435,22 @@ export const createPaymentIntent = async ({ actorId, orderId, input }) => {
   };
 };
 
+// Shared amount/currency/capture-state guard applied on both the Payment
+// Link callback and the webhook path (Phase 2 of
+// docs/razorpay-integration-plan.md) so neither path ever marks a payment
+// captured on the provider's word alone — what Razorpay reports for the
+// payment must match what we quoted when the Payment Link was created, and
+// Razorpay must actually consider it captured.
+export const paymentMatchesProvider = ({
+  payment,
+  providerAmountMinor,
+  providerCurrency,
+  providerStatus
+}) =>
+  providerStatus === "captured" &&
+  Number(providerAmountMinor) === Number(payment.amountMinor) &&
+  String(providerCurrency || "").toUpperCase() === String(payment.currency || "").toUpperCase();
+
 // Handles the browser landing back on our Payment Link callback_url. Always
 // resolves to a redirect target, never throws — Razorpay/the browser is
 // making a plain GET here with no Authorization header, so there is no JSON
@@ -388,11 +477,31 @@ export const paymentCallback = async ({ query }) => {
 
   if (payment.status !== "CAPTURED" && status === "paid") {
     try {
+      // The callback query carries no amount/currency, only a signed status
+      // — fetch the payment itself from Razorpay so this path cannot capture
+      // on a client-supplied status alone (Section 16/18 of the integration
+      // plan: "no client-controlled amount can be charged or marked paid").
+      const providerPayment = await razorpayProvider.fetchPayment({
+        keyId: razorpayKeyId,
+        keySecret: razorpayKeySecret,
+        timeoutMs: razorpayApiTimeoutMs,
+        providerPaymentId: paymentId
+      });
+      if (
+        !paymentMatchesProvider({
+          payment,
+          providerAmountMinor: providerPayment?.amount,
+          providerCurrency: providerPayment?.currency,
+          providerStatus: providerPayment?.status
+        })
+      )
+        return { redirectUrl: paymentResultUrl({ orderId: payment.orderId, status: "pending" }) };
+
       await repository.capturePaymentAndApplyEntitlements({
         id: payment.id,
         orderId: payment.orderId,
         providerPaymentId: paymentId,
-        providerPayload: { source: "payment_link_callback", query }
+        providerPayload: { source: "payment_link_callback", query, providerPayment }
       });
     } catch {
       // The webhook is authoritative and will retry this independently — the
@@ -441,6 +550,22 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
     if (internalPaymentId && capturableWebhookEvents.has(eventType)) {
       const payment = await repository.findPaymentById(internalPaymentId);
       if (payment && payment.status !== "CAPTURED") {
+        // Never trust the event type alone — confirm the payment entity's own
+        // amount, currency, and status against what we quoted when the
+        // Payment Link was created before marking anything captured.
+        if (
+          !paymentMatchesProvider({
+            payment,
+            providerAmountMinor: paymentEntity?.amount,
+            providerCurrency: paymentEntity?.currency,
+            providerStatus: paymentEntity?.status
+          })
+        )
+          throw new HttpError(
+            409,
+            "PAYMENT_MISMATCH",
+            "Webhook payment amount, currency, or status does not match the recorded payment."
+          );
         await repository.capturePaymentAndApplyEntitlements({
           id: payment.id,
           orderId: payment.orderId,

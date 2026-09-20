@@ -3,6 +3,7 @@ import test from "node:test";
 
 import * as validation from "../../src/modules/commerce/commerce.validation.js";
 import { computePlanEndsAt } from "../../src/modules/commerce/commerce.repository.js";
+import { paymentMatchesProvider } from "../../src/modules/commerce/commerce.service.js";
 
 const productId = "11111111-1111-1111-1111-111111111111";
 const listingId = "22222222-2222-2222-2222-222222222222";
@@ -107,4 +108,66 @@ test("plan entitlement extension does not backdate from an already-expired plan"
 test("plan entitlement extension returns null for a plan with no fixed duration", () => {
   const now = new Date("2026-01-01T00:00:00.000Z");
   assert.equal(computePlanEndsAt({ existingEndsAt: null, durationDays: null, now }), null);
+});
+
+const payment = { amountMinor: 99900, currency: "INR" };
+
+test("payment matches provider when amount, currency, and status all agree", () => {
+  assert.equal(
+    paymentMatchesProvider({
+      payment,
+      providerAmountMinor: 99900,
+      providerCurrency: "INR",
+      providerStatus: "captured"
+    }),
+    true
+  );
+});
+
+test("payment does not match provider when the amount differs", () => {
+  assert.equal(
+    paymentMatchesProvider({
+      payment,
+      providerAmountMinor: 1,
+      providerCurrency: "INR",
+      providerStatus: "captured"
+    }),
+    false
+  );
+});
+
+test("payment does not match provider when the currency differs", () => {
+  assert.equal(
+    paymentMatchesProvider({
+      payment,
+      providerAmountMinor: 99900,
+      providerCurrency: "USD",
+      providerStatus: "captured"
+    }),
+    false
+  );
+});
+
+test("payment does not match provider when the currency case differs", () => {
+  assert.equal(
+    paymentMatchesProvider({
+      payment,
+      providerAmountMinor: 99900,
+      providerCurrency: "inr",
+      providerStatus: "captured"
+    }),
+    true
+  );
+});
+
+test("payment does not match provider when it is not yet captured", () => {
+  assert.equal(
+    paymentMatchesProvider({
+      payment,
+      providerAmountMinor: 99900,
+      providerCurrency: "INR",
+      providerStatus: "authorized"
+    }),
+    false
+  );
 });
