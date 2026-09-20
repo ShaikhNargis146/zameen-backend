@@ -12,6 +12,9 @@ router.patch("/plans/:planId", requireAdmin, asyncRoute(controller.updatePlan));
 router.post("/plans/:planId/activate", requireAdmin, asyncRoute(controller.activatePlan));
 router.post("/plans/:planId/deactivate", requireAdmin, asyncRoute(controller.deactivatePlan));
 
+router.get("/payments", requireAdmin, asyncRoute(controller.adminPayments));
+router.get("/payments/:paymentId", requireAdmin, asyncRoute(controller.adminGetPayment));
+
 router.get("/service-requests", requireAdmin, asyncRoute(controller.adminServiceRequests));
 router.get(
   "/service-requests/:requestId",

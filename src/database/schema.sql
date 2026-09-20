@@ -629,6 +629,10 @@ CREATE TABLE commerce.payment_webhook_events (
   event_id varchar(255) NOT NULL,
   event_type varchar(100) NOT NULL,
   payload jsonb NOT NULL,
+  -- The internal payment this delivery resolved to (see commerce.service.js
+  -- handleWebhook), for admin traceability. Null when the payload's
+  -- notes.internalPaymentId is missing or does not match any payment.
+  payment_id uuid REFERENCES commerce.payments(id) ON DELETE RESTRICT,
   received_at timestamptz NOT NULL DEFAULT now(),
   processed_at timestamptz,
   processing_error text,
@@ -638,6 +642,8 @@ CREATE TABLE commerce.payment_webhook_events (
 );
 CREATE INDEX idx_commerce_webhook_events_unprocessed
   ON commerce.payment_webhook_events(provider, received_at) WHERE processed_at IS NULL;
+CREATE INDEX idx_commerce_webhook_events_payment
+  ON commerce.payment_webhook_events(payment_id) WHERE payment_id IS NOT NULL;
 CREATE TABLE commerce.payment_refunds (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   payment_id uuid NOT NULL REFERENCES commerce.payments(id) ON DELETE RESTRICT,

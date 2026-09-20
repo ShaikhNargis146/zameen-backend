@@ -34,6 +34,13 @@ const serviceRequestStatuses = new Set([
   "CANCELLED"
 ]);
 const maxFileSizeBytes = 50 * 1024 * 1024;
+// Mirrors the commerce.payments status CHECK constraint, not the narrower
+// `providers` set above — that one governs what a *new* payment can be
+// created with (Razorpay only, Phase 1); this covers whatever the schema
+// itself allows a payment row to already carry, for admin filtering.
+const paymentStatuses = new Set(["CREATED", "AUTHORIZED", "CAPTURED", "FAILED", "REFUNDED"]);
+const paymentProviders = new Set(["RAZORPAY", "STRIPE", "OTHER"]);
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
@@ -125,6 +132,16 @@ const optionalObject = (value, field) => {
 
 const optionalBoolean = (value, fallback) =>
   value === undefined || value === null ? fallback : Boolean(value);
+
+const optionalDate = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim();
+  if (!datePattern.test(text)) {
+    const message = `${field} must be a date in YYYY-MM-DD format.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
+  return text;
+};
 
 export const planAudience = query =>
   optionalEnum(query.audience, planTypes, "AUDIENCE", "FREE, PREMIUM, or BROKER");
@@ -323,6 +340,24 @@ export const createServiceRequest = body => ({
 export const serviceRequestListQuery = query => ({
   status: optionalEnum(query.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus")
 });
+
+export const adminPaymentListQuery = query => {
+  const fromDate = optionalDate(query.fromDate, "FROM_DATE");
+  const toDate = optionalDate(query.toDate, "TO_DATE");
+  if (fromDate && toDate && fromDate > toDate) {
+    const message = "fromDate must be on or before toDate.";
+    throw new HttpError(400, "INVALID_DATE_RANGE", message, [{ field: "fromDate", message }]);
+  }
+  return {
+    status: optionalEnum(query.status, paymentStatuses, "STATUS", "a valid PaymentStatus"),
+    provider: optionalEnum(query.provider, paymentProviders, "PROVIDER", "RAZORPAY, STRIPE, or OTHER"),
+    orderId: optionalUuid(query.orderId, "orderId"),
+    userId: optionalUuid(query.userId, "userId"),
+    search: optionalString(query.search, 200, "SEARCH"),
+    fromDate,
+    toDate
+  };
+};
 
 export const adminServiceRequestListQuery = query => ({
   status: optionalEnum(query.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus"),

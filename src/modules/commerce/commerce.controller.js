@@ -95,6 +95,17 @@ export const activatePlan = async (req, res) =>
 export const deactivatePlan = async (req, res) =>
   ok(res, await service.setPlanActive(validation.uuid(req.params.planId, "planId"), false));
 
+export const adminPayments = async (req, res) => {
+  const { data, meta } = await service.adminListPayments({
+    filters: validation.adminPaymentListQuery(req.query || {}),
+    query: req.query
+  });
+  ok(res, data, meta);
+};
+
+export const adminGetPayment = async (req, res) =>
+  ok(res, await service.adminGetPayment(validation.uuid(req.params.paymentId, "paymentId")));
+
 export const services = async (req, res) =>
   ok(res, await service.listServices(validation.serviceListQuery(req.query || {}).serviceType));
 

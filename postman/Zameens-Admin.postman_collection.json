@@ -51,6 +51,10 @@
       "value": ""
     },
     {
+      "key": "paymentId",
+      "value": ""
+    },
+    {
       "key": "pointId",
       "value": ""
     },
@@ -473,6 +477,25 @@
           "request": {
             "method": "POST",
             "url": "{{baseUrl}}/admin/plans/{{planId}}/deactivate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Admin: List payments",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/payments?status=CAPTURED&provider=RAZORPAY&search=ZMN-O&fromDate=2026-01-01&toDate=2026-12-31&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin: Payment details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/payments/{{paymentId}}"
           }
         }
       ]

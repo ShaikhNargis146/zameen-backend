@@ -145,6 +145,55 @@ test("payment does not match provider when the currency case differs", () => {
   );
 });
 
+test("adminPaymentListQuery defaults every filter to null with no query params", () => {
+  assert.deepEqual(validation.adminPaymentListQuery({}), {
+    status: null,
+    provider: null,
+    orderId: null,
+    userId: null,
+    search: null,
+    fromDate: null,
+    toDate: null
+  });
+});
+
+test("adminPaymentListQuery accepts a full set of filters", () => {
+  const orderId = "33333333-3333-3333-3333-333333333333";
+  const userId = "44444444-4444-4444-4444-444444444444";
+  const result = validation.adminPaymentListQuery({
+    status: "captured",
+    provider: "razorpay",
+    orderId,
+    userId,
+    search: "ZMN-O-1",
+    fromDate: "2026-01-01",
+    toDate: "2026-01-31"
+  });
+  assert.deepEqual(result, {
+    status: "CAPTURED",
+    provider: "RAZORPAY",
+    orderId,
+    userId,
+    search: "ZMN-O-1",
+    fromDate: "2026-01-01",
+    toDate: "2026-01-31"
+  });
+});
+
+test("adminPaymentListQuery rejects an invalid payment status", () => {
+  assert.throws(
+    () => validation.adminPaymentListQuery({ status: "BOGUS" }),
+    error => error.code === "INVALID_STATUS"
+  );
+});
+
+test("adminPaymentListQuery rejects a fromDate after toDate", () => {
+  assert.throws(
+    () => validation.adminPaymentListQuery({ fromDate: "2026-02-01", toDate: "2026-01-01" }),
+    error => error.code === "INVALID_DATE_RANGE"
+  );
+});
+
 test("payment does not match provider when it is not yet captured", () => {
   assert.equal(
     paymentMatchesProvider({

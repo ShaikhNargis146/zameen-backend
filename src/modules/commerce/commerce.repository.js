@@ -337,6 +337,60 @@ export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
     [provider, providerOrderId]
   );
 
+// Joined with the owning order and buyer so admin list/detail views never
+// need a second round trip to answer "whose payment is this, for what order".
+const paymentAdminJoinColumns = `
+  o.order_number AS "orderNumber", o.status AS "orderStatus", o.user_id AS "userId",
+  o.organization_id AS "organizationId", o.subtotal_minor AS "orderSubtotalMinor",
+  o.tax_minor AS "orderTaxMinor", o.total_minor AS "orderTotalMinor",
+  u.display_name AS "buyerName", u.phone_e164 AS "buyerPhone", u.email::text AS "buyerEmail"
+`;
+
+export const listPaymentsAdmin = (
+  { status, provider, orderId, userId, search, fromDate, toDate },
+  { limit, offset }
+) =>
+  run(
+    "any",
+    `SELECT ${paymentSelectColumns}, ${paymentAdminJoinColumns}, count(*) OVER()::int AS total
+     FROM commerce.payments pay
+     JOIN commerce.orders o ON o.id = pay.order_id
+     JOIN auth.users u ON u.id = o.user_id
+     WHERE ($1::varchar IS NULL OR pay.status = $1)
+       AND ($2::varchar IS NULL OR pay.provider = $2)
+       AND ($3::uuid IS NULL OR pay.order_id = $3)
+       AND ($4::uuid IS NULL OR o.user_id = $4)
+       AND ($5::varchar IS NULL OR o.order_number ILIKE $5 OR u.display_name ILIKE $5
+            OR u.phone_e164 ILIKE $5 OR u.email::text ILIKE $5
+            OR pay.provider_order_id ILIKE $5 OR pay.provider_payment_id ILIKE $5)
+       AND ($6::date IS NULL OR pay.created_at >= $6)
+       AND ($7::date IS NULL OR pay.created_at < ($7::date + INTERVAL '1 day'))
+     ORDER BY pay.created_at DESC LIMIT $8 OFFSET $9`,
+    [
+      status || null,
+      provider || null,
+      orderId || null,
+      userId || null,
+      search ? `%${search}%` : null,
+      fromDate || null,
+      toDate || null,
+      limit,
+      offset
+    ]
+  );
+
+export const findPaymentByIdAdmin = id =>
+  run(
+    "oneOrNone",
+    `SELECT ${paymentSelectColumns}, pay.updated_at AS "updatedAt",
+            pay.provider_payload AS "providerPayload", ${paymentAdminJoinColumns}
+     FROM commerce.payments pay
+     JOIN commerce.orders o ON o.id = pay.order_id
+     JOIN auth.users u ON u.id = o.user_id
+     WHERE pay.id = $1`,
+    [id]
+  );
+
 // Explicitly fails any non-terminal payment attempt still open for this order
 // before a fresh Payment Link is created for a retried /payments/:orderId/create
 // call, per Section 8 of docs/razorpay-integration-plan.md.
@@ -469,18 +523,19 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
 // and fails the WHERE clause instead of racing it to run capture/fail side
 // effects twice. Postgres holds the row lock for the conflicting key while
 // evaluating this, so concurrent deliveries for the same event serialize on it.
-export const insertWebhookEvent = ({ provider, eventId, eventType, payload }) =>
+export const insertWebhookEvent = ({ provider, eventId, eventType, payload, paymentId }) =>
   run(
     "oneOrNone",
-    `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload)
-     VALUES ($1,$2,$3,$4::jsonb)
+    `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload, payment_id)
+     VALUES ($1,$2,$3,$4::jsonb,$5)
      ON CONFLICT (provider, event_id) DO UPDATE
        SET event_type = EXCLUDED.event_type,
+           payment_id = EXCLUDED.payment_id,
            processed_at = NULL,
            processing_error = NULL
        WHERE commerce.payment_webhook_events.processing_error IS NOT NULL
      RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
-    [provider, eventId, eventType, JSON.stringify(payload || {})]
+    [provider, eventId, eventType, JSON.stringify(payload || {}), paymentId || null]
   );
 
 export const markWebhookProcessed = (id, error = null) =>
@@ -488,6 +543,22 @@ export const markWebhookProcessed = (id, error = null) =>
     "none",
     `UPDATE commerce.payment_webhook_events SET processed_at = now(), processing_error = $2 WHERE id = $1`,
     [id, error]
+  );
+
+// The webhook trace for a single payment — what Razorpay actually sent, in
+// delivery order — for the admin payment detail view (GET
+// /admin/payments/:paymentId). Requires the payment_id backfill from
+// 007_payment_webhook_event_payment_link.sql; deliveries received before
+// that migration ran have no linkage and will not appear here.
+export const findWebhookEventsByPaymentId = paymentId =>
+  run(
+    "any",
+    `SELECT id, provider, event_id AS "eventId", event_type AS "eventType", payload,
+            received_at AS "receivedAt", processed_at AS "processedAt", processing_error AS "processingError"
+     FROM commerce.payment_webhook_events
+     WHERE payment_id = $1
+     ORDER BY received_at DESC`,
+    [paymentId]
   );
 
 const serviceColumns = `

@@ -462,6 +462,81 @@ export const paymentCallback = async ({ query }) => {
   };
 };
 
+const toPaymentAdmin = row =>
+  row && {
+    id: row.id,
+    orderId: row.orderId,
+    orderNumber: row.orderNumber,
+    orderStatus: row.orderStatus,
+    provider: row.provider,
+    providerOrderId: row.providerOrderId,
+    providerPaymentId: row.providerPaymentId,
+    status: row.status,
+    amountMinor: Number(row.amountMinor),
+    currency: row.currency,
+    paidAt: row.paidAt,
+    createdAt: row.createdAt,
+    organizationId: row.organizationId,
+    buyer: {
+      userId: row.userId,
+      name: row.buyerName,
+      phone: row.buyerPhone,
+      email: row.buyerEmail
+    }
+  };
+
+// Full detail view: everything the list gives plus the raw provider payload
+// (the gateway's own last-known response), the order's line items, and the
+// full webhook delivery trace for this payment — so an admin never has to
+// cross-reference commerce.orders or re-parse payment_webhook_events
+// payloads separately to see exactly what was bought and what the gateway
+// actually sent, in order, including deliveries that failed to process.
+const toPaymentAdminDetail = async row => {
+  const [itemRows, webhookEvents] = await Promise.all([
+    repository.itemsForOrders([row.orderId]),
+    repository.findWebhookEventsByPaymentId(row.id)
+  ]);
+  return {
+    ...toPaymentAdmin(row),
+    updatedAt: row.updatedAt,
+    providerPayload: row.providerPayload || null,
+    order: {
+      subtotalMinor: Number(row.orderSubtotalMinor),
+      taxMinor: Number(row.orderTaxMinor),
+      totalMinor: Number(row.orderTotalMinor),
+      items: itemRows.map(item => ({
+        productId: item.productId,
+        code: item.code,
+        name: item.name,
+        quantity: item.quantity,
+        unitAmountMinor: Number(item.unitAmountMinor),
+        totalAmountMinor: Number(item.totalAmountMinor)
+      }))
+    },
+    webhookEvents: webhookEvents.map(event => ({
+      id: event.id,
+      eventType: event.eventType,
+      receivedAt: event.receivedAt,
+      processedAt: event.processedAt,
+      processingError: event.processingError,
+      payload: event.payload
+    }))
+  };
+};
+
+export const adminListPayments = async ({ filters, query }) => {
+  const { page, limit, offset } = parsePagination(query);
+  const counted = await repository.listPaymentsAdmin(filters, { limit, offset });
+  const { data: rows, total } = splitCountedRows(counted);
+  return { data: rows.map(toPaymentAdmin), meta: paginationMeta({ page, limit, total }) };
+};
+
+export const adminGetPayment = async paymentId => {
+  const row = await repository.findPaymentByIdAdmin(paymentId);
+  if (!row) throw new HttpError(404, "PAYMENT_NOT_FOUND", "Payment was not found.");
+  return toPaymentAdminDetail(row);
+};
+
 const capturableWebhookEvents = new Set(["payment.captured", "payment_link.paid"]);
 
 export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
@@ -480,48 +555,53 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
 
   const eventType = body?.event || "UNKNOWN";
   const eventId = body?.id || sha256(rawBody?.length ? rawBody : JSON.stringify(body || {}));
-  const event = await repository.insertWebhookEvent({ provider, eventId, eventType, payload: body });
+  // Resolved via the notes we set ourselves at Payment Link creation time,
+  // not via order_id/payment_link_id field names on the webhook payload —
+  // those differ by event type in ways not worth depending on here. Resolved
+  // once, up front, so the same lookup both links this delivery to its
+  // payment row (commerce.payment_webhook_events.payment_id, for admin
+  // traceability) and is reused in the capture/fail branches below instead
+  // of querying twice.
+  const paymentEntity = body?.payload?.payment?.entity;
+  const internalPaymentId = paymentEntity?.notes?.internalPaymentId || null;
+  const payment = internalPaymentId ? await repository.findPaymentById(internalPaymentId) : null;
+
+  const event = await repository.insertWebhookEvent({
+    provider,
+    eventId,
+    eventType,
+    payload: body,
+    paymentId: payment?.id ?? null
+  });
   if (!event) return { received: true, duplicate: true };
 
   try {
-    const paymentEntity = body?.payload?.payment?.entity;
-    // Resolved via the notes we set ourselves at Payment Link creation time,
-    // not via order_id/payment_link_id field names on the webhook payload —
-    // those differ by event type in ways not worth depending on here.
-    const internalPaymentId = paymentEntity?.notes?.internalPaymentId;
-
-    if (internalPaymentId && capturableWebhookEvents.has(eventType)) {
-      const payment = await repository.findPaymentById(internalPaymentId);
-      if (payment && payment.status !== "CAPTURED") {
-        // Never trust the event type alone — confirm the payment entity's own
-        // amount, currency, and status against what we quoted when the
-        // Payment Link was created before marking anything captured.
-        if (
-          !paymentMatchesProvider({
-            payment,
-            providerAmountMinor: paymentEntity?.amount,
-            providerCurrency: paymentEntity?.currency,
-            providerStatus: paymentEntity?.status
-          })
-        )
-          throw new HttpError(
-            409,
-            "PAYMENT_MISMATCH",
-            "Webhook payment amount, currency, or status does not match the recorded payment."
-          );
-        await repository.capturePaymentAndApplyEntitlements({
-          id: payment.id,
-          orderId: payment.orderId,
-          providerPaymentId: paymentEntity.id,
-          providerPayload: body
-        });
-      }
-    } else if (internalPaymentId && eventType === "payment.failed") {
-      const payment = await repository.findPaymentById(internalPaymentId);
-      if (payment && payment.status === "CREATED") {
-        const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
-        if (!failed.ok) throw failed.error;
-      }
+    if (payment && capturableWebhookEvents.has(eventType) && payment.status !== "CAPTURED") {
+      // Never trust the event type alone — confirm the payment entity's own
+      // amount, currency, and status against what we quoted when the
+      // Payment Link was created before marking anything captured.
+      if (
+        !paymentMatchesProvider({
+          payment,
+          providerAmountMinor: paymentEntity?.amount,
+          providerCurrency: paymentEntity?.currency,
+          providerStatus: paymentEntity?.status
+        })
+      )
+        throw new HttpError(
+          409,
+          "PAYMENT_MISMATCH",
+          "Webhook payment amount, currency, or status does not match the recorded payment."
+        );
+      await repository.capturePaymentAndApplyEntitlements({
+        id: payment.id,
+        orderId: payment.orderId,
+        providerPaymentId: paymentEntity.id,
+        providerPayload: body
+      });
+    } else if (payment && eventType === "payment.failed" && payment.status === "CREATED") {
+      const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
+      if (!failed.ok) throw failed.error;
     }
     await repository.markWebhookProcessed(event.id);
   } catch (error) {

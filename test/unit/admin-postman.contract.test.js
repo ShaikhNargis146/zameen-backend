@@ -53,6 +53,8 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "PATCH {{baseUrl}}/admin/plans/{{planId}}",
     "POST {{baseUrl}}/admin/plans/{{planId}}/activate",
     "POST {{baseUrl}}/admin/plans/{{planId}}/deactivate",
+    "GET {{baseUrl}}/admin/payments",
+    "GET {{baseUrl}}/admin/payments/{{paymentId}}",
     "GET {{baseUrl}}/admin/service-requests",
     "GET {{baseUrl}}/admin/service-requests/{{serviceRequestId}}",
     "PATCH {{baseUrl}}/admin/service-requests/{{serviceRequestId}}/status",
