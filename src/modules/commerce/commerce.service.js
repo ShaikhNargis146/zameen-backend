@@ -3,6 +3,7 @@ import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { sha256 } from "../../utils/crypto.js";
+import logger from "../../utils/logger.js";
 import {
   belongsToServiceReport,
   belongsToServiceRequest,
@@ -333,10 +334,34 @@ export const createPaymentIntent = async ({ actorId, orderId, input }) => {
       "Order cannot accept payment in its current state."
     );
 
-  // Explicitly fail any still-open attempt before starting a fresh one,
-  // rather than trying to determine whether Razorpay still considers the old
-  // Payment Link usable (Section 8 of docs/razorpay-integration-plan.md).
-  await repository.failActivePaymentsForOrder(order.id);
+  // Explicitly fail any still-open attempt before starting a fresh one, and
+  // best-effort cancel it on Razorpay's side too — otherwise the old Payment
+  // Link stays payable there (e.g. a bookmarked tab or the browser back
+  // button) even after we've moved the order onto a new one, and a customer
+  // completing both would be charged twice for the same order (Section 8 of
+  // docs/razorpay-integration-plan.md). A cancel failing (already paid,
+  // already cancelled, provider hiccup) must never block issuing the fresh
+  // attempt, so this only logs.
+  const stalePayments = await repository.failActivePaymentsForOrder(order.id);
+  await Promise.all(
+    stalePayments
+      .filter(stale => stale.providerOrderId)
+      .map(stale =>
+        razorpayProvider
+          .cancelPaymentLink({
+            keyId: razorpayKeyId,
+            keySecret: razorpayKeySecret,
+            timeoutMs: razorpayApiTimeoutMs,
+            providerOrderId: stale.providerOrderId
+          })
+          .catch(error =>
+            logger.warn(
+              `Could not cancel stale Razorpay payment link ${stale.providerOrderId} ` +
+                `for order ${order.id}: ${error.message}`
+            )
+          )
+      )
+  );
 
   // Generated up front so it can be embedded in the Payment Link's notes
   // before the payments row exists — this is how the webhook/callback

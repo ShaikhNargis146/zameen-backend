@@ -44,14 +44,20 @@ export const messages = conversationId =>
 
 // The user's currently active plan (personal scope only — org-level plans do
 // not grant AI quota). null means the user has no active plan at all, i.e.
-// the ambient "Free" tier that has no row of its own anywhere.
+// the ambient "Free" tier that has no row of its own anywhere. Must exclude
+// organization_id IS NOT NULL rows: a plan bought with organizationId set
+// still carries the buyer's own user_id (see
+// commerce.repository.capturePaymentAndApplyEntitlements), so without this
+// filter an org-purchased plan would silently grant its quota to whichever
+// member happened to place the order.
 export const activePlanForUser = userId =>
   run(
     "oneOrNone",
     `SELECT pl.ai_monthly_quota AS "aiMonthlyQuota"
      FROM commerce.plan_subscriptions ps
      JOIN commerce.plans pl ON pl.id = ps.plan_id
-     WHERE ps.user_id = $1 AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+     WHERE ps.user_id = $1 AND ps.organization_id IS NULL
+       AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
      ORDER BY ps.ends_at DESC NULLS LAST
      LIMIT 1`,
     [userId]

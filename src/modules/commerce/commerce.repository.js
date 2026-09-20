@@ -393,12 +393,16 @@ export const findPaymentByIdAdmin = id =>
 
 // Explicitly fails any non-terminal payment attempt still open for this order
 // before a fresh Payment Link is created for a retried /payments/:orderId/create
-// call, per Section 8 of docs/razorpay-integration-plan.md.
+// call, per Section 8 of docs/razorpay-integration-plan.md. Returns the
+// provider order ids that were just failed so the caller can also cancel
+// them on Razorpay's side — this row flip alone does not stop the old
+// Payment Link from still being payable there.
 export const failActivePaymentsForOrder = orderId =>
   run(
-    "none",
+    "any",
     `UPDATE commerce.payments SET status = 'FAILED'
-     WHERE order_id = $1 AND status IN ('CREATED','AUTHORIZED')`,
+     WHERE order_id = $1 AND status IN ('CREATED','AUTHORIZED')
+     RETURNING id, provider_order_id AS "providerOrderId"`,
     [orderId]
   );
 

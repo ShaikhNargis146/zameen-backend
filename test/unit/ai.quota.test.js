@@ -57,6 +57,19 @@ test("active plan lookup is scoped to the user and excludes expired/inactive row
   );
 });
 
+test("active plan lookup excludes organization-scoped plans — a plan bought for an org must not grant the buyer personal AI quota", async () => {
+  await withStub(
+    "oneOrNone",
+    async query => {
+      assert.match(query, /ps\.organization_id IS NULL/);
+      return { ok: true, data: { aiMonthlyQuota: 50 } };
+    },
+    async () => {
+      await aiRepository.activePlanForUser("user-1");
+    }
+  );
+});
+
 test("monthly assistant-message count only counts answered questions from this calendar month", async () => {
   await withStub(
     "one",

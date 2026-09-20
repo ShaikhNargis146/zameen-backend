@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { paymentWebhookRateLimit } from "../../config/rate-limit.config.js";
 import { requireOwnedResource } from "../../shared/authorization.js";
 import { asyncRoute } from "../../shared/http.js";
 import { requireAuth } from "../auth/auth.routes.js";
@@ -27,7 +28,7 @@ router.post(
 // Public: Razorpay redirects the customer's browser here after a Payment
 // Link attempt. No auth header is available on this request.
 router.get("/payments/callback", asyncRoute(controller.paymentCallback));
-router.post("/payments/webhook", asyncRoute(controller.webhook));
+router.post("/payments/webhook", paymentWebhookRateLimit, asyncRoute(controller.webhook));
 
 router.get("/services", asyncRoute(controller.services));
 router.get("/services/:serviceId", asyncRoute(controller.getService));
