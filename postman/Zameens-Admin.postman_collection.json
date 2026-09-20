@@ -73,6 +73,19 @@
     {
       "key": "verificationId",
       "value": ""
+    },
+    {
+      "key": "challengeId",
+      "value": ""
+    },
+    {
+      "key": "otp",
+      "value": "",
+      "description": "OTP code from the delivery provider (logged to console in non-production)."
+    },
+    {
+      "key": "adminRefreshToken",
+      "value": ""
     }
   ],
   "auth": {
@@ -86,6 +99,129 @@
     ]
   },
   "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Request OTP (admin phone)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"9876511111\",\n  \"countryCode\": \"+91\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/request"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"challengeId\", json.data.challengeId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"{{otp}}\",\n  \"deviceId\": \"admin-postman\",\n  \"deviceName\": \"Postman Admin Collection\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"adminAccessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"adminRefreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\",\n  \"deviceId\": \"admin-postman\",\n  \"deviceName\": \"Postman Admin Collection\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"adminAccessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"adminRefreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/logout"
+          }
+        },
+        {
+          "name": "Logout all sessions",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/auth/logout-all"
+          }
+        }
+      ]
+    },
     {
       "name": "User Administration",
       "item": [
@@ -135,6 +271,18 @@
               "raw": "{\n  \"roles\": [\"BUYER\", \"SELLER\"],\n  \"reason\": \"Account role update\"\n}"
             },
             "url": "{{baseUrl}}/admin/users/{{userId}}/roles"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Admin: Dashboard summary",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/dashboard"
           }
         }
       ]
@@ -266,6 +414,20 @@
       "name": "Plans",
       "item": [
         {
+          "name": "Admin: List plans",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/plans?isActive=true&planType=PREMIUM&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin: Plan details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/plans/{{planId}}"
+          }
+        },
+        {
           "name": "Admin: Create plan",
           "request": {
             "method": "POST",
@@ -350,6 +512,23 @@
           }
         },
         {
+          "name": "Admin: Service report upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"title-report.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 524288\n}"
+            },
+            "url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}/report/upload-url"
+          }
+        },
+        {
           "name": "Admin: Submit service report",
           "request": {
             "method": "POST",
@@ -371,6 +550,20 @@
     {
       "name": "Content CMS",
       "item": [
+        {
+          "name": "Admin: List content",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/content?status=DRAFT&type=NEWS&language=en&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin: Content details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/content/{{contentId}}"
+          }
+        },
         {
           "name": "Admin: Create content",
           "request": {
@@ -424,6 +617,40 @@
           "request": {
             "method": "DELETE",
             "url": "{{baseUrl}}/admin/content/{{contentId}}"
+          }
+        },
+        {
+          "name": "Admin: Content cover upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"land-prices-rise.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 153600\n}"
+            },
+            "url": "{{baseUrl}}/admin/content/media/upload-url"
+          }
+        },
+        {
+          "name": "Admin: Complete content cover upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storageKey\": \"content/covers/replace-with-storage-key.jpg\",\n  \"fileName\": \"land-prices-rise.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 153600\n}"
+            },
+            "url": "{{baseUrl}}/admin/content/media/complete"
           }
         }
       ]
@@ -697,6 +924,54 @@
     {
       "name": "Advertisements",
       "item": [
+        {
+          "name": "Admin: List ads",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/ads?status=ACTIVE&placement=HOME_TOP&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin: Ad details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/ads/{{adId}}"
+          }
+        },
+        {
+          "name": "Admin: Ad creative upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/media/upload-url"
+          }
+        },
+        {
+          "name": "Admin: Complete ad creative upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storageKey\": \"ads/creatives/replace-with-storage-key.png\",\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/media/complete"
+          }
+        },
         {
           "name": "Admin: Create ad",
           "request": {

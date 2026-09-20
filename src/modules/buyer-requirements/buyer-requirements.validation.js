@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const purposes = new Set([
@@ -14,8 +15,10 @@ const statuses = new Set(["ACTIVE", "PAUSED", "CLOSED"]);
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
@@ -25,60 +28,51 @@ const optionalUuid = (value, field) =>
 const optionalString = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be at most ${max} characters.`
-    );
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalNumber = (value, field, { min } = {}) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isFinite(num) || (min !== undefined && num < min))
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be a number${min !== undefined ? ` >= ${min}` : ""}.`
-    );
+  if (!Number.isFinite(num) || (min !== undefined && num < min)) {
+    const message = `${field} must be a number${min !== undefined ? ` >= ${min}` : ""}.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
 const optionalInteger = (value, field, { min } = {}) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isInteger(num) || (min !== undefined && num < min))
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be a whole number${min !== undefined ? ` >= ${min}` : ""}.`
-    );
+  if (!Number.isInteger(num) || (min !== undefined && num < min)) {
+    const message = `${field} must be a whole number${min !== undefined ? ` >= ${min}` : ""}.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
 const optionalPurpose = value => {
   if (value === undefined || value === null || value === "") return null;
   const purpose = String(value).trim().toUpperCase();
-  if (!purposes.has(purpose))
-    throw new HttpError(
-      400,
-      "INVALID_PURPOSE",
-      "purpose must be one of INVESTMENT, RESIDENTIAL, INDUSTRIAL, COMMERCIAL, WAREHOUSE, AGRICULTURE, OTHER."
-    );
+  if (!purposes.has(purpose)) {
+    const message =
+      "purpose must be one of INVESTMENT, RESIDENTIAL, INDUSTRIAL, COMMERCIAL, WAREHOUSE, AGRICULTURE, OTHER.";
+    throw new HttpError(400, "INVALID_PURPOSE", message, [{ field: "purpose", message }]);
+  }
   return purpose;
 };
 
 const optionalStatus = value => {
   if (value === undefined || value === null || value === "") return null;
   const status = String(value).trim().toUpperCase();
-  if (!statuses.has(status))
-    throw new HttpError(
-      400,
-      "INVALID_STATUS",
-      "status must be ACTIVE, PAUSED, or CLOSED."
-    );
+  if (!statuses.has(status)) {
+    const message = "status must be ACTIVE, PAUSED, or CLOSED.";
+    throw new HttpError(400, "INVALID_STATUS", message, [{ field: "status", message }]);
+  }
   return status;
 };
 
@@ -129,7 +123,8 @@ const optionalBoolean = (value, field) => {
   const text = String(value).trim().toLowerCase();
   if (["true", "1"].includes(text)) return true;
   if (["false", "0"].includes(text)) return false;
-  throw new HttpError(400, `INVALID_${field}`, `${field} must be a boolean.`);
+  const message = `${field} must be a boolean.`;
+  throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
 };
 
 export const listQuery = query => ({

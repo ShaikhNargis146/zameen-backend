@@ -10,7 +10,8 @@ const planColumns = `
   pl.id, pr.id AS "productId", pr.code, pr.name, pl.plan_type AS "planType", pr.description,
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
-  pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive"
+  pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
+  pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
 
 export const listActivePlans = planType =>
@@ -31,6 +32,19 @@ export const findPlanById = id =>
      JOIN commerce.products pr ON pr.id = pl.product_id
      WHERE pl.id = $1`,
     [id]
+  );
+
+export const listPlansAdmin = ({ planType, isActive, search, limit, offset }) =>
+  run(
+    "any",
+    `SELECT ${planColumns}, count(*) OVER()::int AS total FROM commerce.plans pl
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE ($1::varchar IS NULL OR pl.plan_type = $1)
+       AND ($2::boolean IS NULL OR pr.is_active = $2)
+       AND ($3::varchar IS NULL OR pr.code ILIKE $3 OR pr.name ILIKE $3)
+     ORDER BY pr.amount_minor
+     LIMIT $4 OFFSET $5`,
+    [planType, isActive, search ? `%${search}%` : null, limit, offset]
   );
 
 export const findPlanByCode = code =>

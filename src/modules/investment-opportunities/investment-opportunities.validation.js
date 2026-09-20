@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const opportunityStatuses = new Set(["DRAFT", "PUBLISHED", "CLOSED"]);
@@ -8,8 +9,10 @@ const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalUuid = (value, field) =>
@@ -17,49 +20,57 @@ const optionalUuid = (value, field) =>
 
 const requiredString = (value, min, max, field) => {
   const text = String(value ?? "").trim();
-  if (text.length < min || text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be between ${min} and ${max} characters.`
-    );
+  if (text.length < min || text.length > max) {
+    const message = `${field} must be between ${min} and ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalString = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be at most ${max} characters.`);
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalNonNegativeInteger = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isInteger(num) || num < 0)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a whole number >= 0.`);
+  if (!Number.isInteger(num) || num < 0) {
+    const message = `${field} must be a whole number >= 0.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
 const optionalPhone = value => {
   if (value === undefined || value === null || value === "") return null;
   const phone = String(value).trim();
-  if (!e164Pattern.test(phone))
-    throw new HttpError(400, "INVALID_CONTACT_PHONE", "contactPhone must be a valid E.164 number.");
+  if (!e164Pattern.test(phone)) {
+    const message = "contactPhone must be a valid E.164 number.";
+    throw new HttpError(400, "INVALID_CONTACT_PHONE", message, [{ field: "contactPhone", message }]);
+  }
   return phone;
 };
 const optionalEmail = value => {
   if (value === undefined || value === null || value === "") return null;
   const email = String(value).trim().toLowerCase();
-  if (!emailPattern.test(email))
-    throw new HttpError(400, "INVALID_CONTACT_EMAIL", "contactEmail must be a valid email address.");
+  if (!emailPattern.test(email)) {
+    const message = "contactEmail must be a valid email address.";
+    throw new HttpError(400, "INVALID_CONTACT_EMAIL", message, [{ field: "contactEmail", message }]);
+  }
   return email;
 };
 
 const statusEnum = value => {
   const text = String(value ?? "").trim().toUpperCase();
-  if (!opportunityStatuses.has(text))
-    throw new HttpError(400, "INVALID_STATUS", "status must be DRAFT, PUBLISHED, or CLOSED.");
+  if (!opportunityStatuses.has(text)) {
+    const message = "status must be DRAFT, PUBLISHED, or CLOSED.";
+    throw new HttpError(400, "INVALID_STATUS", message, [{ field: "status", message }]);
+  }
   return text;
 };
 

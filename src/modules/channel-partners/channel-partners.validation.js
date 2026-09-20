@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const partnerStatuses = new Set(["PENDING", "APPROVED", "REJECTED", "SUSPENDED"]);
@@ -6,8 +7,10 @@ const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalUuid = (value, field) =>
@@ -15,52 +18,54 @@ const optionalUuid = (value, field) =>
 
 const requiredString = (value, min, max, field) => {
   const text = String(value ?? "").trim();
-  if (text.length < min || text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be between ${min} and ${max} characters.`
-    );
+  if (text.length < min || text.length > max) {
+    const message = `${field} must be between ${min} and ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 const optionalString = (value, max, field) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be at most ${max} characters.`);
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalEnum = (value, set, code, label) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
 const optionalExperienceYears = value => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isInteger(num) || num < 0 || num > 80)
-    throw new HttpError(
-      400,
-      "INVALID_EXPERIENCE_YEARS",
-      "experienceYears must be a whole number between 0 and 80."
-    );
+  if (!Number.isInteger(num) || num < 0 || num > 80) {
+    const message = "experienceYears must be a whole number between 0 and 80.";
+    throw new HttpError(400, "INVALID_EXPERIENCE_YEARS", message, [
+      { field: "experienceYears", message }
+    ]);
+  }
   return num;
 };
 
 const uuidArray = (value, field, { min = 0 } = {}) => {
-  if (!Array.isArray(value))
-    throw new HttpError(400, `INVALID_${field.toUpperCase()}`, `${field} must be an array of UUIDs.`);
+  if (!Array.isArray(value)) {
+    const message = `${field} must be an array of UUIDs.`;
+    throw new HttpError(400, `INVALID_${field.toUpperCase()}`, message, [{ field, message }]);
+  }
   const ids = [...new Set(value.map((entry, index) => uuid(entry, `${field}[${index}]`)))];
-  if (ids.length < min)
-    throw new HttpError(
-      400,
-      `INVALID_${field.toUpperCase()}`,
-      `${field} must contain at least ${min} location${min === 1 ? "" : "s"}.`
-    );
+  if (ids.length < min) {
+    const message = `${field} must contain at least ${min} location${min === 1 ? "" : "s"}.`;
+    throw new HttpError(400, `INVALID_${field.toUpperCase()}`, message, [{ field, message }]);
+  }
   return ids;
 };
 

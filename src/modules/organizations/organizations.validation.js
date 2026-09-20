@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const orgTypes = new Set(["BROKERAGE", "DEVELOPER", "CORPORATE", "AGENCY"]);
 const orgStatuses = new Set(["PENDING", "ACTIVE", "SUSPENDED"]);
@@ -12,61 +13,57 @@ const trimmed = value => String(value ?? "").trim();
 const optionalPhone = value => {
   if (value === undefined || value === null || value === "") return null;
   const phone = trimmed(value);
-  if (!e164Pattern.test(phone))
-    throw new HttpError(
-      400,
-      "INVALID_PHONE",
-      "phone must be a valid E.164 number."
-    );
+  if (!e164Pattern.test(phone)) {
+    const message = "phone must be a valid E.164 number.";
+    throw new HttpError(400, "INVALID_PHONE", message, [{ field: "phone", message }]);
+  }
   return phone;
 };
 
 const optionalEmail = value => {
   if (value === undefined || value === null || value === "") return null;
   const email = trimmed(value).toLowerCase();
-  if (!emailPattern.test(email))
-    throw new HttpError(
-      400,
-      "INVALID_EMAIL",
-      "email must be a valid email address."
-    );
+  if (!emailPattern.test(email)) {
+    const message = "email must be a valid email address.";
+    throw new HttpError(400, "INVALID_EMAIL", message, [{ field: "email", message }]);
+  }
   return email;
 };
 
 const optionalText = (value, max, code) => {
   if (value === undefined || value === null || value === "") return null;
   const text = trimmed(value);
-  if (text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${code}`,
-      `${code} must be at most ${max} characters.`
-    );
+  if (text.length > max) {
+    const message = `${code} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
 const orgName = value => {
   const text = trimmed(value);
-  if (text.length < 2 || text.length > 255)
-    throw new HttpError(400, "INVALID_NAME", "name must be 2-255 characters.");
+  if (text.length < 2 || text.length > 255) {
+    const message = "name must be 2-255 characters.";
+    throw new HttpError(400, "INVALID_NAME", message, [{ field: "name", message }]);
+  }
   return text;
 };
 
 export const uuid = (value, field) => {
   const text = trimmed(value);
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 export const createOrganization = body => {
   const type = trimmed(body.type).toUpperCase();
-  if (!orgTypes.has(type))
-    throw new HttpError(
-      400,
-      "INVALID_TYPE",
-      "type must be BROKERAGE, DEVELOPER, CORPORATE, or AGENCY."
-    );
+  if (!orgTypes.has(type)) {
+    const message = "type must be BROKERAGE, DEVELOPER, CORPORATE, or AGENCY.";
+    throw new HttpError(400, "INVALID_TYPE", message, [{ field: "type", message }]);
+  }
   return {
     name: orgName(body.name),
     type,
@@ -105,8 +102,10 @@ const optionalFilterText = (value, max) => {
 const optionalEnumFilter = (value, set, code, label) => {
   const text = trimmed(value).toUpperCase();
   if (!text) return null;
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
@@ -135,23 +134,19 @@ export const listMineQuery = query => ({
 
 export const organizationStatus = body => {
   const status = trimmed(body.status).toUpperCase();
-  if (!orgStatuses.has(status))
-    throw new HttpError(
-      400,
-      "INVALID_STATUS",
-      "status must be PENDING, ACTIVE, or SUSPENDED."
-    );
+  if (!orgStatuses.has(status)) {
+    const message = "status must be PENDING, ACTIVE, or SUSPENDED.";
+    throw new HttpError(400, "INVALID_STATUS", message, [{ field: "status", message }]);
+  }
   return status;
 };
 
 export const addMember = body => {
   const userId = uuid(body.userId, "userId");
   const role = trimmed(body.role).toUpperCase();
-  if (!memberRoles.has(role))
-    throw new HttpError(
-      400,
-      "INVALID_ROLE",
-      "role must be OWNER, ADMIN, or MEMBER."
-    );
+  if (!memberRoles.has(role)) {
+    const message = "role must be OWNER, ADMIN, or MEMBER.";
+    throw new HttpError(400, "INVALID_ROLE", message, [{ field: "role", message }]);
+  }
   return { userId, role };
 };

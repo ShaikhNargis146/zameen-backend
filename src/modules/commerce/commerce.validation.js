@@ -1,4 +1,5 @@
 import { HttpError } from "../../shared/http.js";
+import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const planTypes = new Set(["FREE", "PREMIUM", "BROKER"]);
@@ -35,79 +36,89 @@ const maxFileSizeBytes = 50 * 1024 * 1024;
 
 export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
-  if (!uuidPattern.test(text))
-    throw new HttpError(400, "INVALID_ID", `${field} must be a valid UUID.`);
+  if (!uuidPattern.test(text)) {
+    const message = `${field} must be a valid UUID.`;
+    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalUuid = (value, field) =>
   value === undefined || value === null || value === "" ? null : uuid(value, field);
 
-const optionalString = (value, max, field) => {
+const optionalString = (value, max, field, detailsField = toField(field)) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
-  if (text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be at most ${max} characters.`
-    );
+  if (text.length > max) {
+    const message = `${field} must be at most ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
+  }
   return text;
 };
 
 const requiredString = (value, min, max, field) => {
   const text = String(value ?? "").trim();
-  if (text.length < min || text.length > max)
-    throw new HttpError(
-      400,
-      `INVALID_${field}`,
-      `${field} must be between ${min} and ${max} characters.`
-    );
+  if (text.length < min || text.length > max) {
+    const message = `${field} must be between ${min} and ${max} characters.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return text;
 };
 
 const optionalEnum = (value, set, code, label) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
 const requiredEnum = (value, set, code, label) => {
   const text = String(value ?? "").trim().toUpperCase();
-  if (!set.has(text))
-    throw new HttpError(400, `INVALID_${code}`, `${code} must be ${label}.`);
+  if (!set.has(text)) {
+    const message = `${code} must be ${label}.`;
+    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+  }
   return text;
 };
 
 const requiredNonNegativeInteger = (value, field) => {
   const num = Number(value);
-  if (!Number.isInteger(num) || num < 0)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a whole number >= 0.`);
+  if (!Number.isInteger(num) || num < 0) {
+    const message = `${field} must be a whole number >= 0.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
-const optionalPositiveInteger = (value, field) => {
+const optionalPositiveInteger = (value, field, detailsField = toField(field)) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isInteger(num) || num <= 0)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a positive whole number.`);
+  if (!Number.isInteger(num) || num <= 0) {
+    const message = `${field} must be a positive whole number.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
+  }
   return num;
 };
 
 const optionalNonNegativeInteger = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
-  if (!Number.isInteger(num) || num < 0)
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a whole number >= 0.`);
+  if (!Number.isInteger(num) || num < 0) {
+    const message = `${field} must be a whole number >= 0.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return num;
 };
 
 const optionalObject = (value, field) => {
   if (value === undefined || value === null) return null;
-  if (typeof value !== "object" || Array.isArray(value))
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be an object.`);
+  if (typeof value !== "object" || Array.isArray(value)) {
+    const message = `${field} must be an object.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
   return value;
 };
 
@@ -121,7 +132,8 @@ const optionalUrl = (value, field) => {
     // eslint-disable-next-line no-new
     new URL(text);
   } catch {
-    throw new HttpError(400, `INVALID_${field}`, `${field} must be a valid URL.`);
+    const message = `${field} must be a valid URL.`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
   }
   return text;
 };
@@ -130,22 +142,32 @@ export const planAudience = query =>
   optionalEnum(query.audience, planTypes, "AUDIENCE", "FREE, PREMIUM, or BROKER");
 
 export const createOrder = body => {
-  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > maxOrderItems)
-    throw new HttpError(
-      400,
-      "INVALID_ITEMS",
-      `items must contain between 1 and ${maxOrderItems} entries.`
-    );
+  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > maxOrderItems) {
+    const message = `items must contain between 1 and ${maxOrderItems} entries.`;
+    throw new HttpError(400, "INVALID_ITEMS", message, [{ field: "items", message }]);
+  }
   const items = body.items.map((item, index) => ({
     productId: uuid(item?.productId, `items[${index}].productId`),
-    quantity: optionalPositiveInteger(item?.quantity, `ITEMS_${index}_QUANTITY`) ?? 1,
-    targetType: optionalString(item?.targetType, 50, `ITEMS_${index}_TARGET_TYPE`),
+    quantity:
+      optionalPositiveInteger(
+        item?.quantity,
+        `ITEMS_${index}_QUANTITY`,
+        `items[${index}].quantity`
+      ) ?? 1,
+    targetType: optionalString(
+      item?.targetType,
+      50,
+      `ITEMS_${index}_TARGET_TYPE`,
+      `items[${index}].targetType`
+    ),
     targetId: optionalUuid(item?.targetId, `items[${index}].targetId`)
   }));
 
   const couponCode = optionalString(body.couponCode, 50, "COUPON_CODE");
   if (couponCode)
-    throw new HttpError(400, "COUPON_NOT_SUPPORTED", "Coupon codes are not supported yet.");
+    throw new HttpError(400, "COUPON_NOT_SUPPORTED", "Coupon codes are not supported yet.", [
+      { field: "couponCode", message: "Coupon codes are not supported yet." }
+    ]);
 
   return {
     items,
@@ -170,6 +192,21 @@ export const verifyPayment = body => ({
   providerPaymentId: requiredString(body.providerPaymentId, 1, 255, "PROVIDER_PAYMENT_ID"),
   providerOrderId: requiredString(body.providerOrderId, 1, 255, "PROVIDER_ORDER_ID"),
   signature: requiredString(body.signature, 1, 512, "SIGNATURE")
+});
+
+const optionalStrictBoolean = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1"].includes(text)) return true;
+  if (["false", "0"].includes(text)) return false;
+  const message = `${field} must be true or false.`;
+  throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+};
+
+export const adminPlanListQuery = query => ({
+  planType: optionalEnum(query.planType, planTypes, "PLAN_TYPE", "FREE, PREMIUM, or BROKER"),
+  isActive: optionalStrictBoolean(query.isActive, "IS_ACTIVE"),
+  search: optionalString(query.search, 200, "SEARCH")
 });
 
 export const createPlan = body => ({
@@ -218,16 +255,20 @@ export const updatePlan = body => {
 const optionalPhone = value => {
   if (value === undefined || value === null || value === "") return null;
   const phone = String(value).trim();
-  if (!e164Pattern.test(phone))
-    throw new HttpError(400, "INVALID_CONTACT_PHONE", "contactPhone must be a valid E.164 number.");
+  if (!e164Pattern.test(phone)) {
+    const message = "contactPhone must be a valid E.164 number.";
+    throw new HttpError(400, "INVALID_CONTACT_PHONE", message, [{ field: "contactPhone", message }]);
+  }
   return phone;
 };
 
 const optionalEmail = value => {
   if (value === undefined || value === null || value === "") return null;
   const email = String(value).trim().toLowerCase();
-  if (!emailPattern.test(email))
-    throw new HttpError(400, "INVALID_CONTACT_EMAIL", "contactEmail must be a valid email address.");
+  if (!emailPattern.test(email)) {
+    const message = "contactEmail must be a valid email address.";
+    throw new HttpError(400, "INVALID_CONTACT_EMAIL", message, [{ field: "contactEmail", message }]);
+  }
   return email;
 };
 
@@ -235,12 +276,10 @@ const fileInput = body => {
   const fileName = requiredString(body.fileName, 1, 255, "FILE_NAME");
   const mimeType = requiredString(body.mimeType, 1, 255, "MIME_TYPE").toLowerCase();
   const fileSizeBytes = Number(body.fileSizeBytes);
-  if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > maxFileSizeBytes)
-    throw new HttpError(
-      400,
-      "INVALID_FILE_SIZE_BYTES",
-      `fileSizeBytes must be a positive whole number up to ${maxFileSizeBytes} bytes.`
-    );
+  if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > maxFileSizeBytes) {
+    const message = `fileSizeBytes must be a positive whole number up to ${maxFileSizeBytes} bytes.`;
+    throw new HttpError(400, "INVALID_FILE_SIZE_BYTES", message, [{ field: "fileSizeBytes", message }]);
+  }
   return { fileName, mimeType, fileSizeBytes };
 };
 
