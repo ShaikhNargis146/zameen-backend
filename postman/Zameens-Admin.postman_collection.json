@@ -986,40 +986,6 @@
           }
         },
         {
-          "name": "Admin: Ad creative upload URL",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800\n}"
-            },
-            "url": "{{baseUrl}}/admin/ads/media/upload-url"
-          }
-        },
-        {
-          "name": "Admin: Complete ad creative upload",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"storageKey\": \"ads/creatives/replace-with-storage-key.png\",\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800\n}"
-            },
-            "url": "{{baseUrl}}/admin/ads/media/complete"
-          }
-        },
-        {
           "name": "Admin: Create ad",
           "request": {
             "method": "POST",
@@ -1031,7 +997,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Homepage Banner\",\n  \"placement\": \"HOME_TOP\",\n  \"imageStorageKey\": \"ads/homepage-banner.png\",\n  \"targetUrl\": \"https://example.com/promo\",\n  \"startsAt\": \"2026-01-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-12-31T00:00:00.000Z\",\n  \"status\": \"ACTIVE\"\n}"
+              "raw": "{\n  \"name\": \"Homepage Banner\",\n  \"placement\": \"HOME_TOP\",\n  \"targetUrl\": \"https://example.com/promo\",\n  \"startsAt\": \"2026-01-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-12-31T00:00:00.000Z\",\n  \"status\": \"ACTIVE\"\n}"
             },
             "url": "{{baseUrl}}/admin/ads"
           }
@@ -1058,6 +1024,95 @@
           "request": {
             "method": "DELETE",
             "url": "{{baseUrl}}/admin/ads/{{adId}}"
+          }
+        },
+        {
+          "name": "Admin: Ad media upload URL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media/upload-url"
+          }
+        },
+        {
+          "name": "Admin: Complete ad media upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storageKey\": \"ads/{{adId}}/media/replace-with-storage-key.png\",\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800,\n  \"isCover\": true\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media/complete"
+          }
+        },
+        {
+          "name": "Admin: List ad media",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media"
+          }
+        },
+        {
+          "name": "Admin: Update ad media",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sortOrder\": 0\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}"
+          }
+        },
+        {
+          "name": "Admin: Reorder ad media",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mediaIds\": [\"{{mediaId}}\"]\n}"
+            },
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media/order"
+          }
+        },
+        {
+          "name": "Admin: Set ad media cover",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}/cover"
+          }
+        },
+        {
+          "name": "Admin: Delete ad media",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}"
           }
         }
       ]

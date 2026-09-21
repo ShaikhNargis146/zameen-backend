@@ -90,11 +90,16 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "DELETE {{baseUrl}}/admin/auctions/{{auctionId}}",
     "GET {{baseUrl}}/admin/ads",
     "GET {{baseUrl}}/admin/ads/{{adId}}",
-    "POST {{baseUrl}}/admin/ads/media/upload-url",
-    "POST {{baseUrl}}/admin/ads/media/complete",
     "POST {{baseUrl}}/admin/ads",
     "PATCH {{baseUrl}}/admin/ads/{{adId}}",
     "DELETE {{baseUrl}}/admin/ads/{{adId}}",
+    "POST {{baseUrl}}/admin/ads/{{adId}}/media/upload-url",
+    "POST {{baseUrl}}/admin/ads/{{adId}}/media/complete",
+    "GET {{baseUrl}}/admin/ads/{{adId}}/media",
+    "PATCH {{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}",
+    "PUT {{baseUrl}}/admin/ads/{{adId}}/media/order",
+    "PUT {{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}/cover",
+    "DELETE {{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}",
     "PATCH {{baseUrl}}/admin/organizations/{{organizationId}}/status"
   ];
 

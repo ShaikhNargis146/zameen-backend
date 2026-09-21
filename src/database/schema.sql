@@ -758,12 +758,24 @@ CREATE UNIQUE INDEX uq_content_investment_interests_open
 CREATE TABLE content.ads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(255) NOT NULL,
   placement varchar(50) NOT NULL,
-  image_storage_key text NOT NULL, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
+  image_storage_key text, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
   status varchar(20) NOT NULL DEFAULT 'INACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SCHEDULED','EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_content_ads_dates CHECK (ends_at > starts_at)
 );
+COMMENT ON COLUMN content.ads.image_storage_key IS
+  'Deprecated: no longer written by the API. Legacy pre-013 value only; content.ad_media is the source of truth.';
 CREATE INDEX idx_content_ads_active ON content.ads(placement, starts_at, ends_at) WHERE status = 'ACTIVE';
+CREATE TABLE content.ad_media (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ad_id uuid NOT NULL REFERENCES content.ads(id) ON DELETE CASCADE,
+  storage_key text NOT NULL, mime_type varchar(100),
+  sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0), is_cover boolean NOT NULL DEFAULT false,
+  uploaded_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz
+);
+CREATE INDEX idx_content_ad_media_ad ON content.ad_media(ad_id, sort_order) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_content_ad_media_cover ON content.ad_media(ad_id) WHERE is_cover AND deleted_at IS NULL;
 
 CREATE TABLE ops.notifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
