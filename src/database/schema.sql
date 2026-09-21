@@ -757,7 +757,7 @@ CREATE UNIQUE INDEX uq_content_investment_interests_open
   ON content.investment_interests(opportunity_id, user_id) WHERE status IN ('NEW','CONTACTED');
 CREATE TABLE content.ads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(255) NOT NULL,
-  placement varchar(50) NOT NULL CHECK (placement IN ('HOME_TOP','SEARCH_TOP','PROPERTY_SIDEBAR','CONTENT')),
+  placement varchar(50) NOT NULL,
   image_storage_key text NOT NULL, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
   status varchar(20) NOT NULL DEFAULT 'INACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SCHEDULED','EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),

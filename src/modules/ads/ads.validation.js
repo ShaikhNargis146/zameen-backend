@@ -2,7 +2,6 @@ import { HttpError } from "../../shared/http.js";
 import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const placements = new Set(["HOME_TOP", "SEARCH_TOP", "PROPERTY_SIDEBAR", "CONTENT"]);
 const adStatuses = new Set(["ACTIVE", "INACTIVE", "SCHEDULED", "EXPIRED"]);
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
@@ -55,8 +54,7 @@ const requiredEnum = (value, set, code, label) => {
   return text;
 };
 
-export const placement = value =>
-  requiredEnum(value, placements, "PLACEMENT", "HOME_TOP, SEARCH_TOP, PROPERTY_SIDEBAR, or CONTENT");
+export const placement = value => requiredString(value, 1, 50, "PLACEMENT").toUpperCase();
 
 export const createAd = body => {
   const startsAt = requiredDateTime(body.startsAt, "STARTS_AT");
@@ -113,12 +111,9 @@ export const mediaComplete = body => ({
 
 export const adminAdListQuery = query => ({
   status: optionalEnum(query.status, adStatuses, "STATUS", "ACTIVE, INACTIVE, SCHEDULED, or EXPIRED"),
-  placement: optionalEnum(
-    query.placement,
-    placements,
-    "PLACEMENT",
-    "HOME_TOP, SEARCH_TOP, PROPERTY_SIDEBAR, or CONTENT"
-  ),
+  placement: query.placement === undefined || query.placement === null || query.placement === ""
+    ? null
+    : placement(query.placement),
   search: optionalString(query.search, 200, "SEARCH")
 });
 
