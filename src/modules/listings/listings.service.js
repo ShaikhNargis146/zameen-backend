@@ -5,6 +5,8 @@ import logger from "../../utils/logger.js";
 import { signedReadUrl } from "../../utils/storage.js";
 import * as notifications from "../notifications/notifications.service.js";
 import {
+  getLocation as propertyLocation,
+  listDocuments as propertyDocuments,
   ownedProperty,
   passport as propertyPassport,
   scanner as propertyScanner,
@@ -27,6 +29,25 @@ const listingCode = () =>
     .replace(/-/g, "")
     .slice(0, 12)
     .toUpperCase()}`;
+const signMedia = mediaRows =>
+  Promise.all(
+    mediaRows.map(async item => ({
+      ...item,
+      url: await signedReadUrl(item.storageKey),
+      thumbnailUrl: await signedReadUrl(item.thumbnailStorageKey)
+    }))
+  );
+const mediaWithUrls = async propertyId =>
+  signMedia(await repository.media(propertyId));
+const listingPropertyContext = async propertyId => {
+  const [media, documents, location] = await Promise.all([
+    mediaWithUrls(propertyId),
+    propertyDocuments(propertyId),
+    propertyLocation(propertyId)
+  ]);
+  const { propertyId: ignored, ...locationDetails } = location || {};
+  return { media, documents, location: location ? locationDetails : null };
+};
 export const ownedListing = async (listingId, actorId) => {
   const listing = await repository.findOwned(listingId, actorId);
   if (!listing)
@@ -74,7 +95,14 @@ export const create = async ({ propertyId, actorId, input }) => {
   }
   return repository.summary(saved.id);
 };
-export const summary = repository.summary;
+export const summary = async id => {
+  const listing = await repository.summary(id);
+  if (!listing) return listing;
+  return {
+    ...listing,
+    ...(await listingPropertyContext(listing.propertyId))
+  };
+};
 export const update = async ({ listing, changes }) => {
   if (!["DRAFT", "REJECTED"].includes(listing.review_status))
     throw new HttpError(
@@ -340,13 +368,7 @@ export const publicDetail = async (id, actorId = null) => {
           showExactLocation: listing.showExactLocation
         }
       : null,
-    media: await Promise.all(
-      media.map(async item => ({
-        ...item,
-        url: await signedReadUrl(item.storageKey),
-        thumbnailUrl: await signedReadUrl(item.thumbnailStorageKey)
-      }))
-    ),
+    media: await signMedia(media),
     amenities,
     parcelSummary,
     seller: {
@@ -395,7 +417,10 @@ export const adminListing = async id => {
   const listing = await repository.adminListing(id);
   if (!listing)
     throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
-  return listing;
+  return {
+    ...listing,
+    ...(await listingPropertyContext(listing.propertyId))
+  };
 };
 export const approve = async ({ id, approval, actorId }) => {
   const before = await repository.summary(id);

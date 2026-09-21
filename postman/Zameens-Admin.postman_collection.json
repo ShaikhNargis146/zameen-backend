@@ -305,6 +305,7 @@
           "name": "Admin \u2014 listing detail",
           "request": {
             "method": "GET",
+            "description": "Response includes media (full array, each item with a signed url/thumbnailUrl) and documents (full array, each item with a signed downloadUrl) for the listing's property, same signing behavior as the public /listings/{listingId}/detail endpoint. Also includes location (location, pincode, addressLine, landmark, formattedAddress, latitude, longitude, locationPrecision, showExactLocation), or null if the property has no location saved yet — unlike the public endpoint, latitude/longitude are always exact here regardless of showExactLocation.",
             "url": "{{baseUrl}}/admin/listings/{{listingId}}"
           }
         },
