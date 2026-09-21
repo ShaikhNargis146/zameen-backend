@@ -121,6 +121,18 @@ const optionalNonNegativeInteger = (value, field) => {
   return num;
 };
 
+// Basis points (1800 = 18%) — bounded to a real GST percentage (0-100%),
+// unlike the general-purpose optionalNonNegativeInteger above.
+const optionalGstRateBps = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0 || num > 10000) {
+    const message = `${field} must be a whole number between 0 and 10000 (basis points).`;
+    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  }
+  return num;
+};
+
 const optionalObject = (value, field) => {
   if (value === undefined || value === null) return null;
   if (typeof value !== "object" || Array.isArray(value)) {
@@ -255,7 +267,9 @@ export const createPlan = body => ({
   verificationIncluded: optionalBoolean(body.verificationIncluded, false),
   features: optionalObject(body.features, "FEATURES") || {},
   isActive: optionalBoolean(body.isActive, true),
-  aiMonthlyQuota: optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA")
+  aiMonthlyQuota: optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA"),
+  gstRateBps: optionalGstRateBps(body.gstRateBps, "GST_RATE_BPS") ?? 1800,
+  hsnSacCode: optionalString(body.hsnSacCode, 20, "HSN_SAC_CODE")
 });
 
 export const updatePlan = body => {
@@ -283,6 +297,10 @@ export const updatePlan = body => {
   if (Object.hasOwn(body, "isActive")) changes.isActive = Boolean(body.isActive);
   if (Object.hasOwn(body, "aiMonthlyQuota"))
     changes.aiMonthlyQuota = optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA");
+  if (Object.hasOwn(body, "gstRateBps"))
+    changes.gstRateBps = optionalGstRateBps(body.gstRateBps, "GST_RATE_BPS");
+  if (Object.hasOwn(body, "hsnSacCode"))
+    changes.hsnSacCode = optionalString(body.hsnSacCode, 20, "HSN_SAC_CODE");
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;

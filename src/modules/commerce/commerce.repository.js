@@ -1,4 +1,5 @@
 import { pg, run } from "../../shared/db.js";
+import { splitGstMinor, stateCodeFromGstin } from "./tax.js";
 
 const runTx = async fn => {
   const result = await pg.tx(fn);
@@ -11,7 +12,7 @@ const planColumns = `
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
   pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
-  pl.ai_monthly_quota AS "aiMonthlyQuota",
+  pl.ai_monthly_quota AS "aiMonthlyQuota", pr.gst_rate_bps AS "gstRateBps", pr.hsn_sac_code AS "hsnSacCode",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
 
@@ -98,13 +99,15 @@ export const createPlan = ({
   featuredDays,
   verificationIncluded,
   features,
-  aiMonthlyQuota
+  aiMonthlyQuota,
+  gstRateBps,
+  hsnSacCode
 }) =>
   runTx(async t => {
     const product = await t.one(
-      `INSERT INTO commerce.products (code, type, name, description, amount_minor, currency, is_active)
-       VALUES ($1,'PLAN',$2,$3,$4,$5,$6) RETURNING id`,
-      [code, name, description, amountMinor, currency, isActive]
+      `INSERT INTO commerce.products (code, type, name, description, amount_minor, currency, is_active, gst_rate_bps, hsn_sac_code)
+       VALUES ($1,'PLAN',$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [code, name, description, amountMinor, currency, isActive, gstRateBps ?? 1800, hsnSacCode ?? null]
     );
     const plan = await t.one(
       `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
@@ -129,7 +132,9 @@ const productColumnMap = {
   description: "description",
   amountMinor: "amount_minor",
   currency: "currency",
-  isActive: "is_active"
+  isActive: "is_active",
+  gstRateBps: "gst_rate_bps",
+  hsnSacCode: "hsn_sac_code"
 };
 const planColumnMap = {
   planType: "plan_type",
@@ -185,6 +190,7 @@ export const findProductsByIds = ids =>
   run(
     "any",
     `SELECT p.id, p.code, p.name, p.type, p.amount_minor AS "amountMinor", p.currency, p.is_active AS "isActive",
+            p.gst_rate_bps AS "gstRateBps", p.hsn_sac_code AS "hsnSacCode",
             pl.id AS "planId",
             promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
      FROM commerce.products p
@@ -240,14 +246,17 @@ export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor
     );
     for (const item of items) {
       await t.none(
-        `INSERT INTO commerce.order_items (order_id, product_id, quantity, unit_amount_minor, total_amount_minor, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+        `INSERT INTO commerce.order_items
+           (order_id, product_id, quantity, unit_amount_minor, total_amount_minor, gst_rate_bps, hsn_sac_code, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
         [
           order.id,
           item.productId,
           item.quantity,
           item.unitAmountMinor,
           item.totalAmountMinor,
+          item.gstRateBps || 0,
+          item.hsnSacCode || null,
           JSON.stringify({ targetType: item.targetType || null, targetId: item.targetId || null })
         ]
       );
@@ -282,6 +291,30 @@ export const findOwnedByUser = (id, userId) =>
     [id, userId]
   );
 
+// userId null (admin) sees any order; otherwise scoped to the owning buyer —
+// same nullable-param ownership pattern used throughout this file (e.g.
+// listPaymentsAdmin). Joined with the buyer and, when applicable, the
+// purchasing organization, since an invoice needs a "bill to" name/GSTIN
+// that the plain orderColumns view above doesn't carry.
+export const findOrderInvoiceRow = (id, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT o.id, o.order_number AS "orderNumber", o.user_id AS "userId", o.organization_id AS "organizationId",
+            o.status, o.subtotal_minor AS "subtotalMinor", o.total_minor AS "totalMinor", o.currency,
+            o.invoice_number AS "invoiceNumber", o.buyer_gstin AS "buyerGstin",
+            o.place_of_supply_state_code AS "placeOfSupplyStateCode",
+            o.cgst_minor AS "cgstMinor", o.sgst_minor AS "sgstMinor", o.igst_minor AS "igstMinor",
+            (SELECT p.paid_at FROM commerce.payments p WHERE p.order_id = o.id AND p.status = 'CAPTURED'
+             ORDER BY p.paid_at DESC LIMIT 1) AS "paidAt",
+            u.display_name AS "buyerName", u.phone_e164 AS "buyerPhone", u.email::text AS "buyerEmail",
+            org.name AS "organizationName"
+     FROM commerce.orders o
+     JOIN auth.users u ON u.id = o.user_id
+     LEFT JOIN account.organizations org ON org.id = o.organization_id
+     WHERE o.id = $1 AND ($2::uuid IS NULL OR o.user_id = $2)`,
+    [id, userId]
+  );
+
 export const listForUser = (userId, { status }, { limit, offset }) =>
   run(
     "any",
@@ -296,7 +329,8 @@ export const itemsForOrders = orderIds =>
   run(
     "any",
     `SELECT oi.order_id AS "orderId", oi.product_id AS "productId", pr.code, pr.name, oi.quantity,
-            oi.unit_amount_minor AS "unitAmountMinor", oi.total_amount_minor AS "totalAmountMinor", oi.metadata
+            oi.unit_amount_minor AS "unitAmountMinor", oi.total_amount_minor AS "totalAmountMinor",
+            oi.gst_rate_bps AS "gstRateBps", oi.hsn_sac_code AS "hsnSacCode", oi.metadata
      FROM commerce.order_items oi
      JOIN commerce.products pr ON pr.id = oi.product_id
      WHERE oi.order_id = ANY($1::uuid[])
@@ -342,7 +376,7 @@ export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
 const paymentAdminJoinColumns = `
   o.order_number AS "orderNumber", o.status AS "orderStatus", o.user_id AS "userId",
   o.organization_id AS "organizationId", o.subtotal_minor AS "orderSubtotalMinor",
-  o.tax_minor AS "orderTaxMinor", o.total_minor AS "orderTotalMinor",
+  o.tax_minor AS "orderTaxMinor", o.total_minor AS "orderTotalMinor", o.invoice_number AS "invoiceNumber",
   u.display_name AS "buyerName", u.phone_e164 AS "buyerPhone", u.email::text AS "buyerEmail"
 `;
 
@@ -433,7 +467,13 @@ export const computePlanEndsAt = ({ existingEndsAt, durationDays, now }) => {
 // (Sections 10-11 of docs/razorpay-integration-plan.md) so the two paths
 // cannot disagree; each entitlement write is independently idempotent so
 // calling this twice for the same payment is harmless.
-export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymentId, providerPayload }) =>
+export const capturePaymentAndApplyEntitlements = ({
+  id,
+  orderId,
+  providerPaymentId,
+  providerPayload,
+  sellerGstin
+}) =>
   runTx(async t => {
     const payment = await t.one(
       `UPDATE commerce.payments
@@ -448,7 +488,8 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
       [orderId]
     );
     const items = await t.any(
-      `SELECT oi.id AS "orderItemId", oi.metadata, p.type,
+      `SELECT oi.id AS "orderItemId", oi.metadata, oi.total_amount_minor AS "totalAmountMinor",
+              oi.gst_rate_bps AS "gstRateBps", p.type,
               pl.id AS "planId", pl.duration_days AS "durationDays",
               promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
        FROM commerce.order_items oi
@@ -514,10 +555,60 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
       }
     }
 
+    // Invoice number + GST split are assigned once, here, at the moment the
+    // order actually becomes PAID — never recomputed later, so redownloading
+    // an invoice always shows the same number/split even if a product's
+    // gst_rate_bps changes afterwards (order_items already snapshots the
+    // rate used below). Place of supply defaults to the seller's own state
+    // (intra-state) since no buyer billing address exists anywhere in this
+    // schema; an org-billed order can override that via its own gst_number.
+    const org = order.organizationId
+      ? await t.oneOrNone(`SELECT gst_number AS "gstNumber" FROM account.organizations WHERE id = $1`, [
+          order.organizationId
+        ])
+      : null;
+    const buyerGstin = org?.gstNumber || null;
+    const sellerStateCode = stateCodeFromGstin(sellerGstin);
+    const placeOfSupplyStateCode = stateCodeFromGstin(buyerGstin) || sellerStateCode;
+    const isIntraState = placeOfSupplyStateCode === sellerStateCode;
+
+    const totals = items.reduce(
+      (acc, item) => {
+        const split = splitGstMinor({
+          totalAmountMinor: item.totalAmountMinor,
+          gstRateBps: item.gstRateBps,
+          isIntraState
+        });
+        acc.cgstMinor += split.cgstMinor;
+        acc.sgstMinor += split.sgstMinor;
+        acc.igstMinor += split.igstMinor;
+        return acc;
+      },
+      { cgstMinor: 0, sgstMinor: 0, igstMinor: 0 }
+    );
+
+    const { n: invoiceSeq } = await t.one(`SELECT nextval('commerce.invoice_number_seq') AS n`);
+    const invoiceNumber = `INV-${String(invoiceSeq).padStart(6, "0")}`;
+    await t.none(
+      `UPDATE commerce.orders
+       SET invoice_number = $2, buyer_gstin = $3, place_of_supply_state_code = $4,
+           cgst_minor = $5, sgst_minor = $6, igst_minor = $7
+       WHERE id = $1`,
+      [
+        orderId,
+        invoiceNumber,
+        buyerGstin,
+        placeOfSupplyStateCode,
+        totals.cgstMinor,
+        totals.sgstMinor,
+        totals.igstMinor
+      ]
+    );
+
     // userId/organizationId are returned alongside the payment so the
     // caller can notify the buyer without a second round trip — payments
     // rows carry no user reference of their own, only orders do.
-    return { ...payment, userId: order.userId, organizationId: order.organizationId };
+    return { ...payment, userId: order.userId, organizationId: order.organizationId, invoiceNumber };
   });
 
 // The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)

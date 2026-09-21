@@ -565,6 +565,11 @@ CREATE TABLE commerce.products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(100) NOT NULL UNIQUE,
   type varchar(30) NOT NULL CHECK (type IN ('PLAN','PROMOTION','SERVICE')),
   name varchar(255) NOT NULL, description text, amount_minor bigint NOT NULL CHECK (amount_minor >= 0), currency char(3) NOT NULL DEFAULT 'INR',
+  -- amount_minor is GST-inclusive. gst_rate_bps/hsn_sac_code (basis points,
+  -- 1800 = 18%) exist purely to render the tax breakdown on an order's
+  -- invoice (see migrations/014_invoice_gst_fields.sql) -- they never change
+  -- what a customer is charged.
+  gst_rate_bps integer NOT NULL DEFAULT 1800 CHECK (gst_rate_bps BETWEEN 0 AND 10000), hsn_sac_code varchar(20),
   is_active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE commerce.plans (
@@ -583,13 +588,29 @@ CREATE TABLE commerce.orders (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
   status varchar(30) NOT NULL DEFAULT 'CREATED' CHECK (status IN ('CREATED','PAYMENT_PENDING','PAID','FAILED','CANCELLED','REFUNDED')),
   subtotal_minor bigint NOT NULL CHECK (subtotal_minor >= 0), tax_minor bigint NOT NULL DEFAULT 0 CHECK (tax_minor >= 0), total_minor bigint NOT NULL CHECK (total_minor >= 0), currency char(3) NOT NULL DEFAULT 'INR',
+  -- Assigned once, at payment-capture time (commerce.repository.js
+  -- capturePaymentAndApplyEntitlements), from commerce.invoice_number_seq --
+  -- null until then. There is no buyer billing address anywhere in this
+  -- schema, so place_of_supply_state_code defaults to the seller's own state
+  -- (intra-state, CGST+SGST) unless organization_id is set and that
+  -- organization has a gst_number, in which case the buyer's state is read
+  -- from the GSTIN's state-code prefix (IGST if it differs from the
+  -- seller's). See migrations/014_invoice_gst_fields.sql.
+  invoice_number varchar(50), buyer_gstin varchar(30), place_of_supply_state_code varchar(2),
+  cgst_minor bigint NOT NULL DEFAULT 0 CHECK (cgst_minor >= 0), sgst_minor bigint NOT NULL DEFAULT 0 CHECK (sgst_minor >= 0), igst_minor bigint NOT NULL DEFAULT 0 CHECK (igst_minor >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_commerce_orders_user ON commerce.orders(user_id, created_at DESC);
+CREATE UNIQUE INDEX uq_commerce_orders_invoice_number ON commerce.orders(invoice_number) WHERE invoice_number IS NOT NULL;
+CREATE SEQUENCE commerce.invoice_number_seq;
 CREATE TABLE commerce.order_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES commerce.orders(id) ON DELETE RESTRICT,
   product_id uuid NOT NULL REFERENCES commerce.products(id) ON DELETE RESTRICT, quantity integer NOT NULL CHECK (quantity > 0),
   unit_amount_minor bigint NOT NULL CHECK (unit_amount_minor >= 0), total_amount_minor bigint NOT NULL CHECK (total_amount_minor >= 0), metadata jsonb,
+  -- Snapshotted from commerce.products at order-creation time, same as the
+  -- amount columns above, so a product's rate changing later never changes
+  -- an already-issued invoice.
+  gst_rate_bps integer NOT NULL DEFAULT 0 CHECK (gst_rate_bps BETWEEN 0 AND 10000), hsn_sac_code varchar(20),
   created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT chk_order_item_total CHECK (total_amount_minor = quantity * unit_amount_minor)
 );
 CREATE INDEX idx_commerce_order_items_order ON commerce.order_items(order_id);

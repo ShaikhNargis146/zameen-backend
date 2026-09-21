@@ -19,6 +19,7 @@ router.get("/plans/me", requireAuth, asyncRoute(controller.myPlan));
 router.post("/orders", requireAuth, asyncRoute(controller.createOrder));
 router.get("/orders/me", requireAuth, asyncRoute(controller.myOrders));
 router.get("/orders/:orderId", requireAuth, asyncRoute(controller.getOrder));
+router.get("/orders/:orderId/invoice", requireAuth, asyncRoute(controller.downloadInvoice));
 
 router.post(
   "/payments/:orderId/create",

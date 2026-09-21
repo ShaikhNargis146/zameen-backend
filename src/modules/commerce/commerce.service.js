@@ -15,7 +15,9 @@ import {
 import * as organizationsRepository from "../organizations/organizations.repository.js";
 import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./commerce.repository.js";
+import { renderInvoicePdf } from "./invoice.pdf.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
+import { splitGstMinor } from "./tax.js";
 
 const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "dev-razorpay-key-id";
 const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
@@ -27,13 +29,22 @@ const razorpayApiTimeoutMs = Number(process.env.RAZORPAY_API_TIMEOUT_MS || 10000
 const apiPublicBaseUrl = process.env.API_PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 8080}`;
 // Where we redirect the browser after handling the Payment Link callback.
 const commerceReturnBaseUrl = process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:3000";
+// The invoice's "Sold By" block — this business's own GST registration.
+// Its state-code prefix (first 2 digits) is also what decides CGST+SGST vs
+// IGST on every invoice (see capturePaymentAndApplyEntitlements).
+const invoiceSellerLegalName = process.env.INVOICE_SELLER_LEGAL_NAME || "Zameens Investments";
+const invoiceSellerGstin = process.env.INVOICE_SELLER_GSTIN || "27DEVTESTGSTIN1Z5";
+const invoiceSellerAddress = process.env.INVOICE_SELLER_ADDRESS || "Address not configured";
 if (!isNonProductionEnv) {
   for (const [name, value] of [
     ["RAZORPAY_KEY_ID", process.env.RAZORPAY_KEY_ID],
     ["RAZORPAY_KEY_SECRET", process.env.RAZORPAY_KEY_SECRET],
     ["RAZORPAY_WEBHOOK_SECRET", process.env.RAZORPAY_WEBHOOK_SECRET],
     ["API_PUBLIC_BASE_URL", process.env.API_PUBLIC_BASE_URL],
-    ["COMMERCE_RETURN_BASE_URL", process.env.COMMERCE_RETURN_BASE_URL]
+    ["COMMERCE_RETURN_BASE_URL", process.env.COMMERCE_RETURN_BASE_URL],
+    ["INVOICE_SELLER_LEGAL_NAME", process.env.INVOICE_SELLER_LEGAL_NAME],
+    ["INVOICE_SELLER_GSTIN", process.env.INVOICE_SELLER_GSTIN],
+    ["INVOICE_SELLER_ADDRESS", process.env.INVOICE_SELLER_ADDRESS]
   ])
     if (!value) throw new Error(`${name} is required in production`);
 }
@@ -77,6 +88,8 @@ const toPlan = row =>
 const toPlanAdmin = row =>
   row && {
     ...toPlan(row),
+    gstRateBps: row.gstRateBps,
+    hsnSacCode: row.hsnSacCode,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -269,7 +282,13 @@ export const createOrder = async ({ actorId, input }) => {
     const unitAmountMinor = Number(product.amountMinor);
     const totalAmountMinor = unitAmountMinor * item.quantity;
     subtotalMinor += totalAmountMinor;
-    items.push({ ...item, unitAmountMinor, totalAmountMinor });
+    items.push({
+      ...item,
+      unitAmountMinor,
+      totalAmountMinor,
+      gstRateBps: product.gstRateBps,
+      hsnSacCode: product.hsnSacCode
+    });
   }
 
   const taxMinor = 0;
@@ -315,6 +334,36 @@ const ownedOrderRow = async (orderId, actorId) => {
   const row = await repository.findOwnedByUser(orderId, actorId);
   if (!row) throw new HttpError(404, "ORDER_NOT_FOUND", "Order was not found.");
   return row;
+};
+
+// Same admin-or-owner visibility as orderForActor above. invoice_number is
+// only ever set once an order is actually PAID (capturePaymentAndApplyEntitlements),
+// so its absence here means "never paid" rather than "not generated yet" —
+// there's nothing to lazily generate, the PDF is just re-rendered on demand
+// from data already persisted at capture time.
+export const generateOrderInvoice = async ({ orderId, actor }) => {
+  const isAdmin = Boolean(actor.roles?.includes("ADMIN"));
+  const row = await repository.findOrderInvoiceRow(orderId, isAdmin ? null : actor.id);
+  if (!row) throw new HttpError(404, "ORDER_NOT_FOUND", "Order was not found.");
+  if (!row.invoiceNumber)
+    throw new HttpError(409, "INVOICE_NOT_AVAILABLE", "This order has not been paid yet.");
+
+  // The order-level cgst/sgst/igst_minor columns only hold the *summed*
+  // split (that's all capturePaymentAndApplyEntitlements needs to persist);
+  // the per-line breakdown the PDF table shows is recomputed here from each
+  // item's own snapshotted gstRateBps via the same pure splitGstMinor used
+  // at capture time — deterministic, so it always matches the stored totals.
+  const isIntraState = Number(row.igstMinor) === 0;
+  const items = (await repository.itemsForOrders([row.id])).map(item => ({
+    ...item,
+    ...splitGstMinor({ totalAmountMinor: item.totalAmountMinor, gstRateBps: item.gstRateBps, isIntraState })
+  }));
+  const buffer = await renderInvoicePdf({
+    seller: { legalName: invoiceSellerLegalName, gstin: invoiceSellerGstin, address: invoiceSellerAddress },
+    order: row,
+    items
+  });
+  return { buffer, fileName: `${row.invoiceNumber}.pdf` };
 };
 
 export const listMyOrders = async ({ actorId, filters, query }) => {
@@ -482,7 +531,8 @@ export const paymentCallback = async ({ query }) => {
         id: payment.id,
         orderId: payment.orderId,
         providerPaymentId: paymentId,
-        providerPayload: { source: "payment_link_callback", query, providerPayment }
+        providerPayload: { source: "payment_link_callback", query, providerPayment },
+        sellerGstin: invoiceSellerGstin
       });
       await notifyPaymentCaptured(captured);
     } catch {
@@ -507,6 +557,7 @@ const toPaymentAdmin = row =>
     orderId: row.orderId,
     orderNumber: row.orderNumber,
     orderStatus: row.orderStatus,
+    invoiceNumber: row.invoiceNumber,
     provider: row.provider,
     providerOrderId: row.providerOrderId,
     providerPaymentId: row.providerPaymentId,
@@ -636,7 +687,8 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
         id: payment.id,
         orderId: payment.orderId,
         providerPaymentId: paymentEntity.id,
-        providerPayload: body
+        providerPayload: body,
+        sellerGstin: invoiceSellerGstin
       });
       await notifyPaymentCaptured(captured);
     } else if (payment && eventType === "payment.failed" && payment.status === "CREATED") {

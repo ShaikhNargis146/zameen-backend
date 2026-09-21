@@ -25,6 +25,16 @@ export const getOrder = async (req, res) =>
     })
   );
 
+export const downloadInvoice = async (req, res) => {
+  const { buffer, fileName } = await service.generateOrderInvoice({
+    orderId: validation.uuid(req.params.orderId, "orderId"),
+    actor: req.actor
+  });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  return res.send(buffer);
+};
+
 export const myOrders = async (req, res) => {
   const { data, meta } = await service.listMyOrders({
     actorId: req.actor.id,
