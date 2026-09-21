@@ -26,22 +26,22 @@
 -- "unique and sequential" GST requirement.
 
 ALTER TABLE commerce.products
-  ADD COLUMN gst_rate_bps integer NOT NULL DEFAULT 1800 CHECK (gst_rate_bps BETWEEN 0 AND 10000),
-  ADD COLUMN hsn_sac_code varchar(20);
+  ADD COLUMN IF NOT EXISTS gst_rate_bps integer NOT NULL DEFAULT 1800 CHECK (gst_rate_bps BETWEEN 0 AND 10000),
+  ADD COLUMN IF NOT EXISTS hsn_sac_code varchar(20);
 
 ALTER TABLE commerce.order_items
-  ADD COLUMN gst_rate_bps integer NOT NULL DEFAULT 0 CHECK (gst_rate_bps BETWEEN 0 AND 10000),
-  ADD COLUMN hsn_sac_code varchar(20);
+  ADD COLUMN IF NOT EXISTS gst_rate_bps integer NOT NULL DEFAULT 0 CHECK (gst_rate_bps BETWEEN 0 AND 10000),
+  ADD COLUMN IF NOT EXISTS hsn_sac_code varchar(20);
 
 ALTER TABLE commerce.orders
-  ADD COLUMN invoice_number varchar(50),
-  ADD COLUMN buyer_gstin varchar(30),
-  ADD COLUMN place_of_supply_state_code varchar(2),
-  ADD COLUMN cgst_minor bigint NOT NULL DEFAULT 0 CHECK (cgst_minor >= 0),
-  ADD COLUMN sgst_minor bigint NOT NULL DEFAULT 0 CHECK (sgst_minor >= 0),
-  ADD COLUMN igst_minor bigint NOT NULL DEFAULT 0 CHECK (igst_minor >= 0);
+  ADD COLUMN IF NOT EXISTS invoice_number varchar(50),
+  ADD COLUMN IF NOT EXISTS buyer_gstin varchar(30),
+  ADD COLUMN IF NOT EXISTS place_of_supply_state_code varchar(2),
+  ADD COLUMN IF NOT EXISTS cgst_minor bigint NOT NULL DEFAULT 0 CHECK (cgst_minor >= 0),
+  ADD COLUMN IF NOT EXISTS sgst_minor bigint NOT NULL DEFAULT 0 CHECK (sgst_minor >= 0),
+  ADD COLUMN IF NOT EXISTS igst_minor bigint NOT NULL DEFAULT 0 CHECK (igst_minor >= 0);
 
-CREATE UNIQUE INDEX uq_commerce_orders_invoice_number
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commerce_orders_invoice_number
   ON commerce.orders(invoice_number) WHERE invoice_number IS NOT NULL;
 
-CREATE SEQUENCE commerce.invoice_number_seq;
+CREATE SEQUENCE IF NOT EXISTS commerce.invoice_number_seq;

@@ -7,7 +7,7 @@
 -- truth and the cover is derived via a correlated subquery in
 -- ads.repository.js, so the public GET /ads response shape is unchanged.
 
-CREATE TABLE content.ad_media (
+CREATE TABLE IF NOT EXISTS content.ad_media (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ad_id uuid NOT NULL REFERENCES content.ads(id) ON DELETE CASCADE,
   storage_key text NOT NULL, mime_type varchar(100),
@@ -15,16 +15,19 @@ CREATE TABLE content.ad_media (
   uploaded_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz
 );
-CREATE INDEX idx_content_ad_media_ad ON content.ad_media(ad_id, sort_order) WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX uq_content_ad_media_cover ON content.ad_media(ad_id) WHERE is_cover AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_content_ad_media_ad ON content.ad_media(ad_id, sort_order) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_content_ad_media_cover ON content.ad_media(ad_id) WHERE is_cover AND deleted_at IS NULL;
 
 -- Backfill: every existing ad currently has a required single image_storage_key.
 -- Migrate it in as that ad's cover. uploaded_by_user_id is left NULL — content.ads
--- has never tracked a creating actor.
+-- has never tracked a creating actor. Guarded by NOT EXISTS so this is safe to
+-- run again on a database where schema.sql already created content.ad_media
+-- fresh (CI's clean-install-then-migrate check does exactly this).
 INSERT INTO content.ad_media (ad_id, storage_key, sort_order, is_cover, created_at)
-SELECT id, image_storage_key, 0, true, created_at
-FROM content.ads
-WHERE image_storage_key IS NOT NULL;
+SELECT ads.id, ads.image_storage_key, 0, true, ads.created_at
+FROM content.ads ads
+WHERE ads.image_storage_key IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM content.ad_media m WHERE m.ad_id = ads.id);
 
 ALTER TABLE content.ads ALTER COLUMN image_storage_key DROP NOT NULL;
 COMMENT ON COLUMN content.ads.image_storage_key IS
