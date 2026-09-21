@@ -121,3 +121,13 @@ export const reinstate = async (req, res) =>
       actorId: req.actor.id
     })
   );
+export const removeMedia = async (req, res) =>
+  ok(
+    res,
+    await service.removeMedia({
+      listingId: req.params.listingId,
+      mediaId: req.params.mediaId,
+      reason: validation.optionalReason(req.body || {}),
+      actorId: req.actor.id
+    })
+  );

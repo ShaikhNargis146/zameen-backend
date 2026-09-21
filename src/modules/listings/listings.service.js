@@ -5,6 +5,7 @@ import logger from "../../utils/logger.js";
 import { signedReadUrl } from "../../utils/storage.js";
 import * as notifications from "../notifications/notifications.service.js";
 import {
+  deleteMedia as deletePropertyMedia,
   getLocation as propertyLocation,
   listDocuments as propertyDocuments,
   ownedProperty,
@@ -537,6 +538,29 @@ export const reinstate = async ({ id, reason, actorId }) => {
     data: { listingId: result.id }
   });
   return listing;
+};
+export const removeMedia = async ({ listingId, mediaId, reason, actorId }) => {
+  const before = await repository.summary(listingId);
+  if (!before)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
+  await deletePropertyMedia({ propertyId: before.propertyId, mediaId });
+  await repository.audit({
+    actorId,
+    action: "LISTING_MEDIA_REMOVED",
+    listingId,
+    before,
+    after: { ...before, removedMediaId: mediaId },
+    note: reason
+  });
+  await notifications.notifySeller(listingId, {
+    type: "LISTING_MEDIA_REMOVED",
+    title: "A photo was removed from your listing",
+    body:
+      reason ||
+      "One of your listing photos was removed by an administrator for not meeting our content guidelines.",
+    data: { listingId, mediaId, reason }
+  });
+  return adminListing(listingId);
 };
 export const expirePublishedListings = async () => {
   const expired = await repository.expirePublished();

@@ -35,6 +35,11 @@
       "value": ""
     },
     {
+      "key": "mediaId",
+      "value": "",
+      "description": "id of a photo on the listing's property, from the media array in the Admin — listing detail response."
+    },
+    {
       "key": "opportunityId",
       "value": ""
     },
@@ -307,6 +312,24 @@
             "method": "GET",
             "description": "Response includes media (full array, each item with a signed url/thumbnailUrl) and documents (full array, each item with a signed downloadUrl) for the listing's property, same signing behavior as the public /listings/{listingId}/detail endpoint. Also includes location (location, pincode, addressLine, landmark, formattedAddress, latitude, longitude, locationPrecision, showExactLocation), or null if the property has no location saved yet — unlike the public endpoint, latitude/longitude are always exact here regardless of showExactLocation.",
             "url": "{{baseUrl}}/admin/listings/{{listingId}}"
+          }
+        },
+        {
+          "name": "Admin \u2014 remove listing photo",
+          "request": {
+            "method": "DELETE",
+            "description": "Removes one photo from the listing's property (e.g. inappropriate content). Audits the removal and notifies the seller with the given reason, or a default message if omitted.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Photo did not meet our content guidelines.\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/listings/{{listingId}}/media/{{mediaId}}"
           }
         },
         {

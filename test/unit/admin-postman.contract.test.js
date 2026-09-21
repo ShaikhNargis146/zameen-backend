@@ -44,6 +44,7 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "POST {{baseUrl}}/admin/listings/{{listingId}}/reject",
     "POST {{baseUrl}}/admin/listings/{{listingId}}/suspend",
     "POST {{baseUrl}}/admin/listings/{{listingId}}/reinstate",
+    "DELETE {{baseUrl}}/admin/listings/{{listingId}}/media/{{mediaId}}",
     "GET {{baseUrl}}/admin/verifications",
     "GET {{baseUrl}}/admin/verifications/{{verificationId}}",
     "PATCH {{baseUrl}}/admin/verifications/{{verificationId}}",
