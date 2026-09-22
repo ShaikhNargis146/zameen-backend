@@ -12,9 +12,13 @@ import {
   signedReadUrl,
   signedWriteUrl
 } from "../../utils/storage.js";
+import * as aiRepository from "../ai/ai.repository.js";
+import * as listingsRepository from "../listings/listings.repository.js";
 import * as organizationsRepository from "../organizations/organizations.repository.js";
 import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./commerce.repository.js";
+import { DEFAULT_FREE_AI_MONTHLY_QUOTA } from "../ai/ai.service.js";
+import { DEFAULT_FREE_LISTING_LIMIT } from "./entitlements.service.js";
 import { renderInvoicePdf } from "./invoice.pdf.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
 import { splitGstMinor } from "./tax.js";
@@ -151,8 +155,9 @@ export const setPlanActive = async (planId, isActive) => {
 
 // What a logged-in user actually has right now — there was previously no
 // endpoint for this at all; plan entitlement was only ever checked
-// internally (e.g. ai.repository.activePlanForUser for AI quota), never
-// exposed to the buyer themselves. The client is expected to read `endsAt`
+// internally (e.g. for AI quota), never exposed to the buyer themselves.
+// See mySubscription below for the fuller entitlement view (features,
+// limits, and usage in one response). The client is expected to read `endsAt`
 // and decide for itself when to show an "expiring soon" banner — there is no
 // server-side push notification for this (see docs/razorpay-integration-plan.md).
 export const myPlanSubscription = async actorId => {
@@ -164,6 +169,66 @@ export const myPlanSubscription = async actorId => {
     status: row.subscriptionStatus,
     startsAt: row.startsAt,
     endsAt: row.endsAt
+  };
+};
+
+// The ambient Free tier shown to a user with no active plan_subscription row
+// at all — mirrors toPlan's shape so mySubscription's response is uniform
+// whether or not the caller has ever purchased anything.
+const FREE_PLAN_DEFAULTS = {
+  id: null,
+  productId: null,
+  code: "PLAN_FREE",
+  name: "Free",
+  planType: "FREE",
+  description: null,
+  amountMinor: 0,
+  currency: "INR",
+  durationDays: null,
+  listingLimit: DEFAULT_FREE_LISTING_LIMIT,
+  featuredDays: null,
+  verificationIncluded: false,
+  features: {},
+  isActive: true,
+  aiMonthlyQuota: DEFAULT_FREE_AI_MONTHLY_QUOTA
+};
+
+const limitBlock = (used, limit) =>
+  limit === null || limit === undefined
+    ? { used, limit: null }
+    : { used, limit, remaining: Math.max(0, limit - used) };
+
+// The acting user's own personal entitlement view — req.actor.id, not an
+// org. This one response is what powers every UI surface that needs to show
+// plan/usage (My Zameens, subscription page, upgrade banners, usage bars).
+// Org dashboards (a channel-partner/org-admin view of an org's own
+// plan/usage) are a parallel, out-of-scope-for-now endpoint — see
+// docs/subscription-entitlements-implementation-plan.md §7.
+export const mySubscription = async actorId => {
+  const active = await repository.resolveEffectivePlanForUser(actorId);
+  const plan = active ? toPlan(active) : FREE_PLAN_DEFAULTS;
+  const [listingsUsed, aiUsed, featuredUsed] = await Promise.all([
+    listingsRepository.countLiveForOwner({ userId: actorId, organizationId: null }),
+    aiRepository.countMonthlyUsageForUser(actorId),
+    repository.countSubscriptionUsageThisPeriod({
+      userId: actorId,
+      organizationId: null,
+      feature: "FEATURED_LISTINGS"
+    })
+  ]);
+  return {
+    plan: { code: plan.code, name: plan.name, monthlyPrice: plan.amountMinor / 100 },
+    status: active ? active.subscriptionStatus : "ACTIVE",
+    currentPeriodStart: active ? active.startsAt : null,
+    currentPeriodEnd: active ? active.endsAt : null,
+    features: plan.features,
+    limits: {
+      activeListings: limitBlock(listingsUsed, plan.listingLimit),
+      imagesPerProperty: { limit: plan.features.imagesPerProperty ?? null },
+      videosPerProperty: { limit: plan.features.videosPerProperty ?? null },
+      featuredListings: limitBlock(featuredUsed, plan.features.featuredListingsPerMonth ?? null),
+      aiQueries: limitBlock(aiUsed, plan.aiMonthlyQuota)
+    }
   };
 };
 

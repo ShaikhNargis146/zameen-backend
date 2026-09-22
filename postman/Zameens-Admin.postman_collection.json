@@ -347,7 +347,9 @@
               "raw": "{\n  \"note\": \"Listing approved after review\"\n}"
             },
             "url": "{{baseUrl}}/admin/listings/{{listingId}}/approve"
-          }
+          },
+          "response": [],
+          "description": "Now also re-checks the seller's (or their organization's) active-listing plan limit at approval time, not just at submit time \u2014 a seller can submit several listings while under the limit and have several approved back-to-back, so this closes that gap. Returns 403 PLAN_LIMIT_REACHED (same nested `error.details.{feature,used,limit,upgradeRequired}` shape as everywhere else) if approving this one would push the owner over their plan's listingLimit, even though it was validly submitted while under the limit at the time."
         },
         {
           "name": "Admin \u2014 reject listing",

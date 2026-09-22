@@ -39,58 +39,6 @@ const withTxStub = async (t, callback) => {
   }
 };
 
-test("active plan lookup is scoped to the user and excludes expired/inactive rows", async () => {
-  await withStub(
-    "oneOrNone",
-    async (query, params) => {
-      assert.match(query, /FROM commerce\.plan_subscriptions ps/);
-      assert.match(query, /JOIN commerce\.plans pl ON pl\.id = ps\.plan_id/);
-      assert.match(query, /ps\.user_id = \$1/);
-      assert.match(query, /ps\.status = 'ACTIVE'/);
-      assert.match(query, /ps\.ends_at IS NULL OR ps\.ends_at > now\(\)/);
-      assert.deepEqual(params, ["user-1"]);
-      return { ok: true, data: { aiMonthlyQuota: 50 } };
-    },
-    async () => {
-      const plan = await aiRepository.activePlanForUser("user-1");
-      assert.equal(plan.aiMonthlyQuota, 50);
-    }
-  );
-});
-
-test("active plan lookup excludes organization-scoped plans — a plan bought for an org must not grant the buyer personal AI quota", async () => {
-  await withStub(
-    "oneOrNone",
-    async query => {
-      assert.match(query, /ps\.organization_id IS NULL/);
-      return { ok: true, data: { aiMonthlyQuota: 50 } };
-    },
-    async () => {
-      await aiRepository.activePlanForUser("user-1");
-    }
-  );
-});
-
-test("organization plan lookup is scoped to an APPROVED channel partner's own organization and its active plan", async () => {
-  await withStub(
-    "oneOrNone",
-    async (query, params) => {
-      assert.match(query, /FROM account\.channel_partner_profiles cp/);
-      assert.match(query, /JOIN commerce\.plan_subscriptions ps ON ps\.organization_id = cp\.organization_id/);
-      assert.match(query, /cp\.user_id = \$1/);
-      assert.match(query, /cp\.status = 'APPROVED'/);
-      assert.match(query, /ps\.status = 'ACTIVE'/);
-      assert.deepEqual(params, ["user-1"]);
-      return { ok: true, data: { aiMonthlyQuota: 200, organizationId: "org-1" } };
-    },
-    async () => {
-      const plan = await aiRepository.activeOrganizationPlanForChannelPartner("user-1");
-      assert.equal(plan.aiMonthlyQuota, 200);
-      assert.equal(plan.organizationId, "org-1");
-    }
-  );
-});
-
 test("reserving a personal quota slot takes a per-user advisory lock, counts only that user's non-org usage, and inserts with organization_id null", async () => {
   const calls = [];
   const t = {
@@ -204,11 +152,27 @@ test("releasing a reservation deletes it, so a failed/aborted attempt never cost
   );
 });
 
+test("countMonthlyUsageForUser is a read-only, personal-scope count — never used for enforcement", async () => {
+  await withStub(
+    "one",
+    async (query, params) => {
+      assert.match(query, /FROM ai\.usage_events/);
+      assert.match(query, /user_id = \$1 AND organization_id IS NULL/);
+      assert.deepEqual(params, ["user-1"]);
+      return { ok: true, data: { count: 4 } };
+    },
+    async () => {
+      const count = await aiRepository.countMonthlyUsageForUser("user-1");
+      assert.equal(count, 4);
+    }
+  );
+});
+
 // ---------------------------------------------------------------------------
-// Org-vs-personal precedence, exercised end to end through ai.service.js's
-// exported search() (the real reserveAiQuota orchestration is a private
-// function, so this is the only way to cover it without a mocking library —
-// see the repo's existing convention of stubbing pg directly). Every case
+// Owner resolution, exercised end to end through ai.service.js's exported
+// search() (the real reserveAiQuota/resolveOrganizationContext orchestration
+// is private, so this is the only way to cover it without a mocking library
+// — see the repo's existing convention of stubbing pg directly). Every case
 // here is driven to throw or to fail on a stubbed step *before*
 // provider.searchIntent would ever run, so none of them make a real OpenAI
 // call.
@@ -227,14 +191,32 @@ const withPgStubs = async (stubs, callback) => {
   }
 };
 
-// Routes the two distinct oneOrNone lookups reserveAiQuota can issue
-// (activeOrganizationPlanForChannelPartner, then activePlanForUser only if
-// that came back empty) to canned responses, while recording how many times
-// each was actually queried.
-const planLookupStub = ({ orgPlan = null, personalPlan = null, calls }) => async (query, params) => {
-  if (/account\.channel_partner_profiles/.test(query)) {
+// Routes the lookups an AI-quota request can issue —
+// organizations.repository.findMembership (only when an explicit
+// organizationId is sent: no org is ever auto-selected from the caller's
+// memberships, see the "no organizationId" tests below for why), then
+// commerce.repository.resolveEffectivePlanForOwner/ForUser's two-step
+// lookup (the real active-plan query, then the live PLAN_FREE catalog
+// fallback query only if that came back empty) — to canned responses,
+// recording how many times each was actually queried.
+const ownerLookupStub = ({
+  membership = null,
+  orgPlan = null,
+  personalPlan = null,
+  freePlan = null,
+  calls
+}) => async (query, params) => {
+  if (/WHERE organization_id = \$1 AND user_id = \$2/.test(query)) {
+    calls.membership.push(params);
+    return { ok: true, data: membership };
+  }
+  if (/ps\.organization_id = \$1/.test(query)) {
     calls.org.push(params);
     return { ok: true, data: orgPlan };
+  }
+  if (/pr\.code = 'PLAN_FREE'/.test(query)) {
+    calls.freePlanFallback.push(params);
+    return { ok: true, data: freePlan };
   }
   if (/commerce\.plan_subscriptions/.test(query)) {
     calls.personal.push(params);
@@ -242,6 +224,7 @@ const planLookupStub = ({ orgPlan = null, personalPlan = null, calls }) => async
   }
   throw new Error(`Unexpected oneOrNone query: ${query}`);
 };
+const newCalls = () => ({ membership: [], org: [], personal: [], freePlanFallback: [] });
 
 // Simulates reserveAiQuotaUsage's transaction finding the pool already at
 // its cap, so reserveAiQuota throws AI_MONTHLY_QUOTA_EXCEEDED before search()
@@ -263,37 +246,11 @@ const exhaustedTxStub = async fn => {
 
 const searchInput = { input: { query: "3 acre plot near Panvel", language: "en", page: 1, limit: 20 } };
 
-test("a channel partner attached to an org with an active plan is charged against the org's pool exclusively — the personal plan lookup is never even issued", async () => {
-  const calls = { org: [], personal: [] };
+test("no organizationId sent — quota resolves personally; an org membership is never even queried, no matter how generous some org's plan might be", async () => {
+  const calls = newCalls();
   await withPgStubs(
     {
-      oneOrNone: planLookupStub({
-        orgPlan: { aiMonthlyQuota: 3, organizationId: "org-1" },
-        personalPlan: { aiMonthlyQuota: 999 }, // must never surface — proves no cross-contamination
-        calls
-      }),
-      tx: exhaustedTxStub
-    },
-    async () => {
-      await assert.rejects(
-        search({ ...searchInput, actorId: "user-1" }),
-        error => {
-          assert.equal(error.code, "AI_MONTHLY_QUOTA_EXCEEDED");
-          assert.match(error.message, /Your organization has used all 3/);
-          return true;
-        }
-      );
-    }
-  );
-  assert.deepEqual(calls.org, [["user-1"]]);
-  assert.deepEqual(calls.personal, []);
-});
-
-test("a user with no qualifying org plan falls back to their own personal plan, after the org lookup comes back empty", async () => {
-  const calls = { org: [], personal: [] };
-  await withPgStubs(
-    {
-      oneOrNone: planLookupStub({ orgPlan: null, personalPlan: { aiMonthlyQuota: 7 }, calls }),
+      oneOrNone: ownerLookupStub({ personalPlan: { aiMonthlyQuota: 7 }, calls }),
       tx: exhaustedTxStub
     },
     async () => {
@@ -308,15 +265,95 @@ test("a user with no qualifying org plan falls back to their own personal plan, 
       );
     }
   );
-  assert.deepEqual(calls.org, [["user-1"]]);
+  // The whole point of Critical 3's fix: with no organizationId, membership
+  // is never looked up at all — there is nothing to "auto-pick the biggest
+  // quota" from, because the org-lookup path never runs in the first place.
+  assert.deepEqual(calls.membership, []);
+  assert.deepEqual(calls.org, []);
   assert.deepEqual(calls.personal, [["user-1"]]);
+  assert.deepEqual(calls.freePlanFallback, []); // a real personal plan was found — never falls through to PLAN_FREE
 });
 
-test("a user with neither an org plan nor a personal plan falls back to the ambient Free tier default", async () => {
-  const calls = { org: [], personal: [] };
+test("no organizationId sent and no personal plan row exists — falls back to the live PLAN_FREE catalog row's aiMonthlyQuota, not a hardcoded default", async () => {
+  const calls = newCalls();
   await withPgStubs(
     {
-      oneOrNone: planLookupStub({ orgPlan: null, personalPlan: null, calls }),
+      oneOrNone: ownerLookupStub({
+        personalPlan: null,
+        freePlan: { aiMonthlyQuota: 9, code: "PLAN_FREE" },
+        calls
+      }),
+      tx: exhaustedTxStub
+    },
+    async () => {
+      await assert.rejects(
+        search({ ...searchInput, actorId: "user-1" }),
+        error => {
+          assert.equal(error.code, "AI_MONTHLY_QUOTA_EXCEEDED");
+          assert.match(error.message, /used all 9/);
+          return true;
+        }
+      );
+    }
+  );
+  assert.deepEqual(calls.personal, [["user-1"]]);
+  assert.equal(calls.freePlanFallback.length, 1);
+});
+
+test("an explicit organizationId the caller is an active member of draws exclusively from that org's pool", async () => {
+  const calls = newCalls();
+  await withPgStubs(
+    {
+      oneOrNone: ownerLookupStub({
+        membership: { organizationId: "org-1", userId: "user-1", role: "MEMBER", status: "ACTIVE" },
+        orgPlan: { aiMonthlyQuota: 3, features: {} },
+        personalPlan: { aiMonthlyQuota: 999 }, // must never surface — proves no cross-contamination
+        calls
+      }),
+      tx: exhaustedTxStub
+    },
+    async () => {
+      await assert.rejects(
+        search({ ...searchInput, actorId: "user-1", input: { ...searchInput.input, organizationId: "org-1" } }),
+        error => {
+          assert.equal(error.code, "AI_MONTHLY_QUOTA_EXCEEDED");
+          assert.match(error.message, /Your organization has used all 3/);
+          return true;
+        }
+      );
+    }
+  );
+  assert.deepEqual(calls.membership, [["org-1", "user-1"]]);
+  assert.deepEqual(calls.org, [["org-1"]]);
+  assert.deepEqual(calls.personal, []);
+});
+
+test("an explicit organizationId the caller is not an active member of is rejected outright — no silent fallback to the personal plan", async () => {
+  const calls = newCalls();
+  await withPgStubs(
+    {
+      oneOrNone: ownerLookupStub({ membership: null, calls }),
+      tx: exhaustedTxStub
+    },
+    async () => {
+      await assert.rejects(
+        search({ ...searchInput, actorId: "user-1", input: { ...searchInput.input, organizationId: "org-1" } }),
+        error => {
+          assert.equal(error.code, "ORGANIZATION_ACCESS_DENIED");
+          return true;
+        }
+      );
+    }
+  );
+  assert.deepEqual(calls.membership, [["org-1", "user-1"]]);
+  assert.deepEqual(calls.org, []);
+  assert.deepEqual(calls.personal, []);
+});
+
+test("a user with no personal plan and PLAN_FREE not seeded falls back to the ambient DEFAULT_FREE_AI_MONTHLY_QUOTA constant as the last resort", async () => {
+  await withPgStubs(
+    {
+      oneOrNone: ownerLookupStub({ personalPlan: null, freePlan: null, calls: newCalls() }),
       tx: exhaustedTxStub
     },
     async () => {
@@ -333,12 +370,16 @@ test("a user with neither an org plan nor a personal plan falls back to the ambi
 });
 
 test("an org plan with no monthly cap (unlimited) skips reservation entirely — no advisory lock, no usage row, request proceeds past the quota gate", async () => {
-  const calls = { org: [], personal: [] };
+  const calls = newCalls();
   let txCalls = 0;
   const stopSentinel = new Error("STOPPED_BEFORE_PROVIDER");
   await withPgStubs(
     {
-      oneOrNone: planLookupStub({ orgPlan: { aiMonthlyQuota: null, organizationId: "org-1" }, calls }),
+      oneOrNone: ownerLookupStub({
+        membership: { organizationId: "org-1", userId: "user-1", role: "MEMBER", status: "ACTIVE" },
+        orgPlan: { aiMonthlyQuota: null, features: {} },
+        calls
+      }),
       tx: async () => {
         txCalls += 1;
         return { ok: false, data: null, error: new Error("must not reserve for unlimited quota") };
@@ -351,7 +392,10 @@ test("an org plan with no monthly cap (unlimited) skips reservation entirely —
       }
     },
     async () => {
-      await assert.rejects(search({ ...searchInput, actorId: "user-1" }), error => error === stopSentinel);
+      await assert.rejects(
+        search({ ...searchInput, actorId: "user-1", input: { ...searchInput.input, organizationId: "org-1" } }),
+        error => error === stopSentinel
+      );
     }
   );
   assert.equal(txCalls, 0);

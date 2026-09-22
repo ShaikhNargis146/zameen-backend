@@ -57,7 +57,14 @@ const handler = (err, req, res, next) => {
       }
     };
     const details = err?.details || err?.errors?.details;
-    if (!isServerError && details?.length) payload.error.details = details;
+    // details is usually an array of field errors ([{ field, message }]), but
+    // entitlement errors (PLAN_LIMIT_REACHED, FEATURE_NOT_AVAILABLE, ...)
+    // pass a plain object ({ feature, used, limit, upgradeRequired }) — an
+    // array-only `.length` check would silently drop those from the response.
+    const hasDetails = Array.isArray(details)
+      ? details.length > 0
+      : Boolean(details) && typeof details === "object" && Object.keys(details).length > 0;
+    if (!isServerError && hasDetails) payload.error.details = details;
 
     return res.status(status).json(payload);
   } catch (e) {

@@ -1,6 +1,7 @@
 import { HttpError } from "../../shared/http.js";
 import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { signedReadUrl } from "../../utils/storage.js";
+import { grantFreePlan, resolveTeamMemberLimit } from "../commerce/entitlements.service.js";
 import * as repository from "./organizations.repository.js";
 
 const notFound = () =>
@@ -54,10 +55,14 @@ const requireActiveOrganization = organization => {
   return organization;
 };
 
-export const create = async ({ actorId, input }) =>
-  withLogoUrl(
-    await repository.createWithOwner({ ...input, createdByUserId: actorId })
-  );
+export const create = async ({ actorId, input }) => {
+  const organization = await repository.createWithOwner({ ...input, createdByUserId: actorId });
+  // Symmetric with auth.service.js#verifyOtp granting individuals a FREE
+  // plan on registration — same no-op-if-not-seeded tolerance, see
+  // entitlements.service.js#grantFreePlan.
+  await grantFreePlan({ organizationId: organization.id });
+  return withLogoUrl(organization);
+};
 
 export const listMine = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
@@ -134,16 +139,30 @@ export const addMember = async ({ organizationId, actorId, userId, role }) => {
       "USER_NOT_FOUND",
       "userId must reference an existing user."
     );
-  // The last-owner guard is enforced atomically inside repository.addMember
-  // itself (under an advisory lock), not here — a separate check-then-write
-  // in this service function would leave the same TOCTOU race it's meant
-  // to close.
-  const { membership, reason } = await repository.addMember(organizationId, userId, role);
+  // Resolved unconditionally (even though it's only applied for a genuinely
+  // new member) rather than gated on the `existing` read above: that read
+  // happens outside repository.addMember's lock, so by the time the lock is
+  // actually held, `existing` could be stale. repository.addMember re-checks
+  // membership fresh inside the lock and only applies this limit then — both
+  // the owner-count guard and this one are enforced atomically there, not
+  // here, so two concurrent invites for different new users can't both pass
+  // a stale "under the limit" read before either commits.
+  const teamMemberLimit = await resolveTeamMemberLimit(organizationId);
+  const { membership, reason, used } = await repository.addMember(organizationId, userId, role, {
+    teamMemberLimit
+  });
   if (reason === "LAST_OWNER")
     throw new HttpError(
       400,
       "LAST_OWNER",
       "The organization must retain at least one owner."
+    );
+  if (reason === "TEAM_LIMIT_REACHED")
+    throw new HttpError(
+      403,
+      "PLAN_LIMIT_REACHED",
+      `This organization's plan allows up to ${teamMemberLimit} team members.`,
+      { feature: "TEAM_MEMBERS", used, limit: teamMemberLimit, upgradeRequired: true }
     );
   return {
     user,

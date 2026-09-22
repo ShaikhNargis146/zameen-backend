@@ -56,50 +56,17 @@ export const messages = conversationId =>
     [conversationId]
   );
 
-// The user's currently active plan (personal scope only — org-level plans do
-// not grant quota through this lookup, see activeOrganizationPlanForChannelPartner
-// below for that path). null means the user has no active personal plan at
-// all, i.e. the ambient "Free" tier that has no row of its own anywhere.
-// Must exclude organization_id IS NOT NULL rows: a plan bought with
-// organizationId set still carries the buyer's own user_id (see
-// commerce.repository.capturePaymentAndApplyEntitlements), so without this
-// filter an org-purchased plan would silently grant its quota to whichever
-// member happened to place the order.
-export const activePlanForUser = userId =>
+// Read-only current-month usage count for display (GET /me/subscription) —
+// never used for enforcement, which always goes through reserveAiQuotaUsage's
+// locked read-then-write below.
+export const countMonthlyUsageForUser = userId =>
   run(
-    "oneOrNone",
-    `SELECT pl.ai_monthly_quota AS "aiMonthlyQuota"
-     FROM commerce.plan_subscriptions ps
-     JOIN commerce.plans pl ON pl.id = ps.plan_id
-     WHERE ps.user_id = $1 AND ps.organization_id IS NULL
-       AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
-     ORDER BY ps.ends_at DESC NULLS LAST
-     LIMIT 1`,
+    "one",
+    `SELECT count(*)::int AS count FROM ai.usage_events
+     WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= date_trunc('month', now())
+       AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
     [userId]
-  );
-
-// The organization's currently active plan, for a user who can draw AI quota
-// from it: an APPROVED channel partner attached to that organization (see
-// account.channel_partner_profiles). null means this user has no such
-// org-granted quota right now (not a channel partner, not attached to an
-// org, or that org has no active plan) — the caller falls back to
-// activePlanForUser/the free tier in that case. Deliberately does not also
-// require the organization itself to be ACTIVE (status is about the org's
-// own storefront/listing visibility, not its billing standing) — a plan it
-// already paid for still counts.
-export const activeOrganizationPlanForChannelPartner = userId =>
-  run(
-    "oneOrNone",
-    `SELECT pl.ai_monthly_quota AS "aiMonthlyQuota", cp.organization_id AS "organizationId"
-     FROM account.channel_partner_profiles cp
-     JOIN commerce.plan_subscriptions ps ON ps.organization_id = cp.organization_id
-     JOIN commerce.plans pl ON pl.id = ps.plan_id
-     WHERE cp.user_id = $1 AND cp.status = 'APPROVED' AND cp.organization_id IS NOT NULL
-       AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
-     ORDER BY ps.ends_at DESC NULLS LAST
-     LIMIT 1`,
-    [userId]
-  );
+  ).then(row => row.count);
 
 // Atomically reserves one unit of monthly AI quota, from one of two mutually
 // exclusive pools: the calling user's own personal quota (organizationId
@@ -287,10 +254,15 @@ export const publishedInvestmentContext = ({ locationId, propertyId, query }) =>
      LIMIT 3`,
     [locationId, propertyId, query || null]
   );
+// owner_organization_id is included so ai.service.js#generateListing can
+// draw AI quota from the property's own owning org when it's org-owned,
+// without the caller having to separately name that org explicitly — this
+// is resource-ownership-based org resolution, distinct from (and safer
+// than) auto-detecting across every org the caller happens to belong to.
 export const ownedPropertyContext = (propertyId, userId) =>
   run(
     "oneOrNone",
-    `SELECT p.id AS "propertyId", pt.name AS "propertyType", d.area_value AS "areaValue", au.name AS "areaUnit", loc.name AS "locationName"
+    `SELECT p.id AS "propertyId", p.owner_organization_id AS "ownerOrganizationId", pt.name AS "propertyType", d.area_value AS "areaValue", au.name AS "areaUnit", loc.name AS "locationName"
      FROM land.properties p JOIN land.property_types pt ON pt.id = p.property_type_id
      LEFT JOIN land.property_land_details d ON d.property_id = p.id
      LEFT JOIN land.area_units au ON au.id = d.area_unit_id

@@ -7,6 +7,8 @@ export const plans = async (req, res) =>
 
 export const myPlan = async (req, res) => ok(res, await service.myPlanSubscription(req.actor.id));
 
+export const mySubscription = async (req, res) => ok(res, await service.mySubscription(req.actor.id));
+
 export const createOrder = async (req, res) =>
   created(
     res,

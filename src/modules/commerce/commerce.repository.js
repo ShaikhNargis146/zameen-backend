@@ -68,9 +68,10 @@ export const planHasOrders = planId =>
   ).then(Boolean);
 
 // The buyer's own currently-active personal plan (organization-scoped plans
-// are out of scope here, same restriction as ai.repository's activePlanForUser).
-// No background sweep flips a lapsed row's status to EXPIRED, so this filters
-// on ends_at lazily, at read time, rather than trusting status = 'ACTIVE' alone.
+// are out of scope here -- see findActiveSubscriptionForOwner below for that
+// path). No background sweep flips a lapsed row's status to EXPIRED, so this
+// filters on ends_at lazily, at read time, rather than trusting status =
+// 'ACTIVE' alone.
 export const findActiveSubscriptionForUser = userId =>
   run(
     "oneOrNone",
@@ -85,6 +86,202 @@ export const findActiveSubscriptionForUser = userId =>
      LIMIT 1`,
     [userId]
   );
+
+// Same active-subscription lookup as findActiveSubscriptionForUser, but for
+// whichever owner a resource actually belongs to: an org's plan when
+// organizationId is set, otherwise the individual's own plan.
+//
+// This answers "does this owner currently hold a REAL plan_subscriptions
+// row" — returns null if not, which matters where that distinction itself
+// is the point (entitlements.service.js#grantFreePlan's own idempotency
+// guard must see null for a brand-new owner, or it would never grant
+// anything; capturePaymentAndApplyEntitlements's own inline expire-before-insert
+// lookup has the same requirement). Entitlement CHECKS should call
+// resolveEffectivePlanForOwner/ForUser below instead, not this directly.
+export const findActiveSubscriptionForOwner = ({ userId, organizationId }) =>
+  organizationId
+    ? run(
+        "oneOrNone",
+        `SELECT ps.status AS "subscriptionStatus", ps.starts_at AS "startsAt", ps.ends_at AS "endsAt",
+                ${planColumns}
+         FROM commerce.plan_subscriptions ps
+         JOIN commerce.plans pl ON pl.id = ps.plan_id
+         JOIN commerce.products pr ON pr.id = pl.product_id
+         WHERE ps.organization_id = $1
+           AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+         ORDER BY ps.ends_at DESC NULLS LAST
+         LIMIT 1`,
+        [organizationId]
+      )
+    : findActiveSubscriptionForUser(userId);
+
+// The live, admin-editable PLAN_FREE catalog row, shaped like a real
+// findActiveSubscriptionForOwner/ForUser result, for an owner with no
+// currently-active plan_subscriptions row at all — whether they've never
+// purchased anything, or purchased once and it has since lapsed with
+// nothing newer. Returns null only if PLAN_FREE itself isn't seeded yet
+// (the caller's own DEFAULT_FREE_* constant remains the last-resort safety
+// net for that case).
+const liveFreeTierPlan = async () => {
+  const freePlan = await run(
+    "oneOrNone",
+    `SELECT ${planColumns} FROM commerce.plans pl
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE pr.code = 'PLAN_FREE'`
+  );
+  return freePlan && { subscriptionStatus: "ACTIVE", startsAt: null, endsAt: null, ...freePlan };
+};
+
+// The plan that actually applies to this owner right now, for entitlement
+// checks (limits, quota, features, GET /me/subscription) — as opposed to
+// findActiveSubscriptionForOwner/ForUser above, which answer a narrower
+// "does a real row exist" question. Falls back to the live PLAN_FREE
+// catalog row instead of a hardcoded JS constant, identically for
+// individual and organization owners, so an owner who purchased a paid plan
+// once and let it lapse gets the SAME admin-editable Free tier as someone
+// who never purchased anything — not a value frozen at deploy time. See
+// docs/subscription-entitlements-audit-checklist.md §D1 for the bug this
+// closes: before this, a lapsed paid plan silently fell back to
+// DEFAULT_FREE_LISTING_LIMIT/etc. because the owner's original FREE grant
+// had itself been marked EXPIRED the moment they bought something else.
+export const resolveEffectivePlanForUser = async userId =>
+  (await findActiveSubscriptionForUser(userId)) || liveFreeTierPlan();
+
+export const resolveEffectivePlanForOwner = async ({ userId, organizationId }) =>
+  (await findActiveSubscriptionForOwner({ userId, organizationId })) || liveFreeTierPlan();
+
+// Grants a plan with no purchase behind it (e.g. the ambient FREE plan on
+// registration, see entitlements.service.js#grantFreePlan) — order_item_id
+// is nullable for exactly this case (see migrations/016_subscription_entitlements.sql).
+export const grantPlanDirectly = ({ userId, organizationId, planId, startsAt, endsAt }) =>
+  run(
+    "one",
+    `INSERT INTO commerce.plan_subscriptions (user_id, organization_id, plan_id, starts_at, ends_at, status)
+     VALUES ($1,$2,$3,$4,$5,'ACTIVE') RETURNING id`,
+    [userId, organizationId || null, planId, startsAt, endsAt]
+  );
+
+// Shared by consumeSubscriptionUsage and grantFeaturedListingFromAllowance
+// below: checks the current period's usage against `limit` and
+// increments/inserts it, inside an already-open transaction `t`. Factored
+// out (rather than each caller opening its own runTx) so a caller that needs
+// a second, related write in the same transaction — e.g. granting the
+// promotion this usage unit unlocks — can do so atomically instead of as a
+// separately-committed follow-up call, where a failure in that second write
+// would otherwise leave the allowance permanently consumed with nothing
+// actually granted. Mirrors ai.repository.reserveAiQuotaUsage's
+// advisory-lock shape (lock the owner, count, then write). The lock key is
+// namespaced by feature so this ledger and a future second feature never
+// contend on the same advisory lock. Returns true if the unit was consumed,
+// false if the period was already at limit.
+const consumeUsageWithinTx = async (t, { userId, organizationId, feature, limit }) => {
+  const lockKey = `${feature}:${organizationId || userId}`;
+  await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+  const period = await t.one(
+    `SELECT date_trunc('month', now()) AS "periodStart", date_trunc('month', now()) + interval '1 month' AS "periodEnd"`
+  );
+  const existing = await t.oneOrNone(
+    organizationId
+      ? `SELECT id, used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE organization_id = $1 AND feature = $2 AND period_start = $3`
+      : `SELECT id, used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE user_id = $1 AND feature = $2 AND period_start = $3`,
+    [organizationId || userId, feature, period.periodStart]
+  );
+  if (existing && existing.usedCount >= limit) return false;
+  if (existing)
+    await t.none(
+      `UPDATE commerce.subscription_usage SET used_count = used_count + 1, updated_at = now() WHERE id = $1`,
+      [existing.id]
+    );
+  else
+    await t.none(
+      `INSERT INTO commerce.subscription_usage (user_id, organization_id, feature, used_count, period_start, period_end)
+       VALUES ($1,$2,$3,1,$4,$5)`,
+      [organizationId ? null : userId, organizationId || null, feature, period.periodStart, period.periodEnd]
+    );
+  return true;
+};
+
+// Generic monthly usage ledger backing any "N included per month" allowance
+// resolved from commerce.plans.features. Standalone entry point for a
+// feature whose entitlement *is* the counter itself, with no second write
+// needed (unlike featured listings below).
+export const consumeSubscriptionUsage = ({ userId, organizationId, feature, limit }) =>
+  runTx(t => consumeUsageWithinTx(t, { userId, organizationId, feature, limit }));
+
+// Read-only, non-transactional twin of the already-featured check inside
+// grantFeaturedListingFromAllowance's transaction below — used by
+// entitlements.service.js#grantFeaturedListing when the owner's plan has no
+// featuredListingsPerMonth allowance at all, so a request for an
+// already-featured listing still gets an accurate alreadyFeatured: true
+// instead of a misleading "no allowance left" (there's nothing to open a
+// transaction for in that case, since there's no usage to consume).
+export const isListingFeatured = listingId =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM marketplace.listing_promotions
+     WHERE listing_id = $1 AND promotion_type = 'FEATURED' AND status = 'ACTIVE'
+       AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())`,
+    [listingId]
+  ).then(Boolean);
+
+// Atomically consumes one unit of the owner's monthly featured-listing
+// allowance and grants the FEATURED promotion in the same transaction as the
+// usage write — see entitlements.service.js#grantFeaturedListing. Mirrors
+// capturePaymentAndApplyEntitlements's existing precedent of writing
+// marketplace.listing_promotions from this module.
+//
+// The already-featured check below guards against a double-tap/client retry
+// of POST /listings/:id/feature: the advisory lock inside
+// consumeUsageWithinTx is scoped to the owner's monthly total, not to this
+// specific listing, so two back-to-back calls for the SAME listing would
+// otherwise each independently pass the usage check and each grant their own
+// promotion — consuming two allowance units for one listing. Checked first,
+// before touching the usage ledger, so a double-tap costs nothing.
+//
+// Returns { promotion, alreadyFeatured: true } if the listing already has an
+// active FEATURED promotion (no usage consumed); { promotion: null,
+// alreadyFeatured: false } if the period's usage is already at the plan's
+// limit; otherwise { promotion: { id, endsAt }, alreadyFeatured: false }.
+export const grantFeaturedListingFromAllowance = ({ userId, organizationId, limit, listingId, featuredDays }) =>
+  runTx(async t => {
+    const alreadyFeatured = await t.oneOrNone(
+      `SELECT id FROM marketplace.listing_promotions
+       WHERE listing_id = $1 AND promotion_type = 'FEATURED' AND status = 'ACTIVE'
+         AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())`,
+      [listingId]
+    );
+    if (alreadyFeatured) return { promotion: null, alreadyFeatured: true };
+    const consumed = await consumeUsageWithinTx(t, {
+      userId,
+      organizationId,
+      feature: "FEATURED_LISTINGS",
+      limit
+    });
+    if (!consumed) return { promotion: null, alreadyFeatured: false };
+    const promotion = await t.one(
+      `INSERT INTO marketplace.listing_promotions (listing_id, promotion_type, starts_at, ends_at, status)
+       VALUES ($1,'FEATURED', now(), now() + ($2 || ' days')::interval, 'ACTIVE')
+       RETURNING id, ends_at AS "endsAt"`,
+      [listingId, featuredDays]
+    );
+    return { promotion, alreadyFeatured: false };
+  });
+
+// Read-only current-period usage count for display (e.g. GET /me/subscription)
+// — never used for enforcement, which always goes through
+// consumeUsageWithinTx's locked read-then-write above.
+export const countSubscriptionUsageThisPeriod = ({ userId, organizationId, feature }) =>
+  run(
+    "oneOrNone",
+    organizationId
+      ? `SELECT used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE organization_id = $1 AND feature = $2 AND period_start = date_trunc('month', now())`
+      : `SELECT used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE user_id = $1 AND feature = $2 AND period_start = date_trunc('month', now())`,
+    [organizationId || userId, feature]
+  ).then(row => row?.usedCount || 0);
 
 export const createPlan = ({
   code,

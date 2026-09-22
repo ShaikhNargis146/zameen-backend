@@ -6,6 +6,7 @@ import {
   randomToken,
   safeEqualHex
 } from "../../utils/crypto.js";
+import { grantFreePlan } from "../commerce/entitlements.service.js";
 import * as repository from "./auth.repository.js";
 import { deliverOtp, otpDeliveryConfigured } from "./otp.provider.js";
 
@@ -223,6 +224,9 @@ class AuthService {
       // A verified individual can browse and create their own listing from the
       // first session. Business-specific roles are added explicitly later.
       await repository.addDefaultRoles(userId);
+      // No-op if the FREE product/plan isn't seeded yet — tolerated rather
+      // than failing registration, see entitlements.service.js#grantFreePlan.
+      await grantFreePlan({ userId });
     }
     return this.createSession({
       userId,

@@ -21,6 +21,7 @@ const uuid = (value, field) => {
   }
   return result;
 };
+const optionalUuid = (value, field) => (value ? uuid(value, field) : null);
 const language = value => {
   const result = String(value || "en")
     .trim()
@@ -36,7 +37,8 @@ export const search = body => ({
   query: text(body.query, "query", 3, 1000, true),
   language: language(body.language),
   page: Math.min(Math.max(Number(body.page || 1), 1), 10000),
-  limit: Math.min(Math.max(Number(body.limit || 20), 1), 50)
+  limit: Math.min(Math.max(Number(body.limit || 20), 1), 50),
+  organizationId: optionalUuid(body.organizationId, "organizationId")
 });
 export const conversation = body => {
   const contextType = String(body.contextType || "")
@@ -62,7 +64,8 @@ export const conversationList = query =>
   parsePagination(query, { maxLimit: 50 });
 export const message = body => ({
   content: text(body.content, "content", 1, 4000, true),
-  language: language(body.language)
+  language: language(body.language),
+  organizationId: optionalUuid(body.organizationId, "organizationId")
 });
 export const listingGenerate = body => {
   const highlights =
@@ -85,6 +88,7 @@ export const listingGenerate = body => {
     highlights: highlights.map((item, index) =>
       text(item, `highlights[${index}]`, 1, 255, true)
     ),
-    language: language(body.language)
+    language: language(body.language),
+    organizationId: optionalUuid(body.organizationId, "organizationId")
   };
 };

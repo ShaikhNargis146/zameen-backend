@@ -90,6 +90,12 @@ router.post(
   requireOwnedListing,
   asyncRoute(controller.markSold)
 );
+router.post(
+  "/listings/:listingId/feature",
+  requireAuth,
+  requireOwnedListing,
+  asyncRoute(controller.feature)
+);
 router.get(
   "/admin/listings",
   requireAdmin,

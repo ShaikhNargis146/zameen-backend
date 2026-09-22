@@ -3,6 +3,7 @@ import { HttpError } from "../../shared/http.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import logger from "../../utils/logger.js";
 import { signedReadUrl } from "../../utils/storage.js";
+import { grantFeaturedListing, resolveListingLimit } from "../commerce/entitlements.service.js";
 import * as notifications from "../notifications/notifications.service.js";
 import {
   deleteMedia as deletePropertyMedia,
@@ -145,6 +146,12 @@ export const submit = async listing => {
       "INVALID_TRANSITION",
       "Listing cannot be submitted from its current state."
     );
+  const owner = { userId: listing.seller_user_id, organizationId: listing.seller_organization_id };
+  // Resolved here (read-only, matching the original check's timing/ordering
+  // relative to the readiness check below) but only enforced later, inside
+  // submitWithinLimit's locked transaction — see resolveListingLimit's own
+  // comment for why a plain check-then-write would race.
+  const limit = await resolveListingLimit(owner);
   const scanner = await propertyScanner(listing.property_id);
   if (scanner.readinessScore < 100)
     throw new HttpError(
@@ -153,9 +160,9 @@ export const submit = async listing => {
       "Complete the required land, location, parcel, document, and media details before submitting this listing.",
       scanner.missingItems
     );
-  let submitted;
+  let result;
   try {
-    submitted = await repository.submit(listing.id);
+    result = await repository.submitWithinLimit({ id: listing.id, ...owner, limit });
   } catch (error) {
     if (error?.code === "23505")
       throw new HttpError(
@@ -165,7 +172,14 @@ export const submit = async listing => {
       );
     throw error;
   }
-  if (!submitted)
+  if (result.reason === "LIMIT_REACHED")
+    throw new HttpError(403, "PLAN_LIMIT_REACHED", `This plan allows up to ${limit} active listings.`, {
+      feature: "ACTIVE_LISTINGS",
+      used: result.used,
+      limit,
+      upgradeRequired: true
+    });
+  if (!result.submitted)
     throw new HttpError(
       409,
       "LISTING_SUBMIT_CONFLICT",
@@ -238,6 +252,33 @@ export const transition = async ({
   });
   return reason ? { ...updated, actionReason: reason } : updated;
 };
+// Draws one unit from the listing owner's plan-included monthly featured
+// allowance (commerce.plans.features.featuredListingsPerMonth), if any is
+// left, and grants the FEATURED promotion directly — bypassing checkout.
+// When there is no allowance (no active plan, or this month's is used up),
+// the caller falls back to the existing paid-promotion flow
+// (POST /orders with a PROMOTION product) instead.
+export const feature = async listing => {
+  const { promotion, alreadyFeatured } = await grantFeaturedListing(
+    { userId: listing.seller_user_id, organizationId: listing.seller_organization_id },
+    listing.id
+  );
+  if (alreadyFeatured)
+    throw new HttpError(
+      409,
+      "LISTING_ALREADY_FEATURED",
+      "This listing is already featured."
+    );
+  if (!promotion)
+    throw new HttpError(
+      403,
+      "PLAN_LIMIT_REACHED",
+      "No plan-included featured listings remain this month. Purchase a featured promotion instead.",
+      { feature: "FEATURED_LISTINGS", upgradeRequired: true, checkoutRequired: true }
+    );
+  return { listingId: listing.id, promotionType: "FEATURED", endsAt: promotion.endsAt };
+};
+
 export const sellerListings = async input => {
   const rows = await repository.sellerListings(input);
   const total = rows[0]?.total || 0;
@@ -425,35 +466,55 @@ export const adminListing = async id => {
 };
 export const approve = async ({ id, approval, actorId }) => {
   const before = await repository.summary(id);
+  if (!before)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Pending listing was not found.");
   // Preserve an existing expiry if the listing already had one (e.g. a
   // second approval cycle), otherwise fall back to the 90-day default — the
   // repository's own COALESCE(new, existing) only covers the first of
   // those two cases, never actually setting a value the very first time.
   const expiresAt = approval.expiresAt || before?.expiresAt || defaultListingExpiry();
-  const result = await repository.approve({
+  // The listing could be withdrawn/deleted by its seller (a PENDING listing
+  // stays status = 'INACTIVE', so remove()'s PUBLISHED-only guard doesn't
+  // block that) in the gap between the summary() read above and this one —
+  // ownerFields filters deleted_at IS NULL, so it returns null in that case.
+  const owner = await repository.ownerFields(id);
+  if (!owner)
+    throw new HttpError(404, "LISTING_NOT_FOUND", "Pending listing was not found.");
+  const ownerScope = { userId: owner.sellerUserId, organizationId: owner.sellerOrganizationId };
+  const limit = await resolveListingLimit(ownerScope);
+  const result = await repository.approveWithinLimit({
     id,
+    ...ownerScope,
+    limit,
     expiresAt
   });
-  if (!result)
+  if (result.reason === "LIMIT_REACHED")
+    throw new HttpError(403, "PLAN_LIMIT_REACHED", `This plan allows up to ${limit} active listings.`, {
+      feature: "ACTIVE_LISTINGS",
+      used: result.used,
+      limit,
+      upgradeRequired: true
+    });
+  if (!result.approved)
     throw new HttpError(
       404,
       "LISTING_NOT_FOUND",
       "Pending listing was not found."
     );
-  const listing = await repository.summary(result.id);
+  const listing = await repository.summary(result.approved.id);
   await repository.audit({
     actorId,
     action: "LISTING_APPROVED",
-    listingId: result.id,
+    listingId: result.approved.id,
     before,
     after: listing,
     note: approval.note
   });
-  await notifications.notifySeller(result.id, {
+  await notifications.notifySeller(result.approved.id, {
     type: "LISTING_APPROVED",
     title: "Your listing was approved",
     body: "Your listing is now live and visible to buyers.",
-    data: { listingId: result.id }
+    data: { listingId: result.approved.id }
   });
   return approval.note ? { ...listing, approvalNote: approval.note } : listing;
 };

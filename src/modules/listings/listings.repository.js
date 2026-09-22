@@ -1,5 +1,11 @@
 import { pg, run } from "../../shared/db.js";
 
+const runTx = async fn => {
+  const result = await pg.tx(fn);
+  if (!result.ok) throw result.error;
+  return result.data;
+};
+
 export const findOwned = (listingId, userId) =>
   run(
     "oneOrNone",
@@ -36,6 +42,22 @@ export const create = input =>
       input.isNegotiable
     ]
   );
+// Counts against whichever owner form applies — org-wide if org-owned, so
+// all of an org's members share the same pool of active listings, matching
+// how teamMembers implies a shared-org-quota model rather than a per-member
+// one. Read-only — used for display (commerce.service.js#mySubscription).
+// Enforcement uses the same count inline inside submitWithinLimit's locked
+// transaction below, not this function, since enforcement needs the count
+// and the write to happen atomically.
+export const countLiveForOwner = ({ userId, organizationId }) =>
+  run(
+    "one",
+    organizationId
+      ? `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_organization_id = $1 AND status = 'PUBLISHED'`
+      : `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_user_id = $1 AND seller_organization_id IS NULL AND status = 'PUBLISHED'`,
+    [organizationId || userId]
+  ).then(row => row.count);
+
 export const liveListingForProperty = propertyId =>
   run(
     "oneOrNone",
@@ -72,13 +94,36 @@ export const archive = id =>
 // could resubmit straight past that suspension with no admin involved,
 // since DRAFT/REJECTED alone doesn't distinguish "never submitted" from
 // "suspended while in that review state".
-export const submit = id =>
-  run(
-    "oneOrNone",
-    `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
-     WHERE id = $1 AND deleted_at IS NULL AND status = 'INACTIVE' AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
-    [id]
-  );
+//
+// limit (resolved by the caller via
+// entitlements.service.js#resolveListingLimit, null = unlimited) is
+// enforced here, inside a per-owner advisory-locked transaction, not as a
+// pre-check in the service layer — otherwise two concurrent submissions
+// from the same owner (different listings) could both read the same
+// pre-write "used" count and both pass, pushing the owner over their plan's
+// active-listing limit. Mirrors organizations.repository.js#addMember's
+// lock-then-check-then-write shape for the same class of race.
+export const submitWithinLimit = ({ id, userId, organizationId, limit }) =>
+  runTx(async t => {
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+      `ACTIVE_LISTINGS:${organizationId || userId}`
+    ]);
+    if (limit !== null) {
+      const { count } = await t.one(
+        organizationId
+          ? `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_organization_id = $1 AND status = 'PUBLISHED'`
+          : `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_user_id = $1 AND seller_organization_id IS NULL AND status = 'PUBLISHED'`,
+        [organizationId || userId]
+      );
+      if (count >= limit) return { submitted: null, reason: "LIMIT_REACHED", used: count };
+    }
+    const submitted = await t.oneOrNone(
+      `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
+       WHERE id = $1 AND deleted_at IS NULL AND status = 'INACTIVE' AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
+      [id]
+    );
+    return { submitted, reason: submitted ? null : "CONFLICT" };
+  });
 export const transition = ({
   id,
   status,
@@ -225,12 +270,50 @@ export const adminListings = ({
     ]
   );
 export const adminListing = id => summary(id);
-export const approve = ({ id, expiresAt }) =>
+
+// The listing's raw owner columns, independent of summary()'s joined
+// "organization" object -- that join filters on organization.deleted_at IS
+// NULL, so it would silently read as personally-owned (null org) for a
+// listing whose owning org happens to be soft-deleted, which is exactly the
+// wrong answer for entitlement resolution. Used by listings.service.js#approve.
+export const ownerFields = id =>
   run(
     "oneOrNone",
-    `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'PUBLISHED', approved_at = now(), published_at = COALESCE(published_at, now()), expires_at = COALESCE($2, expires_at), rejection_reason = NULL WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
-    [id, expiresAt]
+    `SELECT seller_user_id AS "sellerUserId", seller_organization_id AS "sellerOrganizationId"
+     FROM marketplace.listings WHERE id = $1 AND deleted_at IS NULL`,
+    [id]
   );
+
+// limit (resolved by the caller via entitlements.service.js#resolveListingLimit,
+// null = unlimited) is enforced here, inside a per-owner advisory-locked
+// transaction -- the same lock key submitWithinLimit uses, so a submission
+// and an approval for the same owner can never race each other either. This
+// closes the gap submit-time enforcement alone leaves open: a seller can
+// submit several listings back-to-back while under the limit, and an admin
+// approving them later (each individually, or several admins at once) could
+// otherwise push the owner over it, since submission and approval happen at
+// different times with nothing previously spanning both.
+export const approveWithinLimit = ({ id, userId, organizationId, limit, expiresAt }) =>
+  runTx(async t => {
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+      `ACTIVE_LISTINGS:${organizationId || userId}`
+    ]);
+    if (limit !== null) {
+      const { count } = await t.one(
+        organizationId
+          ? `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_organization_id = $1 AND status = 'PUBLISHED'`
+          : `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_user_id = $1 AND seller_organization_id IS NULL AND status = 'PUBLISHED'`,
+        [organizationId || userId]
+      );
+      if (count >= limit) return { approved: null, reason: "LIMIT_REACHED", used: count };
+    }
+    const approved = await t.oneOrNone(
+      `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'PUBLISHED', approved_at = now(), published_at = COALESCE(published_at, now()), expires_at = COALESCE($2, expires_at), rejection_reason = NULL
+       WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
+      [id, expiresAt]
+    );
+    return { approved, reason: approved ? null : "CONFLICT" };
+  });
 export const reject = (id, reason) =>
   run(
     "oneOrNone",

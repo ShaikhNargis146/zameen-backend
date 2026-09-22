@@ -55,6 +55,8 @@ export const withdraw = async (req, res) =>
       reason: validation.optionalReason(req.body || {})
     })
   );
+export const feature = async (req, res) =>
+  ok(res, await service.feature(req.listing));
 export const markSold = async (req, res) =>
   ok(
     res,

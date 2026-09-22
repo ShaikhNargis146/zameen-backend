@@ -153,13 +153,19 @@ export const findUserSummary = userId =>
     [userId]
   );
 
-// Both addMember and removeMember take a per-organization advisory lock
-// before reading the current active-owner count — without it, two
-// concurrent operations that would each individually leave >=1 owner (e.g.
-// two owners removing each other at once) can both read "count > 1" before
-// either commits, leaving the organization with zero active owners and no
-// way to re-grant OWNER (only an existing owner may do that).
-const ownerCountLockKey = organizationId => `${organizationId}:organization-owner-count`;
+// addMember and removeMember both take a per-organization advisory lock
+// before reading current membership state — without it: (a) two concurrent
+// operations that would each individually leave >=1 owner (e.g. two owners
+// removing each other at once) could both read "count > 1" before either
+// commits, leaving the organization with zero active owners and no way to
+// re-grant OWNER (only an existing owner may do that); (b) two concurrent
+// invites for two different new users could both read the same
+// under-the-limit team-member seat count before either commits, pushing the
+// org over its plan's team-member limit. Renamed from the original
+// ownerCountLockKey now that this same lock also guards the team-member-seat
+// check below — one lock per org covering every membership-count invariant,
+// not one lock per invariant.
+const organizationMembershipLockKey = organizationId => `${organizationId}:organization-membership`;
 
 const activeOwnerCount = (t, organizationId) =>
   t.one(
@@ -174,9 +180,18 @@ const activeOwnerCount = (t, organizationId) =>
 // member keeps their ACTIVE status and joined_at when only their role
 // changes (no re-consent needed for a role change to someone already in
 // the org). Re-inviting someone still INVITED just refreshes their role.
-export const addMember = (organizationId, userId, role) =>
+//
+// teamMemberLimit (resolved by the caller via
+// entitlements.service.js#resolveTeamMemberLimit, null = unlimited) is
+// enforced here, inside the same locked transaction as the owner-count
+// check and the insert itself — not as a pre-check in the service layer —
+// so two concurrent invites for two different new users can't both pass a
+// stale "under the limit" read before either commits. Only a genuinely new
+// member (no existing row) consumes a seat; a role change on someone
+// already in the org never does.
+export const addMember = (organizationId, userId, role, { teamMemberLimit = null } = {}) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [ownerCountLockKey(organizationId)]);
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
     const existing = await t.oneOrNone(
       `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
       [organizationId, userId]
@@ -184,6 +199,25 @@ export const addMember = (organizationId, userId, role) =>
     if (existing?.role === "OWNER" && existing.status === "ACTIVE" && role !== "OWNER") {
       const owners = await activeOwnerCount(t, organizationId);
       if (owners.count <= 1) return { membership: null, reason: "LAST_OWNER" };
+    }
+    // A REMOVED row still counts as "existing" for the query above (it
+    // matches on organization_id + user_id regardless of status), but a
+    // REMOVED member holds no seat — re-inviting them is exactly as new-seat
+    // -consuming as a first-time invite, and the ON CONFLICT branch below
+    // reactivates them to INVITED. Treating existing?.status === "REMOVED"
+    // as "not existing" here keeps that path from silently bypassing the
+    // limit the seat-count query itself already excludes REMOVED rows from.
+    const holdsNoSeat = !existing || existing.status === "REMOVED";
+    if (holdsNoSeat && teamMemberLimit !== null) {
+      // ACTIVE and INVITED both consume a seat — an outstanding invite
+      // counts too, otherwise an org could out-invite its limit and win the
+      // race on acceptance.
+      const seats = await t.one(
+        `SELECT count(*)::int AS count FROM account.organization_members
+         WHERE organization_id = $1 AND status IN ('ACTIVE','INVITED')`,
+        [organizationId]
+      );
+      if (seats.count >= teamMemberLimit) return { membership: null, reason: "TEAM_LIMIT_REACHED", used: seats.count };
     }
     const membership = await t.one(
       `INSERT INTO account.organization_members (organization_id, user_id, role, status)
@@ -211,7 +245,7 @@ export const acceptInvite = (organizationId, userId) =>
 
 export const removeMember = (organizationId, userId) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [ownerCountLockKey(organizationId)]);
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
     const target = await t.oneOrNone(
       `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
       [organizationId, userId]

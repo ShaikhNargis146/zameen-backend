@@ -111,6 +111,33 @@ export const setStatus = ({ userId, status, validStatuses, approvedByUserId = nu
     [userId, status, validStatuses, approvedByUserId]
   );
 
+// Ensures an approved channel partner is also a real ACTIVE
+// account.organization_members row (role MEMBER), not just a
+// channel_partner_profiles link — organization_members is what every
+// entitlement/authorization check in this codebase actually reads
+// (property/listing ownership, org-scoped purchases, an explicit
+// organizationId on an AI request, etc.), not channel_partner_profiles.
+// (AI quota specifically is never auto-pooled from mere membership — see
+// ai.service.js#resolveOrganizationContext — but this membership is still
+// what makes an explicit organizationId, or a request about an org-owned
+// resource, resolve correctly for a channel partner too.) ACTIVE (not
+// INVITED): approval is itself the
+// consent step here, so there's no separate accept-invite flow to run a
+// channel partner through. ON CONFLICT DO NOTHING: never overwrites an
+// existing membership row of any status — an org admin's own prior explicit
+// REMOVED (or OWNER/ADMIN) for this user is left untouched, not silently
+// downgraded or reactivated. Mirrors
+// migrations/017_channel_partner_membership_backfill.sql's one-time
+// backfill for every channel partner approved from here on.
+export const ensureOrganizationMembership = (organizationId, userId) =>
+  run(
+    "none",
+    `INSERT INTO account.organization_members (organization_id, user_id, role, status, joined_at)
+     VALUES ($1,$2,'MEMBER','ACTIVE', now())
+     ON CONFLICT (organization_id, user_id) DO NOTHING`,
+    [organizationId, userId]
+  );
+
 export const grantChannelPartnerRole = userId => grantRole(userId, "CHANNEL_PARTNER");
 export const revokeChannelPartnerRole = userId =>
   run(

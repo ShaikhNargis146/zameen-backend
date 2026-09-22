@@ -2,8 +2,10 @@ import { HttpError } from "../../shared/http.js";
 import { paginationMeta, splitCountedRows } from "../../shared/pagination.js";
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import logger from "../../utils/logger.js";
+import * as commerceRepository from "../commerce/commerce.repository.js";
 import * as discovery from "../discovery/discovery.service.js";
 import { search as validateListingSearch } from "../discovery/discovery.validation.js";
+import * as organizationsRepository from "../organizations/organizations.repository.js";
 import * as provider from "./ai.provider.js";
 import * as repository from "./ai.repository.js";
 
@@ -41,6 +43,34 @@ export const DEFAULT_FREE_AI_MONTHLY_QUOTA = 5;
 
 const noopRelease = async () => {};
 
+// An explicit organizationId is validated against active membership and
+// used as-is — never a silent fallback to the personal plan if it doesn't
+// resolve. No organizationId hands back null.
+//
+// Deliberately NOT auto-detected across every org the caller happens to
+// belong to. An earlier version of this function did that (picking
+// whichever org gave the biggest quota) specifically to avoid needing a
+// frontend change — but it meant a personal AI question, or a question
+// asked by someone who belongs to two orgs, could get silently billed
+// against an org's paid quota that had nothing to do with the request, just
+// because that org happened to have the most generous plan. Org-pooling now
+// only ever happens for a reason: the caller names the org (this function),
+// or the request is clearly about a specific resource that resource's own
+// owner fields say is org-owned (see generateListing below, the one place
+// that applies). Anything else draws from the caller's own personal
+// plan/free tier — never someone else's org, however generous.
+const resolveOrganizationContext = async (actorId, organizationId) => {
+  if (!organizationId) return null;
+  const membership = await organizationsRepository.findMembership(organizationId, actorId);
+  if (!membership || membership.status !== "ACTIVE")
+    throw new HttpError(
+      403,
+      "ORGANIZATION_ACCESS_DENIED",
+      "You are not an active member of that organisation."
+    );
+  return organizationId;
+};
+
 // Reserves one unit of the caller's monthly AI quota before the paid LLM
 // call starts. Chat answers, /ai/search and /ai/listing/generate all draw
 // from the same pool (see ai.repository.js reserveAiQuotaUsage) — a rejected
@@ -50,26 +80,22 @@ const noopRelease = async () => {};
 // converts the reservation into permanent usage, `false` (the default, for
 // any failure/abort) deletes it so a failed attempt never costs quota.
 //
-// Scope is auto-detected, never mixed: an APPROVED channel partner attached
-// to an organization with an active plan draws exclusively from that org's
-// shared pool (every such member counts against the same monthly total);
-// anyone else draws from their own personal plan/free tier exactly as
-// before. A caller never falls back from one scope to the other mid-request.
-const reserveAiQuota = async (actorId, kind) => {
-  const orgPlan = await repository.activeOrganizationPlanForChannelPartner(actorId);
-  let organizationId = null;
-  let quota;
-  if (orgPlan) {
-    organizationId = orgPlan.organizationId;
-    quota = orgPlan.aiMonthlyQuota;
-  } else {
-    const plan = await repository.activePlanForUser(actorId);
-    quota = plan ? plan.aiMonthlyQuota : DEFAULT_FREE_AI_MONTHLY_QUOTA;
-  }
+// Scope is caller-specified, never inferred from "which org am I in":
+// passing organizationId (validated above) draws exclusively from that
+// org's shared pool. No organizationId draws from the caller's own personal
+// plan/free tier — resolved via commerce.repository.js#resolveEffectivePlanForOwner/ForUser,
+// which falls back to the live, admin-editable PLAN_FREE catalog row (not a
+// hardcoded default) once nothing currently-active is found.
+const reserveAiQuota = async (actorId, kind, organizationId = null) => {
+  const orgId = await resolveOrganizationContext(actorId, organizationId);
+  const active = orgId
+    ? await commerceRepository.resolveEffectivePlanForOwner({ organizationId: orgId })
+    : await commerceRepository.resolveEffectivePlanForUser(actorId);
+  const quota = active ? active.aiMonthlyQuota : DEFAULT_FREE_AI_MONTHLY_QUOTA;
   if (quota === null) return noopRelease;
   const reservationId = await repository.reserveAiQuotaUsage({
     userId: actorId,
-    organizationId,
+    organizationId: orgId,
     quota,
     kind
   });
@@ -77,7 +103,7 @@ const reserveAiQuota = async (actorId, kind) => {
     throw new HttpError(
       403,
       "AI_MONTHLY_QUOTA_EXCEEDED",
-      organizationId
+      orgId
         ? `Your organization has used all ${quota} AI Property Assistant questions included in its plan this month.`
         : `You have used all ${quota} AI Property Assistant questions included in your plan this month.`
     );
@@ -107,7 +133,9 @@ export const search = async ({ input, actorId }) => {
   // Anonymous callers (optionalAuth) have no plan to meter against, so this
   // only reserves for a logged-in actor — the same rate limit that already
   // applies to this route is the only guard for anonymous traffic.
-  const releaseQuota = actorId ? await reserveAiQuota(actorId, "SEARCH") : noopRelease;
+  const releaseQuota = actorId
+    ? await reserveAiQuota(actorId, "SEARCH", input.organizationId)
+    : noopRelease;
   let succeeded = false;
   try {
     const intent = await provider.searchIntent({
@@ -216,7 +244,7 @@ const messageContext = async ({ conversationId, actorId, input }) => {
   // question should cost nothing and leave no history. The reservation is
   // released by streamMessage's finally block once this attempt's outcome
   // is known.
-  const releaseQuota = await reserveAiQuota(actorId, "CHAT");
+  const releaseQuota = await reserveAiQuota(actorId, "CHAT", input.organizationId);
   try {
     const listing = conversation.listingId
       ? await repository.listingContext(conversation.listingId)
@@ -387,14 +415,19 @@ export const getConversation = async ({ conversationId, actorId }) => {
   };
 };
 export const generateListing = async ({ actorId, input }) => {
-  const releaseQuota = await reserveAiQuota(actorId, "LISTING_GENERATE");
+  const property = input.propertyId
+    ? await repository.ownedPropertyContext(input.propertyId, actorId)
+    : null;
+  if (input.propertyId && !property)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  // Resource-owner-based org resolution: an explicit organizationId always
+  // wins (validated inside reserveAiQuota); otherwise, if the property this
+  // draft is for is itself org-owned, draw quota from that org — never an
+  // unrelated org the caller merely happens to also belong to.
+  const organizationId = input.organizationId || property?.ownerOrganizationId || null;
+  const releaseQuota = await reserveAiQuota(actorId, "LISTING_GENERATE", organizationId);
   let succeeded = false;
   try {
-    const property = input.propertyId
-      ? await repository.ownedPropertyContext(input.propertyId, actorId)
-      : null;
-    if (input.propertyId && !property)
-      throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
     const propertyType = input.propertyTypeId
       ? await repository.propertyType(input.propertyTypeId)
       : null;

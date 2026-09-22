@@ -577,9 +577,13 @@ CREATE TABLE commerce.plans (
   plan_type varchar(30) NOT NULL CHECK (plan_type IN ('FREE','PREMIUM','BROKER')), duration_days integer CHECK (duration_days IS NULL OR duration_days > 0),
   listing_limit integer CHECK (listing_limit IS NULL OR listing_limit >= 0), featured_days integer CHECK (featured_days IS NULL OR featured_days >= 0),
   verification_included boolean NOT NULL DEFAULT false, features jsonb,
-  -- NULL means unlimited. A user with no active plan_subscription at all
-  -- (never purchased anything) is not represented by any row here — that
-  -- ambient "Free" state's quota is a constant in ai.service.js, not a row.
+  -- NULL means unlimited. As of migrations/016_subscription_entitlements.sql,
+  -- a FREE plan (plan_type = 'FREE') is seeded here and granted as a real
+  -- plan_subscriptions row on registration/org-creation (see
+  -- entitlements.service.js#grantFreePlan) — its ai_monthly_quota is
+  -- admin-editable via PATCH /admin/plans/:planId like any other plan. The
+  -- ambient constant in ai.service.js (DEFAULT_FREE_AI_MONTHLY_QUOTA) only
+  -- covers the defensive case where that seed row is somehow missing.
   ai_monthly_quota integer CHECK (ai_monthly_quota IS NULL OR ai_monthly_quota >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -626,7 +630,12 @@ CREATE TABLE commerce.plan_subscriptions (
   user_id uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
   organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
   plan_id uuid NOT NULL REFERENCES commerce.plans(id) ON DELETE RESTRICT,
-  order_item_id uuid NOT NULL UNIQUE REFERENCES commerce.order_items(id) ON DELETE RESTRICT,
+  -- Nullable (migrations/016_subscription_entitlements.sql): a free grant
+  -- with no purchase behind it (see entitlements.service.js#grantFreePlan)
+  -- has no order_item to reference. Still UNIQUE -- Postgres treats multiple
+  -- NULLs as distinct, so any number of free-grant rows can coexist while a
+  -- real purchase's order_item_id stays enforced unique.
+  order_item_id uuid UNIQUE REFERENCES commerce.order_items(id) ON DELETE RESTRICT,
   starts_at timestamptz NOT NULL DEFAULT now(),
   ends_at timestamptz,
   status varchar(30) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CANCELLED','EXPIRED')),
@@ -635,6 +644,30 @@ CREATE TABLE commerce.plan_subscriptions (
 );
 CREATE INDEX idx_commerce_plan_subscriptions_user_active ON commerce.plan_subscriptions(user_id, ends_at) WHERE status = 'ACTIVE';
 CREATE INDEX idx_commerce_plan_subscriptions_org_active ON commerce.plan_subscriptions(organization_id, ends_at) WHERE status = 'ACTIVE';
+
+-- Generic monthly usage ledger for any "N included per month" allowance
+-- resolved from commerce.plans.features -- today only featured listings
+-- (features.featuredListingsPerMonth). See commerce.repository.js
+-- #consumeSubscriptionUsage for the advisory-lock reserve/consume logic.
+CREATE TABLE commerce.subscription_usage (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
+  organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
+  feature varchar(50) NOT NULL,
+  used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+  period_start timestamptz NOT NULL,
+  period_end timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_subscription_usage_owner CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+);
+-- Partial (not plain multi-column) unique indexes: a plain
+-- UNIQUE(user_id, feature, period_start) would never actually collide across
+-- org-owned rows, since every org row has user_id NULL and Postgres treats
+-- NULLs as distinct for uniqueness -- these instead uniquely dedupe within
+-- whichever owner form a row actually uses.
+CREATE UNIQUE INDEX uq_commerce_subscription_usage_user ON commerce.subscription_usage(user_id, feature, period_start) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_commerce_subscription_usage_org ON commerce.subscription_usage(organization_id, feature, period_start) WHERE organization_id IS NOT NULL;
 
 CREATE TABLE commerce.payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES commerce.orders(id) ON DELETE RESTRICT,
@@ -858,11 +891,11 @@ CREATE INDEX idx_ai_messages_conversation ON ai.messages(conversation_id, create
 
 -- Unified monthly AI-quota ledger shared by chat answers, /ai/search and
 -- /ai/listing/generate. See migrations/008_ai_usage_events.sql.
--- organization_id is set only when this usage was charged against an
--- organization's shared plan pool (an APPROVED channel partner attached to
--- an org with an active plan) rather than the calling user's own personal
--- plan/free tier -- see migrations/015_ai_org_quota.sql and
--- ai.repository.js reserveAiQuotaUsage / activeOrganizationPlanForChannelPartner.
+-- organization_id is set only when the caller explicitly requested that
+-- organization's shared plan pool and is an active member of it, rather than
+-- the calling user's own personal plan/free tier -- see
+-- migrations/015_ai_org_quota.sql, migrations/016_subscription_entitlements.sql
+-- and ai.service.js reserveAiQuota / resolveOrganizationContext.
 -- The two scopes are mutually exclusive per request, never combined.
 CREATE TABLE ai.usage_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -952,7 +985,7 @@ BEGIN
     'geo.locations','account.organizations','account.channel_partner_profiles',
     'land.property_types','land.land_use_types','land.ownership_types','land.area_units','land.amenities','land.document_types','land.parcel_identifier_types','land.parcel_configurations','land.properties','land.property_land_details','land.property_parcel_identifiers','land.property_locations','land.property_verification_checks',
     'marketplace.listings','marketplace.buyer_requirements','marketplace.enquiries','marketplace.site_visits',
-    'commerce.products','commerce.plans','commerce.orders','commerce.payments','commerce.payment_webhook_events','commerce.service_catalog','commerce.service_requests',
+    'commerce.products','commerce.plans','commerce.orders','commerce.payments','commerce.payment_webhook_events','commerce.service_catalog','commerce.service_requests','commerce.subscription_usage',
     'content.content_items','content.content_translations','content.market_trend_series','content.auctions','content.investment_opportunities','content.investment_interests','content.ads',
     'ops.notification_deliveries','ai.conversations'
   ] LOOP

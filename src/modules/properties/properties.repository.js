@@ -229,6 +229,21 @@ export const passport = propertyId =>
      FROM land.v_land_passports passport WHERE passport.property_id = $1`,
     [propertyId]
   );
+// The property's raw owner columns, independent of which shape the caller's
+// req.property happens to carry (the owner-scoped loader returns SELECT p.*,
+// the admin loader's propertySummarySql above selects neither
+// created_by_user_id nor owner_organization_id under those names) — used by
+// properties.service.js#completeMedia (via entitlements.service.js#resolveMediaLimits)
+// so limit enforcement resolves the right owner regardless of which loader
+// populated req.property.
+export const ownerFields = propertyId =>
+  run(
+    "oneOrNone",
+    `SELECT created_by_user_id AS "createdByUserId", owner_organization_id AS "ownerOrganizationId"
+     FROM land.properties WHERE id = $1 AND deleted_at IS NULL`,
+    [propertyId]
+  );
+
 export const media = propertyId =>
   run(
     "any",
@@ -241,8 +256,41 @@ export const mediaForProperty = (propertyId, mediaId) =>
     `SELECT id FROM land.property_media WHERE id = $1 AND property_id = $2 AND deleted_at IS NULL`,
     [mediaId, propertyId]
   );
-export const createMediaBatch = async (propertyId, items) => {
+// VIDEO + DRONE_VIDEO both count against videosPerProperty (drone footage is
+// marketing media like video); SITE_PLAN stays uncounted (a document-like
+// asset, not marketing media). Mirrors the same mapping entitlements.service.js
+// used to apply before this limit check moved into this transaction.
+const mediaTypesForCategory = { IMAGE: ["IMAGE"], VIDEO: ["VIDEO", "DRONE_VIDEO"] };
+const categoryForMediaType = mediaType =>
+  mediaType === "IMAGE" ? "IMAGE" : mediaTypesForCategory.VIDEO.includes(mediaType) ? "VIDEO" : null;
+
+// Locks per-property (not per-owner like the listing/team-member limits —
+// media limits are per-property, not pooled across an owner's account) so
+// two concurrent upload batches for the SAME property can't both read a
+// stale "under the limit" count before either commits. limits = {
+// imagesPerProperty, videosPerProperty } (resolved by the caller via
+// entitlements.service.js#resolveMediaLimits, either null = unlimited).
+// Returns { ids, reason: null } on success, or
+// { ids: null, reason: "LIMIT_REACHED", category, used, limit } if the
+// batch would exceed one of the limits — nothing is inserted in that case.
+export const createMediaBatch = async (propertyId, items, limits = {}) => {
   const result = await pg.tx(async transaction => {
+    await transaction.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`PROPERTY_MEDIA:${propertyId}`]);
+    const addedByCategory = new Map();
+    for (const item of items) {
+      const category = categoryForMediaType(item.mediaType);
+      if (!category) continue;
+      addedByCategory.set(category, (addedByCategory.get(category) || 0) + 1);
+    }
+    for (const [category, addedCount] of addedByCategory) {
+      const limit = category === "IMAGE" ? limits.imagesPerProperty : limits.videosPerProperty;
+      if (limit === null || limit === undefined) continue; // unlimited / not set
+      const { count } = await transaction.one(
+        `SELECT count(*)::int AS count FROM land.property_media WHERE property_id = $1 AND media_type = ANY($2::text[]) AND deleted_at IS NULL`,
+        [propertyId, mediaTypesForCategory[category]]
+      );
+      if (count + addedCount > limit) return { ids: null, reason: "LIMIT_REACHED", category, used: count, limit };
+    }
     const ids = [];
     for (const input of items) {
       const row = await transaction.one(
@@ -270,7 +318,7 @@ export const createMediaBatch = async (propertyId, items) => {
         [ids[coverIndex]]
       );
     }
-    return ids;
+    return { ids, reason: null };
   });
   if (!result.ok) throw result.error;
   return result.data;
