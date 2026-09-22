@@ -49,16 +49,37 @@ const noopRelease = async () => {};
 // caller MUST invoke exactly once when its own work finishes: `true`
 // converts the reservation into permanent usage, `false` (the default, for
 // any failure/abort) deletes it so a failed attempt never costs quota.
+//
+// Scope is auto-detected, never mixed: an APPROVED channel partner attached
+// to an organization with an active plan draws exclusively from that org's
+// shared pool (every such member counts against the same monthly total);
+// anyone else draws from their own personal plan/free tier exactly as
+// before. A caller never falls back from one scope to the other mid-request.
 const reserveAiQuota = async (actorId, kind) => {
-  const plan = await repository.activePlanForUser(actorId);
-  const quota = plan ? plan.aiMonthlyQuota : DEFAULT_FREE_AI_MONTHLY_QUOTA;
+  const orgPlan = await repository.activeOrganizationPlanForChannelPartner(actorId);
+  let organizationId = null;
+  let quota;
+  if (orgPlan) {
+    organizationId = orgPlan.organizationId;
+    quota = orgPlan.aiMonthlyQuota;
+  } else {
+    const plan = await repository.activePlanForUser(actorId);
+    quota = plan ? plan.aiMonthlyQuota : DEFAULT_FREE_AI_MONTHLY_QUOTA;
+  }
   if (quota === null) return noopRelease;
-  const reservationId = await repository.reserveAiQuotaUsage(actorId, quota, kind);
+  const reservationId = await repository.reserveAiQuotaUsage({
+    userId: actorId,
+    organizationId,
+    quota,
+    kind
+  });
   if (reservationId === null)
     throw new HttpError(
       403,
       "AI_MONTHLY_QUOTA_EXCEEDED",
-      `You have used all ${quota} AI Property Assistant questions included in your plan this month.`
+      organizationId
+        ? `Your organization has used all ${quota} AI Property Assistant questions included in its plan this month.`
+        : `You have used all ${quota} AI Property Assistant questions included in your plan this month.`
     );
   return async (succeeded = false) =>
     succeeded

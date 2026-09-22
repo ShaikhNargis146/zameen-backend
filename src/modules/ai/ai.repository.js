@@ -57,10 +57,11 @@ export const messages = conversationId =>
   );
 
 // The user's currently active plan (personal scope only — org-level plans do
-// not grant AI quota). null means the user has no active plan at all, i.e.
-// the ambient "Free" tier that has no row of its own anywhere. Must exclude
-// organization_id IS NOT NULL rows: a plan bought with organizationId set
-// still carries the buyer's own user_id (see
+// not grant quota through this lookup, see activeOrganizationPlanForChannelPartner
+// below for that path). null means the user has no active personal plan at
+// all, i.e. the ambient "Free" tier that has no row of its own anywhere.
+// Must exclude organization_id IS NOT NULL rows: a plan bought with
+// organizationId set still carries the buyer's own user_id (see
 // commerce.repository.capturePaymentAndApplyEntitlements), so without this
 // filter an org-purchased plan would silently grant its quota to whichever
 // member happened to place the order.
@@ -77,27 +78,59 @@ export const activePlanForUser = userId =>
     [userId]
   );
 
-// Atomically reserves one unit of this user's monthly AI quota — chat
+// The organization's currently active plan, for a user who can draw AI quota
+// from it: an APPROVED channel partner attached to that organization (see
+// account.channel_partner_profiles). null means this user has no such
+// org-granted quota right now (not a channel partner, not attached to an
+// org, or that org has no active plan) — the caller falls back to
+// activePlanForUser/the free tier in that case. Deliberately does not also
+// require the organization itself to be ACTIVE (status is about the org's
+// own storefront/listing visibility, not its billing standing) — a plan it
+// already paid for still counts.
+export const activeOrganizationPlanForChannelPartner = userId =>
+  run(
+    "oneOrNone",
+    `SELECT pl.ai_monthly_quota AS "aiMonthlyQuota", cp.organization_id AS "organizationId"
+     FROM account.channel_partner_profiles cp
+     JOIN commerce.plan_subscriptions ps ON ps.organization_id = cp.organization_id
+     JOIN commerce.plans pl ON pl.id = ps.plan_id
+     WHERE cp.user_id = $1 AND cp.status = 'APPROVED' AND cp.organization_id IS NOT NULL
+       AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+     ORDER BY ps.ends_at DESC NULLS LAST
+     LIMIT 1`,
+    [userId]
+  );
+
+// Atomically reserves one unit of monthly AI quota, from one of two mutually
+// exclusive pools: the calling user's own personal quota (organizationId
+// null) or their organization's shared quota (organizationId set, consumed
+// together by every member the organization's plan applies to) — chat
 // answers, /ai/search and /ai/listing/generate all draw from the same pool
-// (see migrations/008_ai_usage_events.sql). The advisory lock serializes
-// concurrent callers for the same user, so two requests started at once
-// against a quota of 1 can't both pass the count check before either's
-// reservation lands — the second sees the first's still-open reservation
-// and is correctly blocked. Returns the reservation id, or null if quota is
-// already used up.
-export const reserveAiQuotaUsage = (userId, quota, kind) =>
+// per scope (see migrations/008_ai_usage_events.sql,
+// migrations/015_ai_org_quota.sql). The advisory lock is keyed on whichever
+// scope is being charged (the org, or the user), so concurrent callers
+// against the same pool serialize instead of racing past a low quota
+// together — two requests started at once against a quota of 1 can't both
+// pass the count check before either's reservation lands. Returns the
+// reservation id, or null if quota is already used up.
+export const reserveAiQuotaUsage = ({ userId, organizationId, quota, kind }) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [userId]);
+    const lockKey = organizationId || userId;
+    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
     const usage = await t.one(
-      `SELECT count(*)::int AS used FROM ai.usage_events
-       WHERE user_id = $1 AND reserved_at >= date_trunc('month', now())
-         AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
-      [userId]
+      organizationId
+        ? `SELECT count(*)::int AS used FROM ai.usage_events
+           WHERE organization_id = $1 AND reserved_at >= date_trunc('month', now())
+             AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`
+        : `SELECT count(*)::int AS used FROM ai.usage_events
+           WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= date_trunc('month', now())
+             AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
+      [lockKey]
     );
     if (usage.used >= quota) return null;
     const row = await t.one(
-      `INSERT INTO ai.usage_events (user_id, kind) VALUES ($1, $2) RETURNING id`,
-      [userId, kind]
+      `INSERT INTO ai.usage_events (user_id, organization_id, kind) VALUES ($1, $2, $3) RETURNING id`,
+      [userId, organizationId, kind]
     );
     return row.id;
   });

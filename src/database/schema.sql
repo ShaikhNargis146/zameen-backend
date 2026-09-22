@@ -858,12 +858,20 @@ CREATE INDEX idx_ai_messages_conversation ON ai.messages(conversation_id, create
 
 -- Unified monthly AI-quota ledger shared by chat answers, /ai/search and
 -- /ai/listing/generate. See migrations/008_ai_usage_events.sql.
+-- organization_id is set only when this usage was charged against an
+-- organization's shared plan pool (an APPROVED channel partner attached to
+-- an org with an active plan) rather than the calling user's own personal
+-- plan/free tier -- see migrations/015_ai_org_quota.sql and
+-- ai.repository.js reserveAiQuotaUsage / activeOrganizationPlanForChannelPartner.
+-- The two scopes are mutually exclusive per request, never combined.
 CREATE TABLE ai.usage_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  organization_id uuid REFERENCES account.organizations(id) ON DELETE CASCADE,
   kind varchar(30) NOT NULL CHECK (kind IN ('CHAT','SEARCH','LISTING_GENERATE')),
   reserved_at timestamptz NOT NULL DEFAULT now(), confirmed_at timestamptz
 );
-CREATE INDEX idx_ai_usage_events_user_month ON ai.usage_events(user_id, reserved_at);
+CREATE INDEX idx_ai_usage_events_user_month ON ai.usage_events(user_id, reserved_at) WHERE organization_id IS NULL;
+CREATE INDEX idx_ai_usage_events_org_month ON ai.usage_events(organization_id, reserved_at) WHERE organization_id IS NOT NULL;
 
 -- Land Passport and Scanner Lite are deterministic read models, not AI or
 -- legal opinions. They are recalculated from the canonical property records.
