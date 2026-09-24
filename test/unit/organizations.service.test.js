@@ -138,7 +138,7 @@ test("addMember() rejects a new member once the org's plan-resolved team-member 
       oneOrNone: addMemberOneOrNoneStub({ targetMembership: null, planFeatures: { teamMembers: 1 } }),
       tx: async fn => {
         const data = await fn({
-          none: async () => {}, // advisory lock
+          any: async () => {}, // advisory lock
           oneOrNone: async () => null, // fresh existing-membership check inside the lock
           one: async query => {
             if (/status IN \('ACTIVE','INVITED'\)/.test(query)) return { count: 1 }; // already at the limit of 1
@@ -168,7 +168,7 @@ test("addMember() succeeds and returns the new membership when under the team-me
       oneOrNone: addMemberOneOrNoneStub({ targetMembership: null, planFeatures: { teamMembers: 5 } }),
       tx: async fn => {
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           oneOrNone: async () => null,
           one: async query => {
             if (/status IN \('ACTIVE','INVITED'\)/.test(query)) return { count: 1 }; // under the limit of 5

@@ -58,7 +58,7 @@ test("completeMedia resolves the owner from the property's own DB columns (prope
       },
       tx: async fn => {
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async query => {
             assert.match(query, /media_type = ANY/);
             batchInsertAttempted = true; // set only if we ever get past the count check

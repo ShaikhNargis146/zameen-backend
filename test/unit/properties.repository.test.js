@@ -34,11 +34,11 @@ const stubT = ({ imageCount = null, videoCount = null, insertIds = [] }) => {
   return {
     calls,
     t: {
+      any: async (query, params) => {
+        assert.match(query, /pg_advisory_xact_lock/);
+        calls.lock.push(params);
+      },
       none: async (query, params) => {
-        if (/pg_advisory_xact_lock/.test(query)) {
-          calls.lock.push(params);
-          return;
-        }
         calls.cover.push([query, params]);
       },
       one: async (query, params) => {

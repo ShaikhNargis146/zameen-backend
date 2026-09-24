@@ -35,7 +35,7 @@ const stubT = ({ existing = null, ownerCount = null, seatCount = null, insertRes
   return {
     calls,
     t: {
-      none: async (query, params) => {
+      any: async (query, params) => {
         assert.match(query, /pg_advisory_xact_lock\(hashtext\(\$1\)\)/);
         calls.lock.push(params);
       },

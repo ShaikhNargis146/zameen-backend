@@ -105,7 +105,7 @@ export const archive = id =>
 // lock-then-check-then-write shape for the same class of race.
 export const submitWithinLimit = ({ id, userId, organizationId, limit }) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
       `ACTIVE_LISTINGS:${organizationId || userId}`
     ]);
     if (limit !== null) {
@@ -295,7 +295,7 @@ export const ownerFields = id =>
 // different times with nothing previously spanning both.
 export const approveWithinLimit = ({ id, userId, organizationId, limit, expiresAt }) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
       `ACTIVE_LISTINGS:${organizationId || userId}`
     ]);
     if (limit !== null) {

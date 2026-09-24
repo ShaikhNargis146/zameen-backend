@@ -416,12 +416,13 @@ test("grantFeaturedListing consumes one unit and grants the FEATURED promotion f
       oneOrNone: async () => ({ ok: true, data: { features: { featuredListingsPerMonth: 2 }, featuredDays: 15 } }),
       tx: async fn => {
         const data = await fn({
+          any: async (query, params) => {
+            calls.push(["any", query, params]);
+            assert.match(query, /pg_advisory_xact_lock/);
+            assert.deepEqual(params, ["FEATURED_LISTINGS:user-1"]);
+          },
           none: async (query, params) => {
             calls.push(["none", query, params]);
-            if (/pg_advisory_xact_lock/.test(query)) {
-              assert.deepEqual(params, ["FEATURED_LISTINGS:user-1"]);
-              return;
-            }
             assert.match(query, /INSERT INTO commerce\.subscription_usage/);
             assert.deepEqual(params, [
               "user-1",
@@ -451,7 +452,7 @@ test("grantFeaturedListing consumes one unit and grants the FEATURED promotion f
     }
   );
   // Usage lock+count+write happens before the promotion insert, both in the same tx.
-  assert.equal(calls[0][0], "none");
+  assert.equal(calls[0][0], "any");
   assert.match(calls.at(-1)[1], /INSERT INTO marketplace\.listing_promotions/);
 });
 
@@ -461,6 +462,7 @@ test("grantFeaturedListing preserves an explicitly-configured featuredDays of 0 
       oneOrNone: async () => ({ ok: true, data: { features: { featuredListingsPerMonth: 2 }, featuredDays: 0 } }),
       tx: async fn => {
         const data = await fn({
+          any: async () => {},
           none: async () => {},
           one: async (query, params) => {
             if (/date_trunc/.test(query))
@@ -486,6 +488,7 @@ test("grantFeaturedListing returns promotion: null, alreadyFeatured: false once 
       oneOrNone: async () => ({ ok: true, data: { features: { featuredListingsPerMonth: 2 }, featuredDays: 15 } }),
       tx: async fn => {
         const data = await fn({
+          any: async () => {},
           none: async () => {},
           one: async query => {
             if (/date_trunc/.test(query))

@@ -191,7 +191,7 @@ const activeOwnerCount = (t, organizationId) =>
 // already in the org never does.
 export const addMember = (organizationId, userId, role, { teamMemberLimit = null } = {}) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
     const existing = await t.oneOrNone(
       `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
       [organizationId, userId]
@@ -245,7 +245,7 @@ export const acceptInvite = (organizationId, userId) =>
 
 export const removeMember = (organizationId, userId) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
     const target = await t.oneOrNone(
       `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
       [organizationId, userId]

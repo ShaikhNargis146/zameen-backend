@@ -34,7 +34,7 @@ const stubT = ({ count = null, updateResult = null }) => {
   return {
     calls,
     t: {
-      none: async (query, params) => {
+      any: async (query, params) => {
         assert.match(query, /pg_advisory_xact_lock\(hashtext\(\$1::text\)\)/);
         calls.lock.push(params);
       },
@@ -108,7 +108,7 @@ const stubApproveT = ({ count = null, updateResult = null }) => {
   return {
     calls,
     t: {
-      none: async (query, params) => {
+      any: async (query, params) => {
         assert.match(query, /pg_advisory_xact_lock\(hashtext\(\$1::text\)\)/);
         calls.lock.push(params);
       },

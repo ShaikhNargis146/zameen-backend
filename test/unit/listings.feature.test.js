@@ -36,6 +36,7 @@ test("feature() grants the FEATURED promotion for the plan's featuredDays when a
       }),
       tx: async fn => {
         const data = await fn({
+          any: async () => {},
           none: async () => {},
           one: async (query, params) => {
             if (/date_trunc/.test(query))

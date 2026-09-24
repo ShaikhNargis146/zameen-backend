@@ -83,7 +83,7 @@ export const countMonthlyUsageForUser = userId =>
 export const reserveAiQuotaUsage = ({ userId, organizationId, quota, kind }) =>
   runTx(async t => {
     const lockKey = organizationId || userId;
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
     const usage = await t.one(
       organizationId
         ? `SELECT count(*)::int AS used FROM ai.usage_events

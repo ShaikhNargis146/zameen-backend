@@ -45,7 +45,7 @@ export const insert = ({
   buyerNote
 }) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
       linkingLockKey(listingId, buyerUserId)
     ]);
     const existingEnquiry = await t.oneOrNone(

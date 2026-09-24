@@ -42,8 +42,8 @@ const withTxStub = async (t, callback) => {
 test("reserving a personal quota slot takes a per-user advisory lock, counts only that user's non-org usage, and inserts with organization_id null", async () => {
   const calls = [];
   const t = {
-    none: async (query, params) => {
-      calls.push(["none", query, params]);
+    any: async (query, params) => {
+      calls.push(["any", query, params]);
       assert.match(query, /pg_advisory_xact_lock\(hashtext\(\$1::text\)\)/);
       assert.deepEqual(params, ["user-1"]);
     },
@@ -72,13 +72,13 @@ test("reserving a personal quota slot takes a per-user advisory lock, counts onl
     assert.equal(id, "reservation-1");
   });
   // The lock is taken before the usage is ever counted.
-  assert.equal(calls[0][0], "none");
+  assert.equal(calls[0][0], "any");
   assert.equal(calls[1][0], "one");
 });
 
 test("reserving an org quota slot locks on the organization, counts every member's usage against it, and inserts with the user still attributed", async () => {
   const t = {
-    none: async (query, params) => {
+    any: async (query, params) => {
       assert.match(query, /pg_advisory_xact_lock\(hashtext\(\$1::text\)\)/);
       assert.deepEqual(params, ["org-1"]);
     },
@@ -107,7 +107,7 @@ test("reserving an org quota slot locks on the organization, counts every member
 
 test("reserving a quota slot at the cap returns null and never inserts a row", async () => {
   const t = {
-    none: async () => {},
+    any: async () => {},
     one: async query => {
       if (/SELECT count\(\*\)/.test(query)) return { used: 5 };
       throw new Error("must not insert once quota is exhausted");
@@ -232,7 +232,7 @@ const newCalls = () => ({ membership: [], org: [], personal: [], freePlanFallbac
 const exhaustedTxStub = async fn => {
   try {
     const data = await fn({
-      none: async () => {},
+      any: async () => {},
       one: async query => {
         if (/SELECT count\(\*\)/.test(query)) return { used: 999999 };
         throw new Error("must not insert once quota is exhausted");

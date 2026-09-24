@@ -176,7 +176,7 @@ export const grantPlanDirectly = ({ userId, organizationId, planId, startsAt, en
 // false if the period was already at limit.
 const consumeUsageWithinTx = async (t, { userId, organizationId, feature, limit }) => {
   const lockKey = `${feature}:${organizationId || userId}`;
-  await t.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+  await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
   const period = await t.one(
     `SELECT date_trunc('month', now()) AS "periodStart", date_trunc('month', now()) + interval '1 month' AS "periodEnd"`
   );

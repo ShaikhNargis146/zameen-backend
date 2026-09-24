@@ -43,7 +43,7 @@ test("submit() resolves the limit and checks readiness before ever opening the e
       tx: async fn => {
         txCalled = true;
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async () => ({ count: 1 }),
           oneOrNone: async () => ({ id: "listing-1" })
         });
@@ -84,7 +84,7 @@ test("submit() maps the repository's LIMIT_REACHED reason to a PLAN_LIMIT_REACHE
       oneOrNone: oneOrNoneDispatch({ planLimit: 2, scannerReady: true }),
       tx: async fn => {
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async () => ({ count: 2 }), // at the limit
           oneOrNone: async () => {
             throw new Error("must not submit once the limit check has failed");
@@ -110,7 +110,7 @@ test("submit() maps a plain submit conflict (reason: CONFLICT) to LISTING_SUBMIT
       oneOrNone: oneOrNoneDispatch({ planLimit: 5, scannerReady: true }),
       tx: async fn => {
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async () => ({ count: 1 }),
           oneOrNone: async () => null // UPDATE matched no row
         });

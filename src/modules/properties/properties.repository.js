@@ -275,7 +275,7 @@ const categoryForMediaType = mediaType =>
 // batch would exceed one of the limits — nothing is inserted in that case.
 export const createMediaBatch = async (propertyId, items, limits = {}) => {
   const result = await pg.tx(async transaction => {
-    await transaction.none(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`PROPERTY_MEDIA:${propertyId}`]);
+    await transaction.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`PROPERTY_MEDIA:${propertyId}`]);
     const addedByCategory = new Map();
     for (const item of items) {
       const category = categoryForMediaType(item.mediaType);

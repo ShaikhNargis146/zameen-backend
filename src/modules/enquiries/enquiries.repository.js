@@ -37,7 +37,7 @@ export const insertAndLinkUnlinkedVisits = ({
   message
 }) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
       linkingLockKey(listingId, buyerUserId)
     ]);
     const unlinkedVisits = await t.any(
@@ -70,7 +70,7 @@ export const findOrCreateEnquiryForContactReveal = ({
   message
 }) =>
   runTx(async t => {
-    await t.none(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
       linkingLockKey(listingId, buyerUserId)
     ]);
     const existing = await t.oneOrNone(

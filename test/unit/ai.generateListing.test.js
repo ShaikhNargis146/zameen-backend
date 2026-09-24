@@ -23,7 +23,7 @@ const withPgStubs = async (stubs, callback) => {
 const exhaustedTxStub = async fn => {
   try {
     const data = await fn({
-      none: async () => {},
+      any: async () => {},
       one: async query => {
         if (/SELECT count\(\*\)/.test(query)) return { used: 999999 };
         throw new Error("must not insert once quota is exhausted");

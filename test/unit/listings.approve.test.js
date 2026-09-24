@@ -53,7 +53,7 @@ test("approve() resolves the listing's own owner and enforces the active-listing
       tx: async fn => {
         txCalled = true;
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async () => ({ count: 1 }), // under the limit of 5
           oneOrNone: async () => ({ id: "listing-1" })
         });
@@ -80,7 +80,7 @@ test("approve() throws PLAN_LIMIT_REACHED (not the paid-checkout error) when app
       }),
       tx: async fn => {
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async () => ({ count: 2 }), // already at the limit of 2
           oneOrNone: async () => {
             updateAttempted = true;
@@ -127,7 +127,7 @@ test("approve() resolves the org's pooled limit (not the individual submitter's)
       },
       tx: async fn => {
         const data = await fn({
-          none: async () => {},
+          any: async () => {},
           one: async (query, params) => {
             calls.count.push(params);
             return { count: 5 };
