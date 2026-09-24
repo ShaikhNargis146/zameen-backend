@@ -2,7 +2,8 @@ import { HttpError } from "../../shared/http.js";
 import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const adStatuses = new Set(["ACTIVE", "INACTIVE", "SCHEDULED", "EXPIRED"]);
+const adStatuses = new Set(["ACTIVE", "INACTIVE", "EXPIRED"]);
+const adStatusLabel = "ACTIVE, INACTIVE, or EXPIRED";
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 export const uuid = (value, field) => {
@@ -63,13 +64,22 @@ export const createAd = body => {
     throw new HttpError(400, "INVALID_ENDS_AT", "endsAt must be after startsAt.", [
       { field: "endsAt", message: "endsAt must be after startsAt." }
     ]);
+  const now = new Date();
+  if (startsAt > now)
+    throw new HttpError(400, "INVALID_STARTS_AT", "startsAt cannot be in the future — ads go live immediately, there is no scheduling.", [
+      { field: "startsAt", message: "startsAt cannot be in the future." }
+    ]);
+  if (endsAt <= now)
+    throw new HttpError(400, "INVALID_ENDS_AT", "endsAt must be in the future.", [
+      { field: "endsAt", message: "endsAt must be in the future." }
+    ]);
   return {
     name: requiredString(body.name, 2, 255, "NAME"),
     placement: placement(body.placement),
     targetUrl: optionalUrl(body.targetUrl, "TARGET_URL"),
     startsAt,
     endsAt,
-    status: body.status ? requiredEnum(body.status, adStatuses, "STATUS", "ACTIVE, INACTIVE, SCHEDULED, or EXPIRED") : "INACTIVE"
+    status: body.status ? requiredEnum(body.status, adStatuses, "STATUS", adStatusLabel) : "ACTIVE"
   };
 };
 
@@ -176,7 +186,7 @@ export const mediaOrder = body => {
 };
 
 export const adminAdListQuery = query => ({
-  status: optionalEnum(query.status, adStatuses, "STATUS", "ACTIVE, INACTIVE, SCHEDULED, or EXPIRED"),
+  status: optionalEnum(query.status, adStatuses, "STATUS", adStatusLabel),
   placement: query.placement === undefined || query.placement === null || query.placement === ""
     ? null
     : placement(query.placement),
@@ -191,7 +201,7 @@ export const updateAd = body => {
   if (has(body, "startsAt")) changes.starts_at = requiredDateTime(body.startsAt, "STARTS_AT");
   if (has(body, "endsAt")) changes.ends_at = requiredDateTime(body.endsAt, "ENDS_AT");
   if (has(body, "status"))
-    changes.status = requiredEnum(body.status, adStatuses, "STATUS", "ACTIVE, INACTIVE, SCHEDULED, or EXPIRED");
+    changes.status = requiredEnum(body.status, adStatuses, "STATUS", adStatusLabel);
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;

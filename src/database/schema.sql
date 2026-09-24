@@ -813,7 +813,7 @@ CREATE TABLE content.ads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(255) NOT NULL,
   placement varchar(50) NOT NULL,
   image_storage_key text, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
-  status varchar(20) NOT NULL DEFAULT 'INACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SCHEDULED','EXPIRED')),
+  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_content_ads_dates CHECK (ends_at > starts_at)
 );
