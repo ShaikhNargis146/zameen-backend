@@ -99,7 +99,13 @@ const boolean = (value, field, fallback = null) => {
 };
 
 const maxFileSizeBytes = 50 * 1024 * 1024;
-const adImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+const adMediaMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "video/mp4",
+  "video/webm"
+]);
 
 const fileInput = body => {
   const fileName = requiredString(body.fileName, 1, 255, "FILE_NAME");
@@ -109,8 +115,8 @@ const fileInput = body => {
     const message = `fileSizeBytes must be a positive whole number up to ${maxFileSizeBytes} bytes.`;
     throw new HttpError(400, "INVALID_FILE_SIZE_BYTES", message, [{ field: "fileSizeBytes", message }]);
   }
-  if (!adImageMimeTypes.has(mimeType)) {
-    const message = "mimeType must be image/jpeg, image/png, or image/webp.";
+  if (!adMediaMimeTypes.has(mimeType)) {
+    const message = "mimeType must be image/jpeg, image/png, image/webp, video/mp4, or video/webm.";
     throw new HttpError(400, "INVALID_MIME_TYPE", message, [{ field: "mimeType", message }]);
   }
   return { fileName, mimeType, fileSizeBytes };
