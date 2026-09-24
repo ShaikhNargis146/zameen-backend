@@ -1,0 +1,699 @@
+{
+  "info": {
+    "name": "Zameens — Organizations & Members",
+    "description": "Every organization- and member-lifecycle endpoint in one place — both self-service (organizations.routes.js, run as the org owner or an invited member) and admin-only (organizations.admin.routes.js, run as an ADMIN-role user). Responses use the standard { success, data, meta } / { success, error } envelope.\n\nSuggested run order: Auth — Org Owner (Request OTP → set {{otp}} from the server console → Verify OTP) → Organizations / Create organization → Members / Add member (invite by email) (creates the unverified account for {{memberEmail}}) → Auth — Member User (logs into that same account via email OTP, proving it) → Members / Accept membership (as member user) → Auth — Admin (see that folder's Request OTP description — needs the ADMIN role granted directly in the DB first, no self-service path exists) → Admin — Organizations / Admin — Members as needed.\n\nVerified end-to-end against a real local instance (all 4 self-service org endpoints, 4 member endpoints, 5 admin org endpoints, 1 admin member endpoint, plus the invalid-transition, last-owner, and PLAN_LIMIT_REACHED guards). One inconsistency found along the way, not fixed here: requireAdmin (admin routes) returns 403 ADMIN_REQUIRED for both a missing token and a valid-but-non-admin token, where requireAuth (self-service routes) correctly returns 401 for a missing token — a client can't tell \"log in\" from \"forbidden\" on admin routes.\n\nPlan & usage pooling (why PLAN_LIMIT_REACHED behaves the way it does above): the org's plan lives on one commerce.plan_subscriptions row keyed by organizationId, and every usage counter that reads it (active listings, AI monthly quota, featured-listing/other subscription-usage ledger entries, team-member seats) filters purely on organization_id — never on which member did the thing. OWNER, ADMIN, and MEMBER all draw from and count against the exact same shared pool with zero role distinction; the org-membership check gating who can attribute a resource to the org (used throughout this collection) is likewise role-blind — only status = 'ACTIVE' is checked. The one caveat: this pooling is never inferred from \"the actor happens to be a member of some org\" — it only kicks in when the client explicitly passes organizationId on the resource-creation call (listing, property, AI conversation — all outside this collection's scope). A member acting without it draws against their own personal plan instead, silently.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/api/v1"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "description": "Org owner's bearer token — set by Auth — Org Owner / Verify OTP."
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "memberEmail",
+      "value": "new.hire@example.com",
+      "description": "The email Members / Add member (invite by email) invites, and Auth — Member User later logs into — keep these in sync if you change it."
+    },
+    {
+      "key": "memberAccessToken",
+      "value": "",
+      "description": "Invited user's bearer token — set by Auth — Member User / Verify OTP (run Add member (invite by email) first)."
+    },
+    {
+      "key": "memberRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "memberUserId",
+      "value": "",
+      "description": "Invited user's own id — auto-captured on Auth — Member User / Verify OTP, or read it off Add member (invite by email)'s response. Used by Remove member and Admin — Members / Update member status."
+    },
+    {
+      "key": "adminAccessToken",
+      "value": "",
+      "description": "Bearer token for a user with the ADMIN role — set by Auth — Admin / Verify OTP."
+    },
+    {
+      "key": "adminRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "challengeId",
+      "value": "",
+      "description": "Shared scratch variable — set by whichever Request OTP call you just ran."
+    },
+    {
+      "key": "otp",
+      "value": "",
+      "description": "OTP code from the delivery provider (logged to console in non-production). Shared across all three Auth folders — log in one identity at a time."
+    },
+    {
+      "key": "organizationId",
+      "value": "",
+      "description": "Auto-captured by Organizations / Create organization."
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth — Org Owner",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"9876500001\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/request"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"challengeId\", json.data.challengeId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"{{otp}}\",\n  \"deviceId\": \"orgs-postman-org-owner\",\n  \"deviceName\": \"Zameens Organizations Postman \\u2014 Org Owner\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          },
+          "description": "OTP is logged to the server console in non-production — set the {{otp}} collection variable from there before running this.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"accessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"refreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"accessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"refreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth — Member User",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"{{memberEmail}}\",\n  \"channel\": \"EMAIL\",\n  \"purpose\": \"LOGIN\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/request"
+          },
+          "description": "Run Members / Add member (invite by email) first — this logs in as the account that invite just created (or reused) for {{memberEmail}}.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"challengeId\", json.data.challengeId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"{{otp}}\",\n  \"deviceId\": \"orgs-postman-member-user\",\n  \"deviceName\": \"Zameens Organizations Postman \\u2014 Member User\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          },
+          "description": "OTP is logged to the server console in non-production — set the {{otp}} collection variable from there before running this.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"memberAccessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"memberRefreshToken\", json.data.refreshToken);",
+                  "  pm.collectionVariables.set(\"memberUserId\", json.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{memberRefreshToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"memberAccessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"memberRefreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth — Admin",
+      "item": [
+        {
+          "name": "Request OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"9876511111\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/request"
+          },
+          "description": "No self-service path grants ADMIN. Before this will work, the destination phone must already have the role: INSERT INTO auth.user_roles (user_id, role_id) SELECT '<user id>', id FROM auth.roles WHERE code = 'ADMIN'. If the account already exists and is logged in elsewhere, Auth — Admin / Refresh token alone (not a full re-verify) is enough to pick up a role granted after the fact.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"challengeId\", json.data.challengeId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"{{otp}}\",\n  \"deviceId\": \"orgs-postman-admin\",\n  \"deviceName\": \"Zameens Organizations Postman \\u2014 Admin\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          },
+          "description": "OTP is logged to the server console in non-production — set the {{otp}} collection variable from there before running this.",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"adminAccessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"adminRefreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"adminAccessToken\", json.data.accessToken);",
+                  "  pm.collectionVariables.set(\"adminRefreshToken\", json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Organizations",
+      "item": [
+        {
+          "name": "Create organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Brokerage\",\n  \"type\": \"BROKERAGE\",\n  \"phone\": \"+919876543210\",\n  \"email\": \"broker@example.com\",\n  \"gstNumber\": \"27AAAPL1234C1ZV\",\n  \"reraNumber\": \"P51700012345\",\n  \"logoStorageKey\": null\n}"
+            },
+            "url": "{{baseUrl}}/organizations"
+          },
+          "description": "The creator is auto-added as OWNER, and the org is also granted a real, admin-editable Free plan row (same as an individual gets on registration).",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.success) {",
+                  "  pm.collectionVariables.set(\"organizationId\", json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My organizations",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/organizations/me?page=1&limit=20&search=brok&type=BROKERAGE&status=ACTIVE&role=OWNER"
+          },
+          "description": "Scoped to the caller's own memberships only — for a platform-wide listing (any org, any status), see Admin — Organizations / List organizations. Filters: search, name, type, slug, phone, email, gstNumber, reraNumber, status, role."
+        },
+        {
+          "name": "Organization details",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{baseUrl}}/organizations/{{organizationId}}"
+          },
+          "description": "Public/optional-auth — works with or without a bearer token. 404s a PENDING or SUSPENDED organization unless the caller is one of its active members (admins are not exempt — see Admin — Organizations / Organization detail for the admin-safe equivalent)."
+        },
+        {
+          "name": "Update organization",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Brokerage Name\",\n  \"phone\": \"+919876543211\"\n}"
+            },
+            "url": "{{baseUrl}}/organizations/{{organizationId}}"
+          },
+          "description": "Requires the caller to be an active OWNER or ADMIN of the org. Only send the fields you want to change."
+        }
+      ]
+    },
+    {
+      "name": "Members",
+      "item": [
+        {
+          "name": "List members",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/organizations/{{organizationId}}/members"
+          },
+          "description": "Requires the caller to already be an active member of the org (any role) — this is what 403s a non-member admin, see Admin — Organizations / Organization detail for the workaround."
+        },
+        {
+          "name": "Add member (invite by email)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"role\": \"MEMBER\"\n}"
+            },
+            "url": "{{baseUrl}}/organizations/{{organizationId}}/members"
+          },
+          "description": "Invite-by-email only — there is no explicit-userId variant. Requires the caller to be an active OWNER or ADMIN of the org. If {{memberEmail}} already belongs to an existing user, that account is added as-is (name untouched) — otherwise a new, unverified account is created (email_verified_at stays null until proven via Auth — Member User below). Grants no platform role. role only accepts ADMIN or MEMBER — there is no way to grant OWNER here. Adding a genuinely new member is checked against the org's plan team-member limit — returns 403 PLAN_LIMIT_REACHED once at the plan's teamMembers cap (ACTIVE + INVITED both count). A brand-new org's FREE plan defaults to teamMembers: 1 (DEFAULT_FREE_TEAM_MEMBERS), and the OWNER already occupies that one seat — so this very first invite can 403 immediately on a fresh org. Confirmed live: this needs a real commerce.plan_subscriptions row for the org with a higher teamMembers to get past it (see the Zameens — Commerce & Payments collection's Admin — plan catalog / checkout flow for the real purchase path — there's no dev seed script for this yet). Run this BEFORE Auth — Member User."
+        },
+        {
+          "name": "Accept membership (as member user)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{memberAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/organizations/{{organizationId}}/members/me/accept"
+          },
+          "description": "Run as the invited user, not the org owner — uses {{memberAccessToken}} (from Auth — Member User), not the collection default {{accessToken}}. The only path that moves a membership from INVITED to ACTIVE."
+        },
+        {
+          "name": "Remove member",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/organizations/{{organizationId}}/members/{{memberUserId}}"
+          },
+          "description": "Requires the caller to be an active OWNER or ADMIN of the org (and OWNER specifically to remove another OWNER). Blocks with 400 LAST_OWNER if the target is the org's only active owner. For an admin override that bypasses the OWNER/ADMIN requirement (and can also reactivate a REMOVED member), see Admin — Members / Update member status."
+        }
+      ]
+    },
+    {
+      "name": "Admin — Organizations",
+      "item": [
+        {
+          "name": "List organizations",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/admin/organizations?status=PENDING&page=1&limit=20"
+          },
+          "description": "Platform-wide, not scoped to the caller's own memberships (unlike My organizations above) — PENDING and SUSPENDED organizations are visible here too. Filters: search, name, type, slug, phone, email, gstNumber, reraNumber, status."
+        },
+        {
+          "name": "Organization detail",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}"
+          },
+          "description": "Same as Organization details above but bypasses its active-membership visibility gate, so a PENDING or SUSPENDED organization can be reviewed before/without approving it. Also inlines a members array (user/role/status/joinedAt per member) — the public detail response never includes this, and List members above would 403 an admin who isn't themselves a member."
+        },
+        {
+          "name": "Approve organization",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Documents verified\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/approve"
+          },
+          "description": "PENDING → ACTIVE. 409 INVALID_TRANSITION if not currently PENDING."
+        },
+        {
+          "name": "Suspend organization",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"GST number could not be verified\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/suspend"
+          },
+          "description": "PENDING or ACTIVE → SUSPENDED (doubles as rejecting a pending org — there's no separate REJECTED status in this schema). reason is required. 409 INVALID_TRANSITION if already SUSPENDED."
+        },
+        {
+          "name": "Reinstate organization",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Compliance review complete\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/reinstate"
+          },
+          "description": "SUSPENDED → ACTIVE. 409 INVALID_TRANSITION if not currently SUSPENDED."
+        }
+      ]
+    },
+    {
+      "name": "Admin — Members",
+      "item": [
+        {
+          "name": "Update member status",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"REMOVED\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/members/{{memberUserId}}/status"
+          },
+          "description": "Sets a member's status directly to ACTIVE, INVITED, or REMOVED, bypassing the org's own OWNER/ADMIN requirement entirely (unlike Remove member above). Unlike Remove member, this can also reactivate a REMOVED member straight to ACTIVE/INVITED with no fresh invite-accept cycle and no team-member seat-limit re-check — a deliberate admin override. Still blocks 400 LAST_OWNER if the target is the org's only active OWNER and the new status isn't ACTIVE. There's no SUSPENDED member status distinct from REMOVED without a schema migration."
+        }
+      ]
+    }
+  ]
+}

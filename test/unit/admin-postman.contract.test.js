@@ -45,6 +45,8 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "POST {{baseUrl}}/admin/listings/{{listingId}}/suspend",
     "POST {{baseUrl}}/admin/listings/{{listingId}}/reinstate",
     "DELETE {{baseUrl}}/admin/listings/{{listingId}}/media/{{mediaId}}",
+    "GET {{baseUrl}}/admin/listings/bulk-upload/template",
+    "POST {{baseUrl}}/admin/listings/bulk-upload",
     "GET {{baseUrl}}/admin/verifications",
     "GET {{baseUrl}}/admin/verifications/{{verificationId}}",
     "PATCH {{baseUrl}}/admin/verifications/{{verificationId}}",
@@ -100,7 +102,12 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "PUT {{baseUrl}}/admin/ads/{{adId}}/media/order",
     "PUT {{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}/cover",
     "DELETE {{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}",
-    "PATCH {{baseUrl}}/admin/organizations/{{organizationId}}/status"
+    "GET {{baseUrl}}/admin/organizations",
+    "GET {{baseUrl}}/admin/organizations/{{organizationId}}",
+    "POST {{baseUrl}}/admin/organizations/{{organizationId}}/approve",
+    "POST {{baseUrl}}/admin/organizations/{{organizationId}}/suspend",
+    "POST {{baseUrl}}/admin/organizations/{{organizationId}}/reinstate",
+    "PATCH {{baseUrl}}/admin/organizations/{{organizationId}}/members/{{memberUserId}}/status"
   ];
 
   assert.deepEqual([...signatures].sort(), expected.sort());

@@ -132,21 +132,90 @@ export const listMineQuery = query => ({
   role: optionalEnumFilter(query.role, memberRoles, "ROLE", "OWNER, ADMIN, or MEMBER")
 });
 
-export const organizationStatus = body => {
-  const status = trimmed(body.status).toUpperCase();
-  if (!orgStatuses.has(status)) {
-    const message = "status must be PENDING, ACTIVE, or SUSPENDED.";
+// Same filter shape as listMineQuery, minus `role` — that filter only makes
+// sense against the caller's own membership row, which this platform-wide
+// admin listing has none of.
+export const adminListQuery = query => ({
+  search: optionalFilterText(query.search, 255),
+  name: optionalFilterText(query.name, 255),
+  type: optionalEnumFilter(
+    query.type,
+    orgTypes,
+    "TYPE",
+    "BROKERAGE, DEVELOPER, CORPORATE, or AGENCY"
+  ),
+  slug: optionalFilterText(query.slug, 255),
+  phone: optionalFilterText(query.phone, 20),
+  email: optionalFilterText(query.email, 255)?.toLowerCase() ?? null,
+  gstNumber: optionalFilterText(query.gstNumber, 30),
+  reraNumber: optionalFilterText(query.reraNumber, 100),
+  status: optionalEnumFilter(
+    query.status,
+    orgStatuses,
+    "STATUS",
+    "PENDING, ACTIVE, or SUSPENDED"
+  )
+});
+
+// approve/reinstate — note is an optional audit annotation, not required to
+// justify the action (mirrors channel-partners.validation.js#adminPartnerAction).
+export const adminOrgAction = body => ({
+  note: optionalText(body?.note, 1000, "NOTE")
+});
+
+// suspend — reason is required, since it's the punitive/blocking action
+// (mirrors channel-partners.validation.js#actionReason).
+export const actionReason = body => {
+  const reason = trimmed(body?.reason);
+  if (reason.length < 3 || reason.length > 1000) {
+    const message = "reason must be 3-1000 characters.";
+    throw new HttpError(400, "INVALID_REASON", message, [{ field: "reason", message }]);
+  }
+  return { reason };
+};
+
+// Only ADMIN/MEMBER, not OWNER — this is the only way to add a member (there
+// is no explicit-userId path), and ownership was never meant to be handed
+// out through a plain "add someone" call; the org creator becomes OWNER
+// automatically (organizations.repository.js#createWithOwner) and any
+// further ownership change is a deliberate, separate action this endpoint
+// doesn't currently expose.
+const inviteMemberRoles = new Set(["ADMIN", "MEMBER"]);
+
+export const addMember = body => {
+  const email = trimmed(body.email).toLowerCase();
+  if (!emailPattern.test(email)) {
+    const message = "email must be a valid email address.";
+    throw new HttpError(400, "INVALID_EMAIL", message, [{ field: "email", message }]);
+  }
+  const firstName = trimmed(body.firstName);
+  if (!firstName || firstName.length > 100) {
+    const message = "firstName is required and must be at most 100 characters.";
+    throw new HttpError(400, "INVALID_FIRST_NAME", message, [{ field: "firstName", message }]);
+  }
+  const lastName = trimmed(body.lastName);
+  if (!lastName || lastName.length > 100) {
+    const message = "lastName is required and must be at most 100 characters.";
+    throw new HttpError(400, "INVALID_LAST_NAME", message, [{ field: "lastName", message }]);
+  }
+  const role = trimmed(body.role).toUpperCase();
+  if (!inviteMemberRoles.has(role)) {
+    const message = "role must be ADMIN or MEMBER.";
+    throw new HttpError(400, "INVALID_ROLE", message, [{ field: "role", message }]);
+  }
+  return { role, invite: { email, firstName, lastName } };
+};
+
+const memberStatuses = new Set(["ACTIVE", "INVITED", "REMOVED"]);
+
+// Admin-only — sets a member's status directly to any of the 3 values the
+// schema supports (account.organization_members.status CHECK constraint).
+// There's no SUSPENDED distinct from REMOVED without a schema migration.
+export const memberStatus = body => {
+  const status = trimmed(body?.status).toUpperCase();
+  if (!memberStatuses.has(status)) {
+    const message = "status must be ACTIVE, INVITED, or REMOVED.";
     throw new HttpError(400, "INVALID_STATUS", message, [{ field: "status", message }]);
   }
   return status;
-};
-
-export const addMember = body => {
-  const userId = uuid(body.userId, "userId");
-  const role = trimmed(body.role).toUpperCase();
-  if (!memberRoles.has(role)) {
-    const message = "role must be OWNER, ADMIN, or MEMBER.";
-    throw new HttpError(400, "INVALID_ROLE", message, [{ field: "role", message }]);
-  }
-  return { userId, role };
 };

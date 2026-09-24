@@ -92,6 +92,58 @@ export const listForUser = (userId, filters, { limit, offset }) =>
     [...listForUserParams(userId, filters), limit, offset]
   );
 
+// Platform-wide listing for admin review — unlike listForUser above, this is
+// not scoped to the caller's own memberships (no organization_members join),
+// so a PENDING organization is visible here even though the public get()'s
+// membership-gated visibility (organizations.service.js#get) would 404 it
+// for anyone who isn't already an active member.
+const listAdminFilters = `
+     WHERE o.deleted_at IS NULL
+       AND ($1::varchar IS NULL OR o.name ILIKE $1 OR o.slug ILIKE $1 OR o.phone ILIKE $1 OR o.email ILIKE $1 OR o.gst_number ILIKE $1 OR o.rera_number ILIKE $1)
+       AND ($2::varchar IS NULL OR o.name ILIKE $2)
+       AND ($3::varchar IS NULL OR o.type = $3)
+       AND ($4::varchar IS NULL OR o.slug ILIKE $4)
+       AND ($5::varchar IS NULL OR o.phone ILIKE $5)
+       AND ($6::varchar IS NULL OR o.email ILIKE $6)
+       AND ($7::varchar IS NULL OR o.gst_number ILIKE $7)
+       AND ($8::varchar IS NULL OR o.rera_number ILIKE $8)
+       AND ($9::varchar IS NULL OR o.status = $9)`;
+
+const listAdminParams = ({ search, name, type, slug, phone, email, gstNumber, reraNumber, status }) => [
+  search ? `%${search}%` : null,
+  name ? `%${name}%` : null,
+  type || null,
+  slug ? `%${slug}%` : null,
+  phone ? `%${phone}%` : null,
+  email ? `%${email}%` : null,
+  gstNumber ? `%${gstNumber}%` : null,
+  reraNumber ? `%${reraNumber}%` : null,
+  status || null
+];
+
+export const listAdmin = (filters, { limit, offset }) =>
+  run(
+    "any",
+    `SELECT ${organizationColumns}, created_at AS "createdAt", created_by_user_id AS "createdByUserId",
+            count(*) OVER()::int AS total
+     FROM account.organizations o
+     ${listAdminFilters}
+     ORDER BY o.created_at DESC
+     LIMIT $10 OFFSET $11`,
+    [...listAdminParams(filters), limit, offset]
+  );
+
+// Admin detail lookup — same row shape as findById but exposes createdAt and
+// createdByUserId (findById's organizationColumns intentionally omits these
+// from the public/self-service response shape).
+export const findByIdForAdmin = id =>
+  run(
+    "oneOrNone",
+    `SELECT ${organizationColumns}, created_at AS "createdAt", created_by_user_id AS "createdByUserId"
+     FROM account.organizations WHERE id = $1 AND deleted_at IS NULL`,
+    [id]
+  );
+
 export const update = (id, changes) =>
   pg.updateWhere({
     table: "account.organizations",
@@ -101,13 +153,19 @@ export const update = (id, changes) =>
     returning: organizationColumns
   });
 
-export const setStatus = (id, status) =>
+// validStatuses gates the transition atomically in the WHERE clause (not a
+// separate read-then-write) so two concurrent admin actions on the same org
+// can't race past a stale status check — mirrors
+// channel-partners.repository.js#setStatus. Returns null (not a thrown
+// error) when the current status isn't in validStatuses, which the caller
+// turns into a 409 INVALID_TRANSITION.
+export const setStatus = ({ organizationId, status, validStatuses }) =>
   run(
     "oneOrNone",
-    `UPDATE account.organizations SET status = $2
-     WHERE id = $1 AND deleted_at IS NULL
+    `UPDATE account.organizations SET status = $2, updated_at = now()
+     WHERE id = $1 AND deleted_at IS NULL AND status = ANY($3::varchar[])
      RETURNING ${organizationColumns}`,
-    [id, status]
+    [organizationId, status, validStatuses]
   );
 
 export const audit = ({ actorId, action, entityId, before, after, ip, requestId }) =>
@@ -151,6 +209,35 @@ export const findUserSummary = userId =>
     `SELECT id, display_name AS "name", phone_e164 AS "phone", email
      FROM auth.users WHERE id = $1 AND deleted_at IS NULL`,
     [userId]
+  );
+
+// email is citext (case-insensitive), matching how auth.users' own unique
+// index treats it.
+export const findUserByEmail = email =>
+  run(
+    "oneOrNone",
+    `SELECT id, display_name AS "name", phone_e164 AS "phone", email
+     FROM auth.users WHERE email = $1 AND deleted_at IS NULL`,
+    [email]
+  );
+
+// Unverified — email_verified_at stays NULL, unlike
+// auth.repository.js#createUser (always called right after that destination's
+// own OTP was just verified). Here the *inviter* typed this email, not the
+// invitee, so nothing has actually verified it yet; the invitee proves it
+// themselves later via their own OTP login (auth.service.js#requestOtp
+// matches them by destination and attaches their existing id to the
+// challenge, so verifyOtp reuses this row rather than creating a duplicate).
+// ON CONFLICT DO NOTHING + null return mirrors createUser's own race-losing
+// path — the caller re-looks-up by email when this returns null.
+export const createInvitedUser = ({ email, firstName, lastName }) =>
+  run(
+    "oneOrNone",
+    `INSERT INTO auth.users (email, first_name, last_name, display_name)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT DO NOTHING
+     RETURNING id, display_name AS "name", phone_e164 AS "phone", email`,
+    [email, firstName, lastName, `${firstName} ${lastName}`.trim()]
   );
 
 // addMember and removeMember both take a per-organization advisory lock
@@ -261,4 +348,35 @@ export const removeMember = (organizationId, userId) =>
       [organizationId, userId]
     );
     return { removed, reason: null };
+  });
+
+// Admin-only generic status setter — unlike removeMember above (self-service,
+// ACTIVE/INVITED -> REMOVED only, gated on the org's own OWNER/ADMIN), this
+// allows any existing row to move to any of the 3 valid statuses, including
+// REMOVED -> ACTIVE/INVITED (reactivation with no fresh invite-accept cycle,
+// and deliberately not re-checked against the plan's team-member seat limit
+// the way addMember's own REMOVED -> INVITED re-invite path is — this is an
+// admin override, not a self-service seat purchase). Still enforces the one
+// invariant that must hold no matter who's acting: an org can't be left with
+// zero active owners.
+export const setMemberStatus = (organizationId, userId, status) =>
+  runTx(async t => {
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [organizationMembershipLockKey(organizationId)]);
+    const before = await t.oneOrNone(
+      `SELECT role, status FROM account.organization_members WHERE organization_id = $1 AND user_id = $2`,
+      [organizationId, userId]
+    );
+    if (!before) return { membership: null, before: null, reason: "NOT_FOUND" };
+    if (before.role === "OWNER" && before.status === "ACTIVE" && status !== "ACTIVE") {
+      const owners = await activeOwnerCount(t, organizationId);
+      if (owners.count <= 1) return { membership: null, before, reason: "LAST_OWNER" };
+    }
+    const membership = await t.one(
+      `UPDATE account.organization_members
+       SET status = $3, joined_at = CASE WHEN $3 = 'ACTIVE' AND joined_at IS NULL THEN now() ELSE joined_at END
+       WHERE organization_id = $1 AND user_id = $2
+       RETURNING role, status, joined_at AS "joinedAt"`,
+      [organizationId, userId, status]
+    );
+    return { membership, before, reason: null };
   });

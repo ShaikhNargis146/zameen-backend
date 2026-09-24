@@ -12,7 +12,7 @@
     {
       "key": "adminAccessToken",
       "value": "",
-      "description": "Bearer token for a user with the ADMIN role. Obtain via /auth/otp/verify with an admin account."
+      "description": "Bearer token for a user with the ADMIN role. Obtain via /auth/otp/verify with an admin account — but there's no self-service path to become one first (users.validation.js#selfRole explicitly blocks self-assigning ADMIN, same as CHANNEL_PARTNER). The account must already have the role granted directly in the DB: INSERT INTO auth.user_roles (user_id, role_id) SELECT '<user id>', id FROM auth.roles WHERE code = 'ADMIN'. Roles are re-resolved fresh from the DB on every /auth/refresh too, not just /auth/otp/verify, so refreshing an existing session also picks up a role granted after the fact — no full re-login required."
     },
     {
       "key": "adId",
@@ -46,6 +46,11 @@
     {
       "key": "organizationId",
       "value": ""
+    },
+    {
+      "key": "memberUserId",
+      "value": "",
+      "description": "id of a user who is (or was) a member of {{organizationId}}, for Admin — update member status."
     },
     {
       "key": "partnerId",
@@ -400,6 +405,32 @@
               "raw": "{\n  \"reason\": \"Compliance review complete, listing reinstated.\"\n}"
             },
             "url": "{{baseUrl}}/admin/listings/{{listingId}}/reinstate"
+          }
+        },
+        {
+          "name": "Admin — bulk upload template",
+          "request": {
+            "method": "GET",
+            "description": "Downloads a blank CSV template (correct headers/columns) for bulk listing import.",
+            "url": "{{baseUrl}}/admin/listings/bulk-upload/template"
+          }
+        },
+        {
+          "name": "Admin — bulk upload listings",
+          "request": {
+            "method": "POST",
+            "description": "Multipart upload of a filled-in CSV (field name `file`). .csv only, max 10MB — rejects with INVALID_FILE_TYPE or FILE_TOO_LARGE otherwise.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/admin/listings/bulk-upload"
           }
         }
       ]
@@ -1123,9 +1154,26 @@
       "name": "Organizations (extra)",
       "item": [
         {
-          "name": "Change organization status (admin)",
+          "name": "Admin — list organizations",
           "request": {
-            "method": "PATCH",
+            "method": "GET",
+            "description": "Platform-wide listing, not scoped to the caller's own memberships (unlike GET /organizations/me) — so PENDING and SUSPENDED organizations are visible here too, which the member-gated public GET /organizations/{organizationId} would otherwise 404 for a non-member admin. Filters: search, name, type, slug, phone, email, gstNumber, reraNumber, status.",
+            "url": "{{baseUrl}}/admin/organizations?status=PENDING&page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin — organization detail",
+          "request": {
+            "method": "GET",
+            "description": "Same as the public GET /organizations/{organizationId} but bypasses its active-membership visibility gate, so a PENDING or SUSPENDED organization can be reviewed before/without approving it. Also inlines a `members` array (user, role, status, joinedAt for each) — the public detail response never includes this, and the dedicated GET /organizations/{organizationId}/members endpoint would 403 an admin who isn't themselves a member.",
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}"
+          }
+        },
+        {
+          "name": "Admin — approve organization",
+          "request": {
+            "method": "POST",
+            "description": "PENDING → ACTIVE. Fails with 409 INVALID_TRANSITION if the organization isn't currently PENDING.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1134,9 +1182,63 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"SUSPENDED\"\n}"
+              "raw": "{\n  \"note\": \"Documents verified\"\n}"
             },
-            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/status"
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/approve"
+          }
+        },
+        {
+          "name": "Admin — suspend organization",
+          "request": {
+            "method": "POST",
+            "description": "PENDING or ACTIVE → SUSPENDED (there's no separate REJECTED status, so this doubles as rejecting a pending organization). reason is required. Fails with 409 INVALID_TRANSITION if the organization is already SUSPENDED.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"GST number could not be verified\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/suspend"
+          }
+        },
+        {
+          "name": "Admin — reinstate organization",
+          "request": {
+            "method": "POST",
+            "description": "SUSPENDED → ACTIVE. Fails with 409 INVALID_TRANSITION if the organization isn't currently SUSPENDED.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Compliance review complete\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/reinstate"
+          }
+        },
+        {
+          "name": "Admin — update member status",
+          "request": {
+            "method": "PATCH",
+            "description": "Admin-only: sets an organization member's status directly to ACTIVE, INVITED, or REMOVED, bypassing the org's own OWNER/ADMIN requirement (unlike the self-service Remove member request under Organizations). Unlike Remove member, this can also reactivate a REMOVED member straight to ACTIVE/INVITED with no fresh invite-accept cycle and no team-member seat-limit re-check — a deliberate admin override. Still blocks 400 LAST_OWNER if the target is the org's only active OWNER and the new status isn't ACTIVE. There's no SUSPENDED status distinct from REMOVED without a schema migration.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"REMOVED\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/organizations/{{organizationId}}/members/{{memberUserId}}/status"
           }
         }
       ]
