@@ -1,6 +1,6 @@
 # Subscription Entitlements — Registration, Enforcement & Plan-Change Audit
 
-**Status (2026-09-22):** Audit of branch `FWD-Payment-gateway`. Originally written as a read-only analysis; **§D1 and the listing-approval gap it's paired with were since fixed** (see [`subscription-entitlements-changes-summary.md`](./subscription-entitlements-changes-summary.md) §6, Critical 1 and Critical 2) — this version reflects that. Every other row below is unchanged from the original analysis and still reflects the current code, re-verified.
+**Status (2026-09-25):** Audit of branch `FWD-Payment-gateway`. Originally written as a read-only analysis; **§D1 and the listing-approval gap it's paired with were since fixed** (see [`subscription-entitlements-changes-summary.md`](./subscription-entitlements-changes-summary.md) §6, Critical 1 and Critical 2), and **§D3 (period-counters were calendar-month scoped, not renewal-anchored) has since been fixed too** — see `src/shared/usageCycle.js`. Every other row below is unchanged from the original analysis and still reflects the current code, re-verified.
 
 > **Note:** this file was found missing from disk partway through a follow-up turn — recreated here with the resolutions applied. If you have an earlier copy, this version supersedes it.
 
@@ -65,9 +65,15 @@ The raw (non-fallback) lookup is kept for exactly two callers that need to know 
 
 Unchanged from the original finding. These reflect current DB state against whichever plan is active *right now* — no reset needed. Enforcement runs only when something new is added; a downgrade that puts an owner over a new, lower limit doesn't retroactively remove existing resources. Confirmed still true after Critical 2's approval-side fix — that fix closes the *submit-then-approve* race, it doesn't change the grandfathering behavior for existing published listings.
 
-### D3. Period-counters (AI quota, featured-listing allowance) — calendar-month scoped, not reset by a plan change mid-month
+### D3. 🔧 Resolved — period-counters (AI quota, featured-listing allowance, contact unlocks) now reset on plan renewal, not just the calendar month
 
-Unchanged. Both `ai.usage_events` and `commerce.subscription_usage` are scoped by wall-clock calendar month via `date_trunc`, independent of which plan was active when each unit of usage happened — a mid-month upgrade doesn't reset usage already counted against the new, larger quota. No explicit reset job exists or is needed; a new calendar month naturally excludes prior rows from the `WHERE` clause.
+**Original finding:** both `ai.usage_events` and `commerce.subscription_usage` were scoped by wall-clock calendar month via `date_trunc('month', now())`, independent of which plan was active when each unit of usage happened — a mid-month purchase/upgrade/renewal never reset anything; the owner kept whatever they'd already used against the 1st-of-the-month bucket.
+
+**Fix:** `src/shared/usageCycle.js#resolveUsageCycle` anchors the MONTHLY period to the owner's (or, for a pooled feature, the organization's) *current* `commerce.plan_subscriptions.starts_at` instead of the calendar month, rolling forward one whole month at a time from that anchor (clamped for month-end overflow, e.g. a plan that started on the 31st). `capturePaymentAndApplyEntitlements` already inserts a brand-new row with `starts_at = now` for every purchase, upgrade, *and* renewal (never mutates an existing row's `starts_at`) — anchoring to that column is what makes "usage resets on renewal, at any time" fall out automatically, with no explicit reset job: the new anchor simply doesn't match any `period_start` a prior cycle wrote, so the counter starts fresh at 0 under the new key, the moment the new plan row exists.
+
+Threaded through every MONTHLY consumer: `commerce.repository.js#consumeUsageWithinTx`/`countSubscriptionUsageThisPeriod` (featured listings, contact unlocks), `ai.repository.js#reserveAiQuotaUsage`/`countMonthlyUsageForUser` (AI quota, personal or org-pooled). For an org-pooled feature (AI quota, featured listings), the anchor is the *organization's* own active plan row, so a renewal by any member resets the shared pool for every member reading it — not just the member who happened to renew it. `features.contactUnlocksLifetime` (FREE tier) is unaffected — it was never period-scoped to begin with (see `LIFETIME_PERIOD` in `commerce.repository.js`).
+
+The ambient last-resort fallback (no real subscription row to anchor to at all — e.g. PLAN_FREE itself unseeded) still falls back to the plain calendar month, same as before — there's no subscription instance to anchor to in that narrow edge case.
 
 ---
 
@@ -78,6 +84,6 @@ Unchanged. Both `ai.usage_events` and `commerce.subscription_usage` are scoped b
 | Registration → plan allocation | Solid. Only the dev-only demo seed script bypasses it. |
 | Per-feature tracking/enforcement | Solid for every numeric limit, now including approval-side listing enforcement. Boolean feature gating is unused scaffolding; `verificationIncluded` remains unenforced. |
 | Plan flexibility | Works via "buy a product" only — no admin override (still a gap), no self-service downgrade (by design). |
-| Usage reset on plan change | **The lapsed-paid-plan gap (D1) is now fixed.** Live-count limits and period-counters behave as originally analyzed — both confirmed intentional/acceptable. |
+| Usage reset on plan change | **D1 (lapsed-paid-plan fallback) and D3 (period-counters now reset on renewal, not just the calendar month) are both fixed.** Live-count limits (D2) remain intentionally not retroactive. |
 
 **Still open, not addressed this session:** A7 (demo seed bypass, dev-only), B8 (`verificationIncluded` never enforced), C7 (no admin plan-assignment override).

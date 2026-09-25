@@ -3,15 +3,18 @@ import test from "node:test";
 
 import { pg } from "../../src/shared/db.js";
 import {
+  DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME,
   DEFAULT_FREE_LISTING_LIMIT,
   DEFAULT_FREE_TEAM_MEMBERS,
   assertFeature,
+  consumeContactUnlock,
   grantFeaturedListing,
   grantFreePlan,
   resolveListingLimit,
   resolveMediaLimits,
   resolveTeamMemberLimit
 } from "../../src/modules/commerce/entitlements.service.js";
+import { resolveUsageCycle } from "../../src/shared/usageCycle.js";
 
 test("Free-tier fallback constants match the plan's documented defaults", () => {
   assert.equal(DEFAULT_FREE_LISTING_LIMIT, 2);
@@ -409,11 +412,17 @@ test("grantFeaturedListing returns alreadyFeatured: true without touching the us
   assert.equal(usageTouched, false);
 });
 
-test("grantFeaturedListing consumes one unit and grants the FEATURED promotion for the plan's featuredDays, in the same transaction", async () => {
+test("grantFeaturedListing consumes one unit and grants the FEATURED promotion for the plan's featuredDays, in the same transaction, anchored to this owner's own plan starts_at (not the calendar month)", async () => {
   const calls = [];
+  const planStartsAt = "2026-08-13T08:15:00.000Z";
+  const now = new Date("2026-09-20T00:00:00.000Z");
+  const { periodStart, periodEnd } = resolveUsageCycle({ anchorStartsAt: planStartsAt, now });
   await withPgStubs(
     {
-      oneOrNone: async () => ({ ok: true, data: { features: { featuredListingsPerMonth: 2 }, featuredDays: 15 } }),
+      oneOrNone: async () => ({
+        ok: true,
+        data: { features: { featuredListingsPerMonth: 2 }, featuredDays: 15, startsAt: planStartsAt }
+      }),
       tx: async fn => {
         const data = await fn({
           any: async (query, params) => {
@@ -424,18 +433,10 @@ test("grantFeaturedListing consumes one unit and grants the FEATURED promotion f
           none: async (query, params) => {
             calls.push(["none", query, params]);
             assert.match(query, /INSERT INTO commerce\.subscription_usage/);
-            assert.deepEqual(params, [
-              "user-1",
-              null,
-              "FEATURED_LISTINGS",
-              "2026-09-01T00:00:00.000Z",
-              "2026-10-01T00:00:00.000Z"
-            ]);
+            assert.deepEqual(params, ["user-1", null, "FEATURED_LISTINGS", periodStart, periodEnd]);
           },
           one: async (query, params) => {
             calls.push(["one", query, params]);
-            if (/date_trunc/.test(query))
-              return { periodStart: "2026-09-01T00:00:00.000Z", periodEnd: "2026-10-01T00:00:00.000Z" };
             assert.match(query, /INSERT INTO marketplace\.listing_promotions/);
             assert.match(query, /'FEATURED'/);
             assert.deepEqual(params, ["listing-1", 15]);
@@ -447,13 +448,52 @@ test("grantFeaturedListing consumes one unit and grants the FEATURED promotion f
       }
     },
     async () => {
-      const result = await grantFeaturedListing({ userId: "user-1", organizationId: null }, "listing-1");
+      const result = await grantFeaturedListing({ userId: "user-1", organizationId: null }, "listing-1", { now });
       assert.deepEqual(result, { promotion: { id: "promotion-1", endsAt: "2026-10-07T00:00:00.000Z" }, alreadyFeatured: false });
     }
   );
   // Usage lock+count+write happens before the promotion insert, both in the same tx.
   assert.equal(calls[0][0], "any");
   assert.match(calls.at(-1)[1], /INSERT INTO marketplace\.listing_promotions/);
+});
+
+// The exact scenario "usage resets on renewal" exists for: two otherwise
+// identical requests, only the owner's plan starts_at differs (a renewal
+// happened in between) -- the SAME calendar day, but the featured-listings
+// usage ledger keys on a different period_start for each, so the renewed
+// owner's counter starts fresh at 0 instead of inheriting whatever the
+// pre-renewal owner had already used this calendar month.
+test("grantFeaturedListing keys the usage period on the owner's CURRENT plan starts_at, so a same-day renewal opens a distinct (fresh) usage period from the one before it", async () => {
+  const now = new Date("2026-09-20T12:00:00.000Z");
+  const beforeRenewal = resolveUsageCycle({ anchorStartsAt: "2026-08-01T00:00:00.000Z", now });
+  const afterRenewal = resolveUsageCycle({ anchorStartsAt: "2026-09-20T09:00:00.000Z", now }); // renewed hours earlier, same day
+  assert.notDeepEqual(beforeRenewal.periodStart, afterRenewal.periodStart);
+
+  let insertedPeriodStart;
+  await withPgStubs(
+    {
+      oneOrNone: async () => ({
+        ok: true,
+        data: { features: { featuredListingsPerMonth: 2 }, featuredDays: 15, startsAt: "2026-09-20T09:00:00.000Z" }
+      }),
+      tx: async fn => {
+        const data = await fn({
+          any: async () => {},
+          none: async (query, params) => {
+            insertedPeriodStart = params[3];
+          },
+          one: async () => ({ id: "promotion-1", endsAt: "2026-10-07T00:00:00.000Z" }),
+          oneOrNone: grantFeaturedListingTxOneOrNoneStub({ alreadyFeatured: null, usageRow: null })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      await grantFeaturedListing({ userId: "user-1", organizationId: null }, "listing-1", { now });
+    }
+  );
+  assert.deepEqual(insertedPeriodStart, afterRenewal.periodStart);
+  assert.notDeepEqual(insertedPeriodStart, beforeRenewal.periodStart);
 });
 
 test("grantFeaturedListing preserves an explicitly-configured featuredDays of 0 rather than falling back to the 30-day default", async () => {
@@ -507,4 +547,225 @@ test("grantFeaturedListing returns promotion: null, alreadyFeatured: false once 
     }
   );
   assert.equal(promotionInsertAttempted, false);
+});
+
+// ---------------------------------------------------------------------------
+// consumeContactUnlock — resolved through the BUYER's own personal plan
+// (never resolveEffectivePlanForOwner/an org), since a contact unlock is
+// spent by whoever does the unlocking, not the listing's owner. FREE uses a
+// lifetime cap (contactUnlocksLifetime); PRO/BUSINESS a monthly allowance
+// (contactUnlocksPerMonth) via the same consumeUsageWithinTx machinery
+// featured listings already uses, keyed under feature "CONTACT_UNLOCKS".
+// ---------------------------------------------------------------------------
+
+// Dispatches the transaction-scoped oneOrNone lookups consumeContactUnlock's
+// repository transaction can issue -- the already-unlocked check first, then
+// (only if not already unlocked and a limit is set) the usage-period lookup.
+const contactUnlockTxOneOrNoneStub = ({ alreadyUnlocked = null, usageRow = null }) => async query => {
+  if (/FROM marketplace\.contact_unlocks/.test(query)) return alreadyUnlocked;
+  assert.match(query, /FROM commerce\.subscription_usage/);
+  return usageRow;
+};
+
+test("consumeContactUnlock returns alreadyUnlocked: true without touching the usage ledger when this buyer already unlocked this listing", async () => {
+  let usageTouched = false;
+  await withPgStubs(
+    {
+      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksLifetime: 5 } } }),
+      tx: async fn => {
+        const data = await fn({
+          any: async () => {},
+          none: async () => {
+            usageTouched = true;
+            throw new Error("must not write anything once already unlocked");
+          },
+          one: async () => {
+            usageTouched = true;
+            throw new Error("must not reach any t.one call once already unlocked");
+          },
+          oneOrNone: contactUnlockTxOneOrNoneStub({ alreadyUnlocked: { id: "unlock-1" } })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      const result = await consumeContactUnlock("user-1", "listing-1");
+      assert.deepEqual(result, { unlocked: true, alreadyUnlocked: true });
+    }
+  );
+  assert.equal(usageTouched, false);
+});
+
+test("consumeContactUnlock on the FREE plan consumes one unit of the lifetime cap on a genuinely new unlock", async () => {
+  const calls = [];
+  await withPgStubs(
+    {
+      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksLifetime: 5 } } }),
+      tx: async fn => {
+        const data = await fn({
+          any: async (query, params) => {
+            calls.push(["any", query, params]);
+          },
+          none: async (query, params) => {
+            calls.push(["none", query, params]);
+          },
+          one: async () => {
+            throw new Error("LIFETIME mode must not query date_trunc for a calendar period");
+          },
+          oneOrNone: contactUnlockTxOneOrNoneStub({ alreadyUnlocked: null, usageRow: null })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      const result = await consumeContactUnlock("user-1", "listing-1");
+      assert.deepEqual(result, { unlocked: true, alreadyUnlocked: false });
+    }
+  );
+  // Usage insert (lifetime period) happens before the contact_unlocks record insert.
+  const noneCalls = calls.filter(([kind]) => kind === "none");
+  assert.match(noneCalls[0][1], /INSERT INTO commerce\.subscription_usage/);
+  assert.deepEqual(noneCalls[0][2], [
+    "user-1",
+    null,
+    "CONTACT_UNLOCKS",
+    new Date(0),
+    new Date("9999-12-31T23:59:59.000Z")
+  ]);
+  assert.match(noneCalls[1][1], /INSERT INTO marketplace\.contact_unlocks/);
+  assert.deepEqual(noneCalls[1][2], ["listing-1", "user-1"]);
+});
+
+test("consumeContactUnlock throws PLAN_LIMIT_REACHED once the FREE plan's lifetime cap is exhausted, without recording an unlock", async () => {
+  let unlockRecorded = false;
+  await withPgStubs(
+    {
+      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksLifetime: 5 } } }),
+      tx: async fn => {
+        const data = await fn({
+          any: async () => {},
+          none: async query => {
+            unlockRecorded = true;
+            throw new Error(`must not write once the cap is exhausted: ${query}`);
+          },
+          one: async () => {
+            throw new Error("LIFETIME mode must not query date_trunc");
+          },
+          oneOrNone: contactUnlockTxOneOrNoneStub({ alreadyUnlocked: null, usageRow: { id: "usage-1", usedCount: 5 } })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      await assert.rejects(consumeContactUnlock("user-1", "listing-1"), error => {
+        assert.equal(error.status, 403);
+        assert.equal(error.code, "PLAN_LIMIT_REACHED");
+        assert.deepEqual(error.details, { feature: "CONTACT_UNLOCKS", used: 5, limit: 5, upgradeRequired: true });
+        return true;
+      });
+    }
+  );
+  assert.equal(unlockRecorded, false);
+});
+
+test("consumeContactUnlock on a PRO/BUSINESS plan uses the monthly allowance (contactUnlocksPerMonth), anchored to this buyer's own plan starts_at, not the lifetime cap or the calendar month", async () => {
+  const planStartsAt = "2026-09-05T00:00:00.000Z";
+  const now = new Date("2026-09-20T00:00:00.000Z");
+  const { periodStart, periodEnd } = resolveUsageCycle({ anchorStartsAt: planStartsAt, now });
+  let usageInsertParams;
+  await withPgStubs(
+    {
+      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksPerMonth: 50 }, startsAt: planStartsAt } }),
+      tx: async fn => {
+        const data = await fn({
+          any: async () => {},
+          none: async (query, params) => {
+            if (/INSERT INTO commerce\.subscription_usage/.test(query)) usageInsertParams = params;
+          },
+          one: async () => {
+            throw new Error("consumeContactUnlock must never issue a t.one call");
+          },
+          oneOrNone: contactUnlockTxOneOrNoneStub({ alreadyUnlocked: null, usageRow: null })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      const result = await consumeContactUnlock("user-1", "listing-1", { now });
+      assert.deepEqual(result, { unlocked: true, alreadyUnlocked: false });
+    }
+  );
+  assert.deepEqual(usageInsertParams, ["user-1", null, "CONTACT_UNLOCKS", periodStart, periodEnd]);
+});
+
+// Mirrors the featured-listings renewal test above: same feature
+// (CONTACT_UNLOCKS, MONTHLY mode), same calendar day, only the buyer's own
+// plan starts_at differs (they renewed) -- the usage ledger must key on the
+// new anchor, so the renewed buyer's allowance starts fresh at 0.
+test("consumeContactUnlock's MONTHLY allowance keys on the buyer's CURRENT plan starts_at, so renewing mid-cycle opens a fresh contact-unlock period", async () => {
+  const now = new Date("2026-09-20T12:00:00.000Z");
+  const beforeRenewal = resolveUsageCycle({ anchorStartsAt: "2026-08-01T00:00:00.000Z", now });
+  const afterRenewal = resolveUsageCycle({ anchorStartsAt: "2026-09-20T09:00:00.000Z", now });
+  assert.notDeepEqual(beforeRenewal.periodStart, afterRenewal.periodStart);
+
+  let usageInsertParams;
+  await withPgStubs(
+    {
+      oneOrNone: async () => ({
+        ok: true,
+        data: { features: { contactUnlocksPerMonth: 50 }, startsAt: "2026-09-20T09:00:00.000Z" }
+      }),
+      tx: async fn => {
+        const data = await fn({
+          any: async () => {},
+          none: async (query, params) => {
+            if (/INSERT INTO commerce\.subscription_usage/.test(query)) usageInsertParams = params;
+          },
+          one: async () => {},
+          oneOrNone: contactUnlockTxOneOrNoneStub({ alreadyUnlocked: null, usageRow: null })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      await consumeContactUnlock("user-1", "listing-1", { now });
+    }
+  );
+  assert.deepEqual(usageInsertParams[3], afterRenewal.periodStart);
+  assert.notDeepEqual(usageInsertParams[3], beforeRenewal.periodStart);
+});
+
+test("consumeContactUnlock falls back to DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME when the owner has no active plan at all (FREE not seeded)", async () => {
+  await withPgStubs(
+    {
+      oneOrNone: async query => {
+        if (/ps\.user_id = \$1 AND ps\.organization_id IS NULL/.test(query)) return { ok: true, data: null };
+        if (/pr\.code = 'PLAN_FREE'/.test(query)) return { ok: true, data: null };
+        return { ok: true, data: null };
+      },
+      tx: async fn => {
+        const data = await fn({
+          any: async () => {},
+          none: async () => {},
+          one: async () => {
+            throw new Error("LIFETIME mode must not query date_trunc");
+          },
+          oneOrNone: contactUnlockTxOneOrNoneStub({ alreadyUnlocked: null, usageRow: { id: "usage-1", usedCount: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME } })
+        });
+        return { ok: true, data, error: null };
+      }
+    },
+    async () => {
+      await assert.rejects(consumeContactUnlock("user-1", "listing-1"), error => {
+        assert.equal(error.code, "PLAN_LIMIT_REACHED");
+        assert.deepEqual(error.details, {
+          feature: "CONTACT_UNLOCKS",
+          used: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME,
+          limit: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME,
+          upgradeRequired: true
+        });
+        return true;
+      });
+    }
+  );
 });

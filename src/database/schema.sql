@@ -505,6 +505,18 @@ CREATE INDEX idx_marketplace_listing_events_listing ON marketplace.listing_event
 CREATE INDEX idx_marketplace_listing_events_user ON marketplace.listing_events(user_id, created_at DESC) WHERE user_id IS NOT NULL;
 CREATE INDEX idx_marketplace_listing_events_type ON marketplace.listing_events(event_type, created_at DESC);
 
+-- Source of truth for "has this buyer already unlocked this listing's
+-- contact" (see migrations/019_contact_unlock_entitlements.sql) -- distinct
+-- from listing_events' unconstrained CONTACT_REVEAL analytics rows above, so
+-- a repeat view of an already-unlocked listing doesn't consume another unit
+-- of the buyer's plan-based contact-unlock allowance.
+CREATE TABLE marketplace.contact_unlocks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (listing_id, user_id)
+);
+CREATE INDEX idx_marketplace_contact_unlocks_user ON marketplace.contact_unlocks(user_id);
+
 CREATE TABLE marketplace.buyer_requirements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   name varchar(255), location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT,

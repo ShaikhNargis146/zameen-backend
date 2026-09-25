@@ -4,6 +4,15 @@ import test from "node:test";
 import { pg } from "../../src/shared/db.js";
 import { DEFAULT_FREE_AI_MONTHLY_QUOTA, search } from "../../src/modules/ai/ai.service.js";
 import * as aiRepository from "../../src/modules/ai/ai.repository.js";
+import { resolveUsageCycle } from "../../src/shared/usageCycle.js";
+
+// Fixed anchor/now pair reused by the anchored-period tests below so
+// expected period_start values are deterministic instead of depending on the
+// real wall clock — see src/shared/usageCycle.js for why the period is
+// anchored to the owner's plan starts_at rather than the calendar month.
+const anchorStartsAt = new Date("2026-08-13T08:15:00.000Z");
+const now = new Date("2026-09-20T00:00:00.000Z");
+const { periodStart } = resolveUsageCycle({ anchorStartsAt, now });
 
 test("the ambient Free tier (no active plan_subscription row) defaults to 5/month", () => {
   assert.equal(DEFAULT_FREE_AI_MONTHLY_QUOTA, 5);
@@ -52,9 +61,9 @@ test("reserving a personal quota slot takes a per-user advisory lock, counts onl
       if (/SELECT count\(\*\)/.test(query)) {
         assert.match(query, /FROM ai\.usage_events/);
         assert.match(query, /user_id = \$1 AND organization_id IS NULL/);
-        assert.match(query, /reserved_at >= date_trunc\('month', now\(\)\)/);
+        assert.match(query, /reserved_at >= \$2/);
         assert.match(query, /confirmed_at IS NOT NULL OR reserved_at > now\(\) - interval '5 minutes'/);
-        assert.deepEqual(params, ["user-1"]);
+        assert.deepEqual(params, ["user-1", periodStart]);
         return { used: 2 };
       }
       assert.match(query, /INSERT INTO ai\.usage_events \(user_id, organization_id, kind\)/);
@@ -67,7 +76,9 @@ test("reserving a personal quota slot takes a per-user advisory lock, counts onl
       userId: "user-1",
       organizationId: null,
       quota: 5,
-      kind: "CHAT"
+      kind: "CHAT",
+      anchorStartsAt,
+      now
     });
     assert.equal(id, "reservation-1");
   });
@@ -86,7 +97,8 @@ test("reserving an org quota slot locks on the organization, counts every member
       if (/SELECT count\(\*\)/.test(query)) {
         assert.match(query, /organization_id = \$1/);
         assert.doesNotMatch(query, /user_id = \$1/);
-        assert.deepEqual(params, ["org-1"]);
+        assert.match(query, /reserved_at >= \$2/);
+        assert.deepEqual(params, ["org-1", periodStart]);
         return { used: 3 };
       }
       assert.match(query, /INSERT INTO ai\.usage_events \(user_id, organization_id, kind\)/);
@@ -99,7 +111,9 @@ test("reserving an org quota slot locks on the organization, counts every member
       userId: "user-1",
       organizationId: "org-1",
       quota: 10,
-      kind: "CHAT"
+      kind: "CHAT",
+      anchorStartsAt,
+      now
     });
     assert.equal(id, "reservation-2");
   });
@@ -158,12 +172,29 @@ test("countMonthlyUsageForUser is a read-only, personal-scope count — never us
     async (query, params) => {
       assert.match(query, /FROM ai\.usage_events/);
       assert.match(query, /user_id = \$1 AND organization_id IS NULL/);
-      assert.deepEqual(params, ["user-1"]);
+      assert.match(query, /reserved_at >= \$2/);
+      assert.deepEqual(params, ["user-1", periodStart]);
       return { ok: true, data: { count: 4 } };
     },
     async () => {
-      const count = await aiRepository.countMonthlyUsageForUser("user-1");
+      const count = await aiRepository.countMonthlyUsageForUser("user-1", { anchorStartsAt, now });
       assert.equal(count, 4);
+    }
+  );
+});
+
+test("countMonthlyUsageForUser with no anchor (ambient FREE fallback with no real subscription row) counts against the calendar month", async () => {
+  const fixedNow = new Date("2026-09-20T00:00:00.000Z");
+  const { periodStart: calendarMonthStart } = resolveUsageCycle({ anchorStartsAt: null, now: fixedNow });
+  await withStub(
+    "one",
+    async (query, params) => {
+      assert.deepEqual(params, ["user-1", calendarMonthStart]);
+      return { ok: true, data: { count: 1 } };
+    },
+    async () => {
+      const count = await aiRepository.countMonthlyUsageForUser("user-1", { now: fixedNow });
+      assert.equal(count, 1);
     }
   );
 });

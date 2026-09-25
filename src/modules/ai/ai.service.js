@@ -97,7 +97,13 @@ const reserveAiQuota = async (actorId, kind, organizationId = null) => {
     userId: actorId,
     organizationId: orgId,
     quota,
-    kind
+    kind,
+    // Anchors this pool's monthly quota to its own plan's starts_at (the
+    // org's, when pooled; otherwise the caller's own) rather than the
+    // wall-clock calendar month -- undefined when `active` is null (no
+    // active row and PLAN_FREE itself unseeded), which resolveUsageCycle
+    // treats as its own last-resort calendar-month fallback.
+    anchorStartsAt: active?.startsAt
   });
   if (reservationId === null)
     throw new HttpError(

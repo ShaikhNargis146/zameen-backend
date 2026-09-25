@@ -8,6 +8,7 @@ import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
 import * as notifications from "../notifications/notifications.service.js";
+import * as entitlements from "../commerce/entitlements.service.js";
 import * as repository from "./enquiries.repository.js";
 import { uuid } from "./enquiries.validation.js";
 
@@ -230,6 +231,8 @@ export const contactReveal = async ({
   if (!sellerInfo)
     throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
 
+  const { alreadyUnlocked } = await entitlements.consumeContactUnlock(actorId, listingId);
+
   // Atomic: two concurrent "reveal contact" calls (e.g. a double-clicked
   // CTA) must not both see no open enquiry and both create one.
   let enquiry;
@@ -266,6 +269,7 @@ export const contactReveal = async ({
     email: sellerInfo.email,
     whatsappE164: sellerInfo.phoneE164,
     organizationName: sellerInfo.organizationName,
-    leadCreated
+    leadCreated,
+    alreadyUnlocked
   };
 };

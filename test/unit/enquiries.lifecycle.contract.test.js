@@ -12,6 +12,20 @@ test("revealing seller contact info links the buyer's earlier unlinked site visi
   assert.doesNotMatch(contactReveal, /repository\.insert\(/);
 });
 
+test("revealing contact goes through the plan's contact-unlock allowance before any enquiry/lead is created", async () => {
+  const service = await readFile(
+    new URL("../../src/modules/enquiries/enquiries.service.js", import.meta.url),
+    "utf8"
+  );
+  const contactReveal = service.slice(service.indexOf("export const contactReveal"));
+  assert.match(contactReveal, /entitlements\.consumeContactUnlock\(/);
+  assert.ok(
+    contactReveal.indexOf("entitlements.consumeContactUnlock(") <
+      contactReveal.indexOf("findOrCreateEnquiryForContactReveal("),
+    "the plan-limit check must run before the enquiry/lead is created, so a PLAN_LIMIT_REACHED rejection leaves no side effect"
+  );
+});
+
 test("a seller cannot enquire on or contact-reveal their own listing", async () => {
   const service = await readFile(
     new URL("../../src/modules/enquiries/enquiries.service.js", import.meta.url),

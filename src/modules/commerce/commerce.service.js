@@ -18,7 +18,7 @@ import * as organizationsRepository from "../organizations/organizations.reposit
 import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./commerce.repository.js";
 import { DEFAULT_FREE_AI_MONTHLY_QUOTA } from "../ai/ai.service.js";
-import { DEFAULT_FREE_LISTING_LIMIT } from "./entitlements.service.js";
+import { DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME, DEFAULT_FREE_LISTING_LIMIT } from "./entitlements.service.js";
 import { renderInvoicePdf } from "./invoice.pdf.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
 import { splitGstMinor } from "./tax.js";
@@ -188,7 +188,11 @@ const FREE_PLAN_DEFAULTS = {
   listingLimit: DEFAULT_FREE_LISTING_LIMIT,
   featuredDays: null,
   verificationIncluded: false,
-  features: {},
+  // contactUnlocksLifetime mirrors entitlements.service.js#consumeContactUnlock's
+  // own DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME fallback -- without it, this
+  // display path would report contactUnlocks as unlimited (limit: null) while
+  // enforcement still caps it at 5, the moment PLAN_FREE itself isn't seeded.
+  features: { contactUnlocksLifetime: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME },
   isActive: true,
   aiMonthlyQuota: DEFAULT_FREE_AI_MONTHLY_QUOTA
 };
@@ -204,16 +208,43 @@ const limitBlock = (used, limit) =>
 // Org dashboards (a channel-partner/org-admin view of an org's own
 // plan/usage) are a parallel, out-of-scope-for-now endpoint — see
 // docs/subscription-entitlements-implementation-plan.md §7.
-export const mySubscription = async actorId => {
+export const mySubscription = async (actorId, { now } = {}) => {
   const active = await repository.resolveEffectivePlanForUser(actorId);
   const plan = active ? toPlan(active) : FREE_PLAN_DEFAULTS;
-  const [listingsUsed, aiUsed, featuredUsed] = await Promise.all([
+  // contactUnlocksLifetime (FREE) vs contactUnlocksPerMonth (PRO/BUSINESS) --
+  // see entitlements.service.js#consumeContactUnlock for why these are two
+  // distinct feature keys with different reset semantics.
+  const hasContactLifetimeLimit =
+    plan.features.contactUnlocksLifetime !== null && plan.features.contactUnlocksLifetime !== undefined;
+  const contactUnlockLimit = hasContactLifetimeLimit
+    ? plan.features.contactUnlocksLifetime
+    : (plan.features.contactUnlocksPerMonth ?? null);
+  const contactUnlockPeriodMode = hasContactLifetimeLimit ? "LIFETIME" : "MONTHLY";
+  // Anchors every MONTHLY counter below to this user's own current plan's
+  // starts_at (undefined when active is the ambient FREE_PLAN_DEFAULTS
+  // fallback, which has no real subscription instance to anchor to --
+  // resolveUsageCycle falls back to the calendar month there, same
+  // last-resort behavior as everywhere else) -- see
+  // entitlements.service.js#consumeContactUnlock/grantFeaturedListing, which
+  // enforce against this exact same anchor.
+  const anchorStartsAt = active?.startsAt;
+  const [listingsUsed, aiUsed, featuredUsed, contactUnlocksUsed] = await Promise.all([
     listingsRepository.countLiveForOwner({ userId: actorId, organizationId: null }),
-    aiRepository.countMonthlyUsageForUser(actorId),
+    aiRepository.countMonthlyUsageForUser(actorId, { anchorStartsAt, now }),
     repository.countSubscriptionUsageThisPeriod({
       userId: actorId,
       organizationId: null,
-      feature: "FEATURED_LISTINGS"
+      feature: "FEATURED_LISTINGS",
+      anchorStartsAt,
+      now
+    }),
+    repository.countSubscriptionUsageThisPeriod({
+      userId: actorId,
+      organizationId: null,
+      feature: "CONTACT_UNLOCKS",
+      periodMode: contactUnlockPeriodMode,
+      anchorStartsAt,
+      now
     })
   ]);
   return {
@@ -227,7 +258,8 @@ export const mySubscription = async actorId => {
       imagesPerProperty: { limit: plan.features.imagesPerProperty ?? null },
       videosPerProperty: { limit: plan.features.videosPerProperty ?? null },
       featuredListings: limitBlock(featuredUsed, plan.features.featuredListingsPerMonth ?? null),
-      aiQueries: limitBlock(aiUsed, plan.aiMonthlyQuota)
+      aiQueries: limitBlock(aiUsed, plan.aiMonthlyQuota),
+      contactUnlocks: limitBlock(contactUnlocksUsed, contactUnlockLimit)
     }
   };
 };

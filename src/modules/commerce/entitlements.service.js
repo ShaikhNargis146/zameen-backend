@@ -10,6 +10,7 @@ import * as listingsRepository from "../listings/listings.repository.js";
 // exercised in steady state.
 export const DEFAULT_FREE_LISTING_LIMIT = 2;
 export const DEFAULT_FREE_TEAM_MEMBERS = 1;
+export const DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME = 5;
 
 const featureLabels = {
   advancedAnalytics: "Advanced analytics",
@@ -110,7 +111,7 @@ export const assertFeature = async ({ userId, organizationId }, key) => {
 // "consume" + "grant" pair of calls: those would commit as two independent
 // transactions, and a failure in the second could permanently consume the
 // allowance with nothing actually featured.
-export const grantFeaturedListing = async (owner, listingId) => {
+export const grantFeaturedListing = async (owner, listingId, { now } = {}) => {
   const active = await repository.resolveEffectivePlanForOwner(owner);
   const limit = active?.features?.featuredListingsPerMonth;
   if (!limit) {
@@ -125,8 +126,69 @@ export const grantFeaturedListing = async (owner, listingId) => {
     // ?? not || -- an admin-configured featuredDays of 0 is a valid,
     // distinct value (schema only rejects negative), and must not be
     // treated the same as "not set".
-    featuredDays: active.featuredDays ?? 30
+    featuredDays: active.featuredDays ?? 30,
+    // Anchors this owner's monthly allowance to their CURRENT plan's own
+    // starts_at (see src/shared/usageCycle.js) rather than the wall-clock
+    // calendar month, so a purchase/upgrade/renewal at any time immediately
+    // opens a fresh allowance with nothing carried over from before.
+    anchorStartsAt: active.startsAt,
+    now
   });
+};
+
+// Consumes one unit of the acting buyer's own personal contact-unlock
+// allowance for this specific listing, or confirms it's already unlocked
+// (free re-reveal) -- see commerce.repository.js#consumeContactUnlock for
+// the atomic already-unlocked-check + consume + record transaction.
+//
+// Resolved through the buyer's OWN plan (resolveEffectivePlanForUser, not
+// resolveEffectivePlanForOwner/an organizationId) -- unlike listings/media/
+// team-members, which are entitlements of the resource owner (seller), a
+// contact unlock is spent by whoever is doing the unlocking (the buyer), and
+// every plan in this catalog is described in seller terms ("individual
+// sellers", "brokerages managing a team") with no separate buyer-org
+// concept, so there is no pooling case to resolve here, matching how AI
+// quota defaults to the caller's own personal plan absent an explicit
+// organizationId.
+//
+// FREE's cap is a lifetime total (features.contactUnlocksLifetime) since the
+// FREE plan itself never expires/resets (see grantFreePlan); PRO/BUSINESS
+// are a monthly allowance (features.contactUnlocksPerMonth), consistent with
+// every other "N per month" feature. A plan with neither key set (limit
+// null) is treated as unlimited, same convention as every other resolveXLimit
+// in this file.
+export const consumeContactUnlock = async (actorId, listingId, { now } = {}) => {
+  const active = await repository.resolveEffectivePlanForUser(actorId);
+  // No active row AND no seeded FREE catalog row either (liveFreeTierPlan
+  // found nothing) -- fall back to the ambient Free-tier default rather than
+  // treating a missing seed as "unlimited", matching resolveListingLimit/
+  // resolveTeamMemberLimit's fallback convention above.
+  const features = active?.features || {};
+  const lifetimeLimit = active ? features.contactUnlocksLifetime : DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME;
+  const hasLifetimeLimit = lifetimeLimit !== null && lifetimeLimit !== undefined;
+  const limit = hasLifetimeLimit ? lifetimeLimit : (features.contactUnlocksPerMonth ?? null);
+  const periodMode = hasLifetimeLimit ? "LIFETIME" : "MONTHLY";
+
+  const result = await repository.consumeContactUnlock({
+    userId: actorId,
+    listingId,
+    limit,
+    periodMode,
+    // Irrelevant for LIFETIME mode (never resets), but anchors a MONTHLY
+    // allowance (PRO/BUSINESS's contactUnlocksPerMonth) to this buyer's own
+    // current plan's starts_at, same renewal-resets-usage rule as every
+    // other periodic feature -- see grantFeaturedListing above.
+    anchorStartsAt: active?.startsAt,
+    now
+  });
+  if (!result.unlocked)
+    throw new HttpError(
+      403,
+      "PLAN_LIMIT_REACHED",
+      "You've used all your contact unlocks for this plan. Upgrade to unlock more contacts.",
+      { feature: "CONTACT_UNLOCKS", used: limit, limit, upgradeRequired: true }
+    );
+  return result;
 };
 
 // Materializes an explicit FREE commerce.plan_subscriptions row for a user

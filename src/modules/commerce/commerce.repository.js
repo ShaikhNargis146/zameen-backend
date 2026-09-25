@@ -1,4 +1,5 @@
 import { pg, run } from "../../shared/db.js";
+import { resolveUsageCycle } from "../../shared/usageCycle.js";
 import { splitGstMinor, stateCodeFromGstin } from "./tax.js";
 
 const runTx = async fn => {
@@ -174,12 +175,30 @@ export const grantPlanDirectly = ({ userId, organizationId, planId, startsAt, en
 // namespaced by feature so this ledger and a future second feature never
 // contend on the same advisory lock. Returns true if the unit was consumed,
 // false if the period was already at limit.
-const consumeUsageWithinTx = async (t, { userId, organizationId, feature, limit }) => {
+// LIFETIME_PERIOD gives a feature that never resets (e.g. the FREE plan's
+// contact-unlock cap -- see consumeContactUnlock below) a fixed period_start
+// so it reuses this same ledger/lock/count machinery instead of a parallel
+// code path, rather than a real calendar boundary.
+const LIFETIME_PERIOD = {
+  periodStart: new Date(0),
+  periodEnd: new Date("9999-12-31T23:59:59.000Z")
+};
+
+// anchorStartsAt is the owner's CURRENT plan_subscriptions.starts_at (passed
+// down from entitlements.service.js, which already resolved the active plan
+// to read its limit) -- resolveUsageCycle anchors the MONTHLY period to it
+// instead of the wall-clock calendar month, so a purchase/upgrade/renewal at
+// any time immediately opens a fresh period with nothing carried over (see
+// src/shared/usageCycle.js's header for why). `now` is accepted explicitly,
+// mirroring computePlanEndsAt's own `now` parameter, purely for
+// deterministic testing -- real callers never need to pass it.
+const consumeUsageWithinTx = async (
+  t,
+  { userId, organizationId, feature, limit, periodMode = "MONTHLY", anchorStartsAt = null, now = new Date() }
+) => {
   const lockKey = `${feature}:${organizationId || userId}`;
   await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
-  const period = await t.one(
-    `SELECT date_trunc('month', now()) AS "periodStart", date_trunc('month', now()) + interval '1 month' AS "periodEnd"`
-  );
+  const period = periodMode === "LIFETIME" ? LIFETIME_PERIOD : resolveUsageCycle({ anchorStartsAt, now });
   const existing = await t.oneOrNone(
     organizationId
       ? `SELECT id, used_count AS "usedCount" FROM commerce.subscription_usage
@@ -207,8 +226,8 @@ const consumeUsageWithinTx = async (t, { userId, organizationId, feature, limit 
 // resolved from commerce.plans.features. Standalone entry point for a
 // feature whose entitlement *is* the counter itself, with no second write
 // needed (unlike featured listings below).
-export const consumeSubscriptionUsage = ({ userId, organizationId, feature, limit }) =>
-  runTx(t => consumeUsageWithinTx(t, { userId, organizationId, feature, limit }));
+export const consumeSubscriptionUsage = ({ userId, organizationId, feature, limit, anchorStartsAt, now }) =>
+  runTx(t => consumeUsageWithinTx(t, { userId, organizationId, feature, limit, anchorStartsAt, now }));
 
 // Read-only, non-transactional twin of the already-featured check inside
 // grantFeaturedListingFromAllowance's transaction below — used by
@@ -244,7 +263,15 @@ export const isListingFeatured = listingId =>
 // active FEATURED promotion (no usage consumed); { promotion: null,
 // alreadyFeatured: false } if the period's usage is already at the plan's
 // limit; otherwise { promotion: { id, endsAt }, alreadyFeatured: false }.
-export const grantFeaturedListingFromAllowance = ({ userId, organizationId, limit, listingId, featuredDays }) =>
+export const grantFeaturedListingFromAllowance = ({
+  userId,
+  organizationId,
+  limit,
+  listingId,
+  featuredDays,
+  anchorStartsAt,
+  now
+}) =>
   runTx(async t => {
     const alreadyFeatured = await t.oneOrNone(
       `SELECT id FROM marketplace.listing_promotions
@@ -257,7 +284,9 @@ export const grantFeaturedListingFromAllowance = ({ userId, organizationId, limi
       userId,
       organizationId,
       feature: "FEATURED_LISTINGS",
-      limit
+      limit,
+      anchorStartsAt,
+      now
     });
     if (!consumed) return { promotion: null, alreadyFeatured: false };
     const promotion = await t.one(
@@ -269,19 +298,84 @@ export const grantFeaturedListingFromAllowance = ({ userId, organizationId, limi
     return { promotion, alreadyFeatured: false };
   });
 
+// Atomically resolves "has this buyer already unlocked this listing's
+// contact" and, if not, consumes one unit of their plan's contact-unlock
+// allowance and records the unlock -- see
+// entitlements.service.js#consumeContactUnlock. Combined into one
+// transaction (already-unlocked check, usage consume, and the unlock record
+// insert) for the same reason grantFeaturedListingFromAllowance above does:
+// two independently-committed writes could let a double-tap consume two
+// allowance units for one listing, or let two concurrent first-time reveals
+// of the same listing both pass the already-unlocked check before either
+// commits.
+//
+// periodMode is "LIFETIME" for the FREE plan's 5-lifetime cap and "MONTHLY"
+// for PRO/BUSINESS's N-per-month allowance (see consumeUsageWithinTx's
+// LIFETIME_PERIOD above) -- resolved by the caller from which feature key is
+// present on the plan (contactUnlocksLifetime vs contactUnlocksPerMonth).
+//
+// Returns { unlocked: true, alreadyUnlocked: true } (no usage consumed) if
+// this buyer already unlocked this exact listing before; { unlocked: true,
+// alreadyUnlocked: false } if this is a genuinely new unlock and the plan
+// has room for it (or has no limit configured at all -- limit null/undefined
+// means unlimited, same convention as every other resolveXLimit in this
+// codebase); { unlocked: false, alreadyUnlocked: false } once the period's
+// allowance is exhausted.
+export const consumeContactUnlock = ({ userId, listingId, limit, periodMode, anchorStartsAt, now }) =>
+  runTx(async t => {
+    const lockKey = `CONTACT_UNLOCKS:${userId}`;
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+    const already = await t.oneOrNone(
+      `SELECT id FROM marketplace.contact_unlocks WHERE listing_id = $1 AND user_id = $2`,
+      [listingId, userId]
+    );
+    if (already) return { unlocked: true, alreadyUnlocked: true };
+    if (limit !== null && limit !== undefined) {
+      const consumed = await consumeUsageWithinTx(t, {
+        userId,
+        organizationId: null,
+        feature: "CONTACT_UNLOCKS",
+        limit,
+        periodMode,
+        anchorStartsAt,
+        now
+      });
+      if (!consumed) return { unlocked: false, alreadyUnlocked: false };
+    }
+    await t.none(
+      `INSERT INTO marketplace.contact_unlocks (listing_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [listingId, userId]
+    );
+    return { unlocked: true, alreadyUnlocked: false };
+  });
+
 // Read-only current-period usage count for display (e.g. GET /me/subscription)
 // — never used for enforcement, which always goes through
-// consumeUsageWithinTx's locked read-then-write above.
-export const countSubscriptionUsageThisPeriod = ({ userId, organizationId, feature }) =>
-  run(
+// consumeUsageWithinTx's locked read-then-write above. periodMode mirrors
+// consumeContactUnlock's -- "LIFETIME" reads the same fixed period_start
+// LIFETIME_PERIOD.periodStart writes to, "MONTHLY" (default) reads whichever
+// renewal-anchored cycle resolveUsageCycle resolves `anchorStartsAt`/`now`
+// to, same as every other metered feature (see consumeUsageWithinTx above).
+export const countSubscriptionUsageThisPeriod = ({
+  userId,
+  organizationId,
+  feature,
+  periodMode = "MONTHLY",
+  anchorStartsAt,
+  now
+}) => {
+  const periodStart =
+    periodMode === "LIFETIME" ? LIFETIME_PERIOD.periodStart : resolveUsageCycle({ anchorStartsAt, now }).periodStart;
+  return run(
     "oneOrNone",
     organizationId
       ? `SELECT used_count AS "usedCount" FROM commerce.subscription_usage
-         WHERE organization_id = $1 AND feature = $2 AND period_start = date_trunc('month', now())`
+         WHERE organization_id = $1 AND feature = $2 AND period_start = $3`
       : `SELECT used_count AS "usedCount" FROM commerce.subscription_usage
-         WHERE user_id = $1 AND feature = $2 AND period_start = date_trunc('month', now())`,
-    [organizationId || userId, feature]
+         WHERE user_id = $1 AND feature = $2 AND period_start = $3`,
+    [organizationId || userId, feature, periodStart]
   ).then(row => row?.usedCount || 0);
+};
 
 export const createPlan = ({
   code,

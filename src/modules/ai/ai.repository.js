@@ -1,4 +1,5 @@
 import { pg, run } from "../../shared/db.js";
+import { resolveUsageCycle } from "../../shared/usageCycle.js";
 
 const runTx = async fn => {
   const result = await pg.tx(fn);
@@ -56,17 +57,21 @@ export const messages = conversationId =>
     [conversationId]
   );
 
-// Read-only current-month usage count for display (GET /me/subscription) —
+// Read-only current-period usage count for display (GET /me/subscription) —
 // never used for enforcement, which always goes through reserveAiQuotaUsage's
-// locked read-then-write below.
-export const countMonthlyUsageForUser = userId =>
-  run(
+// locked read-then-write below. anchorStartsAt/now mirror reserveAiQuotaUsage's
+// own params -- see src/shared/usageCycle.js for why the period is anchored
+// to the owner's plan starts_at rather than the wall-clock calendar month.
+export const countMonthlyUsageForUser = (userId, { anchorStartsAt, now } = {}) => {
+  const { periodStart } = resolveUsageCycle({ anchorStartsAt, now });
+  return run(
     "one",
     `SELECT count(*)::int AS count FROM ai.usage_events
-     WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= date_trunc('month', now())
+     WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= $2
        AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
-    [userId]
+    [userId, periodStart]
   ).then(row => row.count);
+};
 
 // Atomically reserves one unit of monthly AI quota, from one of two mutually
 // exclusive pools: the calling user's own personal quota (organizationId
@@ -80,19 +85,20 @@ export const countMonthlyUsageForUser = userId =>
 // together — two requests started at once against a quota of 1 can't both
 // pass the count check before either's reservation lands. Returns the
 // reservation id, or null if quota is already used up.
-export const reserveAiQuotaUsage = ({ userId, organizationId, quota, kind }) =>
+export const reserveAiQuotaUsage = ({ userId, organizationId, quota, kind, anchorStartsAt, now }) =>
   runTx(async t => {
     const lockKey = organizationId || userId;
     await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+    const { periodStart } = resolveUsageCycle({ anchorStartsAt, now });
     const usage = await t.one(
       organizationId
         ? `SELECT count(*)::int AS used FROM ai.usage_events
-           WHERE organization_id = $1 AND reserved_at >= date_trunc('month', now())
+           WHERE organization_id = $1 AND reserved_at >= $2
              AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`
         : `SELECT count(*)::int AS used FROM ai.usage_events
-           WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= date_trunc('month', now())
+           WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= $2
              AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
-      [lockKey]
+      [lockKey, periodStart]
     );
     if (usage.used >= quota) return null;
     const row = await t.one(
