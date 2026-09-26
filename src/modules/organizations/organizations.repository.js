@@ -211,33 +211,33 @@ export const findUserSummary = userId =>
     [userId]
   );
 
-// email is citext (case-insensitive), matching how auth.users' own unique
-// index treats it.
-export const findUserByEmail = email =>
+// Matches auth.users' own unique partial index on phone_e164 (excluding
+// soft-deleted rows).
+export const findUserByPhone = phone =>
   run(
     "oneOrNone",
     `SELECT id, display_name AS "name", phone_e164 AS "phone", email
-     FROM auth.users WHERE email = $1 AND deleted_at IS NULL`,
-    [email]
+     FROM auth.users WHERE phone_e164 = $1 AND deleted_at IS NULL`,
+    [phone]
   );
 
-// Unverified — email_verified_at stays NULL, unlike
+// Unverified — phone_verified_at stays NULL, unlike
 // auth.repository.js#createUser (always called right after that destination's
-// own OTP was just verified). Here the *inviter* typed this email, not the
+// own OTP was just verified). Here the *inviter* typed this number, not the
 // invitee, so nothing has actually verified it yet; the invitee proves it
 // themselves later via their own OTP login (auth.service.js#requestOtp
 // matches them by destination and attaches their existing id to the
 // challenge, so verifyOtp reuses this row rather than creating a duplicate).
 // ON CONFLICT DO NOTHING + null return mirrors createUser's own race-losing
-// path — the caller re-looks-up by email when this returns null.
-export const createInvitedUser = ({ email, firstName, lastName }) =>
+// path — the caller re-looks-up by phone when this returns null.
+export const createInvitedUser = ({ phone, firstName, lastName }) =>
   run(
     "oneOrNone",
-    `INSERT INTO auth.users (email, first_name, last_name, display_name)
+    `INSERT INTO auth.users (phone_e164, first_name, last_name, display_name)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT DO NOTHING
      RETURNING id, display_name AS "name", phone_e164 AS "phone", email`,
-    [email, firstName, lastName, `${firstName} ${lastName}`.trim()]
+    [phone, firstName, lastName, `${firstName} ${lastName}`.trim()]
   );
 
 // addMember and removeMember both take a per-organization advisory lock

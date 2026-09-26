@@ -223,7 +223,7 @@
 					]
 				},
 				{
-					"name": "Request OTP (Member \u2014 email)",
+					"name": "Request OTP (Member \u2014 phone)",
 					"request": {
 						"method": "POST",
 						"auth": {
@@ -237,11 +237,11 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"destination\": \"{{memberEmail}}\",\n  \"channel\": \"EMAIL\",\n  \"purpose\": \"LOGIN\"\n}"
+							"raw": "{\n  \"destination\": \"{{memberPhone}}\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\"\n}"
 						},
 						"url": "{{baseUrl}}/auth/otp/request"
 					},
-					"description": "Run Members / Add member (invite by email) first \u2014 this logs in as the account that invite just created (or reused) for {{memberEmail}}.",
+					"description": "Run Members / Add member (invite by phone) first \u2014 this logs in as the account that invite just created (or reused) for {{memberPhone}}.",
 					"event": [
 						{
 							"listen": "test",
@@ -1499,7 +1499,7 @@
 					"description": "Requires the caller to already be an active member of the org (any role) \u2014 this is what 403s a non-member admin, see Admin \u2014 Organizations / Organization detail for the workaround."
 				},
 				{
-					"name": "Add member (invite by email)",
+					"name": "Add member (invite by phone)",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -1510,11 +1510,11 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"role\": \"MEMBER\"\n}"
+							"raw": "{\n  \"phone\": \"{{memberPhone}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"role\": \"MEMBER\"\n}"
 						},
 						"url": "{{baseUrl}}/organizations/{{organizationId}}/members"
 					},
-					"description": "Invite-by-email only \u2014 there is no explicit-userId variant. Requires the caller to be an active OWNER or ADMIN of the org. If {{memberEmail}} already belongs to an existing user, that account is added as-is (name untouched) \u2014 otherwise a new, unverified account is created (email_verified_at stays null until proven via Auth \u2014 Member User below). Grants no platform role. role only accepts ADMIN or MEMBER \u2014 there is no way to grant OWNER here. Adding a genuinely new member is checked against the org's plan team-member limit \u2014 returns 403 PLAN_LIMIT_REACHED once at the plan's teamMembers cap (ACTIVE + INVITED both count). A brand-new org's FREE plan defaults to teamMembers: 1 (DEFAULT_FREE_TEAM_MEMBERS), and the OWNER already occupies that one seat \u2014 so this very first invite can 403 immediately on a fresh org. Confirmed live: this needs a real commerce.plan_subscriptions row for the org with a higher teamMembers to get past it (see the Zameens \u2014 Commerce & Payments collection's Admin \u2014 plan catalog / checkout flow for the real purchase path \u2014 there's no dev seed script for this yet). Run this BEFORE Auth \u2014 Member User."
+					"description": "Invite-by-phone only \u2014 there is no explicit-userId variant. Requires the caller to be an active OWNER or ADMIN of the org. If {{memberPhone}} already belongs to an existing user, that account is added as-is (name untouched) \u2014 otherwise a new, unverified account is created (phone_verified_at stays null until proven via Auth \u2014 Member User below). Grants no platform role. role only accepts ADMIN or MEMBER \u2014 there is no way to grant OWNER here. Adding a genuinely new member is checked against the org's plan team-member limit \u2014 returns 403 PLAN_LIMIT_REACHED once at the plan's teamMembers cap (ACTIVE + INVITED both count). A brand-new org's FREE plan defaults to teamMembers: 1 (DEFAULT_FREE_TEAM_MEMBERS), and the OWNER already occupies that one seat \u2014 so this very first invite can 403 immediately on a fresh org. Confirmed live: this needs a real commerce.plan_subscriptions row for the org with a higher teamMembers to get past it (see the Zameens \u2014 Commerce & Payments collection's Admin \u2014 plan catalog / checkout flow for the real purchase path \u2014 there's no dev seed script for this yet). Run this BEFORE Auth \u2014 Member User."
 				},
 				{
 					"name": "Accept membership (as member user)",
@@ -3576,8 +3576,8 @@
 			"type": "string"
 		},
 		{
-			"key": "memberEmail",
-			"value": "new.hire@example.com",
+			"key": "memberPhone",
+			"value": "+919876543210",
 			"type": "string"
 		},
 		{

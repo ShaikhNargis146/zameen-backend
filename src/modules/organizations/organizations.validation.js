@@ -183,10 +183,10 @@ export const actionReason = body => {
 const inviteMemberRoles = new Set(["ADMIN", "MEMBER"]);
 
 export const addMember = body => {
-  const email = trimmed(body.email).toLowerCase();
-  if (!emailPattern.test(email)) {
-    const message = "email must be a valid email address.";
-    throw new HttpError(400, "INVALID_EMAIL", message, [{ field: "email", message }]);
+  const phone = trimmed(body.phone);
+  if (!e164Pattern.test(phone)) {
+    const message = "phone must be a valid E.164 number.";
+    throw new HttpError(400, "INVALID_PHONE", message, [{ field: "phone", message }]);
   }
   const firstName = trimmed(body.firstName);
   if (!firstName || firstName.length > 100) {
@@ -203,7 +203,7 @@ export const addMember = body => {
     const message = "role must be ADMIN or MEMBER.";
     throw new HttpError(400, "INVALID_ROLE", message, [{ field: "role", message }]);
   }
-  return { role, invite: { email, firstName, lastName } };
+  return { role, invite: { phone, firstName, lastName } };
 };
 
 const memberStatuses = new Set(["ACTIVE", "INVITED", "REMOVED"]);

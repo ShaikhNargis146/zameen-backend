@@ -170,20 +170,20 @@ export const listMembers = async ({ organizationId, actorId }) => {
   return toMemberDtos(await repository.listMembers(organizationId));
 };
 
-// Looks up an existing account by email first — an email that already
+// Looks up an existing account by phone number first — a number that already
 // belongs to someone just invites that existing account as-is, their name is
 // never touched. Only a genuinely new account gets firstName/lastName.
 // Grants no platform role (auth.user_roles) — the invited person self-assigns
 // one later via users.validation.js#selfRole if/when they need one, same as
 // any other self-registered user; this only ever creates the account and the
 // org membership.
-const resolveInvitedUser = async ({ email, firstName, lastName }) => {
-  const existingUser = await repository.findUserByEmail(email);
+const resolveInvitedUser = async ({ phone, firstName, lastName }) => {
+  const existingUser = await repository.findUserByPhone(phone);
   if (existingUser) return existingUser;
-  const created = await repository.createInvitedUser({ email, firstName, lastName });
+  const created = await repository.createInvitedUser({ phone, firstName, lastName });
   if (created) return created;
-  // Lost a create race against a concurrent invite for the same new email.
-  const user = await repository.findUserByEmail(email);
+  // Lost a create race against a concurrent invite for the same new number.
+  const user = await repository.findUserByPhone(phone);
   if (!user)
     throw new HttpError(
       409,
@@ -198,8 +198,8 @@ export const addMember = async ({ organizationId, actorId, role, invite }) => {
   const actorMembership = await requireManager(organizationId, actorId);
   const user = await resolveInvitedUser(invite);
   // role can never literally be "OWNER" (organizations.validation.js#addMember
-  // only allows ADMIN/MEMBER), but the invited email can still resolve to an
-  // EXISTING user who already holds OWNER on this org — changing their role
+  // only allows ADMIN/MEMBER), but the invited phone number can still resolve
+  // to an EXISTING user who already holds OWNER on this org — changing their role
   // away from OWNER still needs the actor to themselves be an OWNER.
   const existing = await repository.findMembership(organizationId, user.id);
   if (existing?.role === "OWNER" && actorMembership.role !== "OWNER")

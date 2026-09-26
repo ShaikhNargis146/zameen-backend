@@ -112,7 +112,7 @@ test("create() still succeeds when the FREE plan isn't seeded yet — the grant 
   );
 });
 
-// addMember() — invite-by-email only (no explicit-userId path). Resolves the
+// addMember() — invite-by-phone only (no explicit-userId path). Resolves the
 // team-member limit unconditionally (not just when the target looks new from
 // an un-locked pre-check) and passes it into repository.addMember, which is
 // the only place that actually enforces it, inside its own locked
@@ -128,14 +128,14 @@ const ownerMembership = {
   status: "ACTIVE",
   joinedAt: "2026-01-01T00:00:00.000Z"
 };
-const newUserSummary = { id: "user-2", name: "Jane Doe", phone: null, email: "new.hire@example.com" };
-const defaultInvite = { email: "new.hire@example.com", firstName: "Jane", lastName: "Doe" };
+const newUserSummary = { id: "user-2", name: "Jane Doe", phone: "+919876543210", email: null };
+const defaultInvite = { phone: "+919876543210", firstName: "Jane", lastName: "Doe" };
 
 const addMemberOneOrNoneStub = ({ targetMembership = null, planFeatures = {} }) => async (query, params) => {
   if (/FROM account\.organizations WHERE id = \$1/.test(query)) return { ok: true, data: activeOrg };
   if (/FROM account\.organization_members WHERE organization_id = \$1 AND user_id = \$2/.test(query))
     return { ok: true, data: params[1] === "actor-1" ? ownerMembership : targetMembership };
-  if (/FROM auth\.users WHERE email = \$1/.test(query)) return { ok: true, data: newUserSummary }; // invite matches an already-registered email
+  if (/FROM auth\.users WHERE phone_e164 = \$1/.test(query)) return { ok: true, data: newUserSummary }; // invite matches an already-registered phone number
   if (/ps\.organization_id = \$1/.test(query)) return { ok: true, data: { features: planFeatures } };
   throw new Error(`unexpected oneOrNone query: ${query}`);
 };
@@ -194,17 +194,17 @@ test("addMember() succeeds and returns the new membership when under the team-me
   );
 });
 
-test("addMember() creates a new unverified account (no platform role granted) when no account exists for that email", async () => {
-  const createdUser = { id: "user-3", name: "Jane Doe", phone: null, email: "new.hire@example.com" };
+test("addMember() creates a new unverified account (no platform role granted) when no account exists for that phone number", async () => {
+  const createdUser = { id: "user-3", name: "Jane Doe", phone: "+919876543210", email: null };
   await withPgStubs(
     {
       oneOrNone: async (query, params) => {
         if (/FROM account\.organizations WHERE id = \$1/.test(query)) return { ok: true, data: activeOrg };
         if (/FROM account\.organization_members WHERE organization_id = \$1 AND user_id = \$2/.test(query))
           return { ok: true, data: params[1] === "actor-1" ? ownerMembership : null };
-        if (/FROM auth\.users WHERE email = \$1/.test(query)) return { ok: true, data: null }; // no existing account
+        if (/FROM auth\.users WHERE phone_e164 = \$1/.test(query)) return { ok: true, data: null }; // no existing account
         if (/INSERT INTO auth\.users/.test(query)) {
-          assert.deepEqual(params, ["new.hire@example.com", "Jane", "Doe", "Jane Doe"]);
+          assert.deepEqual(params, ["+919876543210", "Jane", "Doe", "Jane Doe"]);
           return { ok: true, data: createdUser };
         }
         if (/ps\.organization_id = \$1/.test(query)) return { ok: true, data: { features: { teamMembers: 5 } } };
@@ -233,7 +233,7 @@ test("addMember() creates a new unverified account (no platform role granted) wh
   );
 });
 
-test("addMember() reuses an existing account matched by email, and never creates a duplicate", async () => {
+test("addMember() reuses an existing account matched by phone number, and never creates a duplicate", async () => {
   const existingUser = { id: "user-4", name: "Already Registered", phone: "+919876500009", email: "existing@example.com" };
   let userInsertAttempted = false;
   await withPgStubs(
@@ -242,10 +242,10 @@ test("addMember() reuses an existing account matched by email, and never creates
         if (/FROM account\.organizations WHERE id = \$1/.test(query)) return { ok: true, data: activeOrg };
         if (/FROM account\.organization_members WHERE organization_id = \$1 AND user_id = \$2/.test(query))
           return { ok: true, data: params[1] === "actor-1" ? ownerMembership : null };
-        if (/FROM auth\.users WHERE email = \$1/.test(query)) return { ok: true, data: existingUser };
+        if (/FROM auth\.users WHERE phone_e164 = \$1/.test(query)) return { ok: true, data: existingUser };
         if (/INSERT INTO auth\.users/.test(query)) {
           userInsertAttempted = true;
-          throw new Error("must not create a new account when the email already has one");
+          throw new Error("must not create a new account when the phone number already has one");
         }
         if (/ps\.organization_id = \$1/.test(query)) return { ok: true, data: { features: { teamMembers: 5 } } };
         throw new Error(`unexpected oneOrNone query: ${query}`);
@@ -267,7 +267,7 @@ test("addMember() reuses an existing account matched by email, and never creates
         organizationId: "org-1",
         actorId: "actor-1",
         role: "ADMIN",
-        invite: { email: "existing@example.com", firstName: "Ignored", lastName: "Ignored" }
+        invite: { phone: "+919876500009", firstName: "Ignored", lastName: "Ignored" }
       });
       assert.equal(result.user, existingUser);
     }
@@ -284,8 +284,8 @@ test("addMember() rejects changing an existing OWNER's role when the actor isn't
         if (/FROM account\.organizations WHERE id = \$1/.test(query)) return { ok: true, data: activeOrg };
         if (/FROM account\.organization_members WHERE organization_id = \$1 AND user_id = \$2/.test(query))
           return { ok: true, data: params[1] === "actor-2" ? adminActorMembership : existingOwner };
-        if (/FROM auth\.users WHERE email = \$1/.test(query))
-          return { ok: true, data: { id: "user-5", name: "Existing Owner", phone: null, email: "owner@example.com" } };
+        if (/FROM auth\.users WHERE phone_e164 = \$1/.test(query))
+          return { ok: true, data: { id: "user-5", name: "Existing Owner", phone: "+919876500001", email: null } };
         throw new Error(`unexpected oneOrNone query: ${query}`);
       },
       tx: async () => {
@@ -298,7 +298,7 @@ test("addMember() rejects changing an existing OWNER's role when the actor isn't
           organizationId: "org-1",
           actorId: "actor-2",
           role: "MEMBER",
-          invite: { email: "owner@example.com", firstName: "Existing", lastName: "Owner" }
+          invite: { phone: "+919876500001", firstName: "Existing", lastName: "Owner" }
         }),
         error => {
           assert.equal(error.status, 403);

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zameens — Organizations & Members",
-    "description": "Every organization- and member-lifecycle endpoint in one place — both self-service (organizations.routes.js, run as the org owner or an invited member) and admin-only (organizations.admin.routes.js, run as an ADMIN-role user). Responses use the standard { success, data, meta } / { success, error } envelope.\n\nSuggested run order: Auth — Org Owner (Request OTP → set {{otp}} from the server console → Verify OTP) → Organizations / Create organization → Members / Add member (invite by email) (creates the unverified account for {{memberEmail}}) → Auth — Member User (logs into that same account via email OTP, proving it) → Members / Accept membership (as member user) → Auth — Admin (see that folder's Request OTP description — needs the ADMIN role granted directly in the DB first, no self-service path exists) → Admin — Organizations / Admin — Members as needed.\n\nVerified end-to-end against a real local instance (all 4 self-service org endpoints, 4 member endpoints, 5 admin org endpoints, 1 admin member endpoint, plus the invalid-transition, last-owner, and PLAN_LIMIT_REACHED guards). One inconsistency found along the way, not fixed here: requireAdmin (admin routes) returns 403 ADMIN_REQUIRED for both a missing token and a valid-but-non-admin token, where requireAuth (self-service routes) correctly returns 401 for a missing token — a client can't tell \"log in\" from \"forbidden\" on admin routes.\n\nPlan & usage pooling (why PLAN_LIMIT_REACHED behaves the way it does above): the org's plan lives on one commerce.plan_subscriptions row keyed by organizationId, and every usage counter that reads it (active listings, AI monthly quota, featured-listing/other subscription-usage ledger entries, team-member seats) filters purely on organization_id — never on which member did the thing. OWNER, ADMIN, and MEMBER all draw from and count against the exact same shared pool with zero role distinction; the org-membership check gating who can attribute a resource to the org (used throughout this collection) is likewise role-blind — only status = 'ACTIVE' is checked. The one caveat: this pooling is never inferred from \"the actor happens to be a member of some org\" — it only kicks in when the client explicitly passes organizationId on the resource-creation call (listing, property, AI conversation — all outside this collection's scope). A member acting without it draws against their own personal plan instead, silently.",
+    "description": "Every organization- and member-lifecycle endpoint in one place — both self-service (organizations.routes.js, run as the org owner or an invited member) and admin-only (organizations.admin.routes.js, run as an ADMIN-role user). Responses use the standard { success, data, meta } / { success, error } envelope.\n\nSuggested run order: Auth — Org Owner (Request OTP → set {{otp}} from the server console → Verify OTP) → Organizations / Create organization → Members / Add member (invite by phone) (creates the unverified account for {{memberPhone}}) → Auth — Member User (logs into that same account via SMS OTP, proving it) → Members / Accept membership (as member user) → Auth — Admin (see that folder's Request OTP description — needs the ADMIN role granted directly in the DB first, no self-service path exists) → Admin — Organizations / Admin — Members as needed.\n\nVerified end-to-end against a real local instance (all 4 self-service org endpoints, 4 member endpoints, 5 admin org endpoints, 1 admin member endpoint, plus the invalid-transition, last-owner, and PLAN_LIMIT_REACHED guards). One inconsistency found along the way, not fixed here: requireAdmin (admin routes) returns 403 ADMIN_REQUIRED for both a missing token and a valid-but-non-admin token, where requireAuth (self-service routes) correctly returns 401 for a missing token — a client can't tell \"log in\" from \"forbidden\" on admin routes.\n\nPlan & usage pooling (why PLAN_LIMIT_REACHED behaves the way it does above): the org's plan lives on one commerce.plan_subscriptions row keyed by organizationId, and every usage counter that reads it (active listings, AI monthly quota, featured-listing/other subscription-usage ledger entries, team-member seats) filters purely on organization_id — never on which member did the thing. OWNER, ADMIN, and MEMBER all draw from and count against the exact same shared pool with zero role distinction; the org-membership check gating who can attribute a resource to the org (used throughout this collection) is likewise role-blind — only status = 'ACTIVE' is checked. The one caveat: this pooling is never inferred from \"the actor happens to be a member of some org\" — it only kicks in when the client explicitly passes organizationId on the resource-creation call (listing, property, AI conversation — all outside this collection's scope). A member acting without it draws against their own personal plan instead, silently.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,14 +19,14 @@
       "value": ""
     },
     {
-      "key": "memberEmail",
-      "value": "new.hire@example.com",
-      "description": "The email Members / Add member (invite by email) invites, and Auth — Member User later logs into — keep these in sync if you change it."
+      "key": "memberPhone",
+      "value": "+919876543210",
+      "description": "The phone number Members / Add member (invite by phone) invites, and Auth — Member User later logs into — keep these in sync if you change it."
     },
     {
       "key": "memberAccessToken",
       "value": "",
-      "description": "Invited user's bearer token — set by Auth — Member User / Verify OTP (run Add member (invite by email) first)."
+      "description": "Invited user's bearer token — set by Auth — Member User / Verify OTP (run Add member (invite by phone) first)."
     },
     {
       "key": "memberRefreshToken",
@@ -35,7 +35,7 @@
     {
       "key": "memberUserId",
       "value": "",
-      "description": "Invited user's own id — auto-captured on Auth — Member User / Verify OTP, or read it off Add member (invite by email)'s response. Used by Remove member and Admin — Members / Update member status."
+      "description": "Invited user's own id — auto-captured on Auth — Member User / Verify OTP, or read it off Add member (invite by phone)'s response. Used by Remove member and Admin — Members / Update member status."
     },
     {
       "key": "adminAccessToken",
@@ -201,11 +201,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"destination\": \"{{memberEmail}}\",\n  \"channel\": \"EMAIL\",\n  \"purpose\": \"LOGIN\"\n}"
+              "raw": "{\n  \"destination\": \"{{memberPhone}}\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\"\n}"
             },
             "url": "{{baseUrl}}/auth/otp/request"
           },
-          "description": "Run Members / Add member (invite by email) first — this logs in as the account that invite just created (or reused) for {{memberEmail}}.",
+          "description": "Run Members / Add member (invite by phone) first — this logs in as the account that invite just created (or reused) for {{memberPhone}}.",
           "event": [
             {
               "listen": "test",
@@ -492,7 +492,7 @@
           "description": "Requires the caller to already be an active member of the org (any role) — this is what 403s a non-member admin, see Admin — Organizations / Organization detail for the workaround."
         },
         {
-          "name": "Add member (invite by email)",
+          "name": "Add member (invite by phone)",
           "request": {
             "method": "POST",
             "header": [
@@ -503,11 +503,11 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"role\": \"MEMBER\"\n}"
+              "raw": "{\n  \"phone\": \"{{memberPhone}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"role\": \"MEMBER\"\n}"
             },
             "url": "{{baseUrl}}/organizations/{{organizationId}}/members"
           },
-          "description": "Invite-by-email only — there is no explicit-userId variant. Requires the caller to be an active OWNER or ADMIN of the org. If {{memberEmail}} already belongs to an existing user, that account is added as-is (name untouched) — otherwise a new, unverified account is created (email_verified_at stays null until proven via Auth — Member User below). Grants no platform role. role only accepts ADMIN or MEMBER — there is no way to grant OWNER here. Adding a genuinely new member is checked against the org's plan team-member limit — returns 403 PLAN_LIMIT_REACHED once at the plan's teamMembers cap (ACTIVE + INVITED both count). A brand-new org's FREE plan defaults to teamMembers: 1 (DEFAULT_FREE_TEAM_MEMBERS), and the OWNER already occupies that one seat — so this very first invite can 403 immediately on a fresh org. Confirmed live: this needs a real commerce.plan_subscriptions row for the org with a higher teamMembers to get past it (see the Zameens — Commerce & Payments collection's Admin — plan catalog / checkout flow for the real purchase path — there's no dev seed script for this yet). Run this BEFORE Auth — Member User."
+          "description": "Invite-by-phone only — there is no explicit-userId variant. Requires the caller to be an active OWNER or ADMIN of the org. If {{memberPhone}} already belongs to an existing user, that account is added as-is (name untouched) — otherwise a new, unverified account is created (phone_verified_at stays null until proven via Auth — Member User below). Grants no platform role. role only accepts ADMIN or MEMBER — there is no way to grant OWNER here. Adding a genuinely new member is checked against the org's plan team-member limit — returns 403 PLAN_LIMIT_REACHED once at the plan's teamMembers cap (ACTIVE + INVITED both count). A brand-new org's FREE plan defaults to teamMembers: 1 (DEFAULT_FREE_TEAM_MEMBERS), and the OWNER already occupies that one seat — so this very first invite can 403 immediately on a fresh org. Confirmed live: this needs a real commerce.plan_subscriptions row for the org with a higher teamMembers to get past it (see the Zameens — Commerce & Payments collection's Admin — plan catalog / checkout flow for the real purchase path — there's no dev seed script for this yet). Run this BEFORE Auth — Member User."
         },
         {
           "name": "Accept membership (as member user)",
