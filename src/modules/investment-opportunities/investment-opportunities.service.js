@@ -1,5 +1,6 @@
 import { HttpError } from "../../shared/http.js";
 import { paginationMeta, parsePagination } from "../../shared/pagination.js";
+import { userSummariesByIds } from "../../shared/userSummary.js";
 import * as repository from "./investment-opportunities.repository.js";
 
 const toLocationSummary = row =>
@@ -128,4 +129,45 @@ export const createInterest = async ({ opportunityId, actorId, input }) => {
       throw new HttpError(400, "INVALID_REFERENCE", "organizationId does not exist.");
     throw error;
   }
+};
+
+const interestNotFound = () =>
+  new HttpError(404, "INTEREST_NOT_FOUND", "Investment interest was not found.");
+
+const toInterests = async rows => {
+  if (!rows.length) return [];
+  const organizationIds = [...new Set(rows.map(row => row.organizationId).filter(Boolean))];
+  const [usersMap, orgRows] = await Promise.all([
+    userSummariesByIds(rows.map(row => row.userId)),
+    repository.organizationsByIds(organizationIds)
+  ]);
+  const orgById = new Map(orgRows.map(row => [row.id, row]));
+  return rows.map(row => ({
+    id: row.id,
+    opportunityId: row.opportunityId,
+    user: usersMap.get(row.userId) || null,
+    organization: row.organizationId ? orgById.get(row.organizationId) || null : null,
+    contactPhone: row.contactPhone,
+    contactEmail: row.contactEmail,
+    message: row.message,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }));
+};
+const toInterest = async row => (await toInterests([row]))[0];
+
+export const listInterests = async ({ opportunityId, filters, query }) => {
+  const opportunity = await repository.findById(opportunityId);
+  if (!opportunity) throw notFound();
+  const { page, limit, offset } = parsePagination(query);
+  const rows = await repository.listInterestsByOpportunity({ opportunityId, ...filters, limit, offset });
+  const total = rows[0]?.total || 0;
+  return { data: await toInterests(rows), meta: paginationMeta({ page, limit, total }) };
+};
+
+export const interestDetail = async ({ opportunityId, interestId }) => {
+  const row = await repository.findInterestById(interestId);
+  if (!row || row.opportunityId !== opportunityId) throw interestNotFound();
+  return toInterest(row);
 };

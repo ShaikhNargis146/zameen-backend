@@ -102,3 +102,31 @@ export const findOpenInterest = (opportunityId, userId) =>
      ORDER BY created_at DESC LIMIT 1`,
     [opportunityId, userId]
   );
+
+const adminInterestColumns = `id, opportunity_id AS "opportunityId", user_id AS "userId", organization_id AS "organizationId", contact_phone AS "contactPhone", contact_email AS "contactEmail", message, status, created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+export const listInterestsByOpportunity = ({ opportunityId, statuses, limit, offset }) =>
+  run(
+    "any",
+    `SELECT ${adminInterestColumns}, count(*) OVER()::int AS total
+     FROM content.investment_interests
+     WHERE opportunity_id = $1
+       AND ($2::varchar[] IS NULL OR status = ANY($2::varchar[]))
+     ORDER BY created_at DESC
+     LIMIT $3 OFFSET $4`,
+    [opportunityId, statuses, limit, offset]
+  );
+
+export const findInterestById = id =>
+  run("oneOrNone", `SELECT ${adminInterestColumns} FROM content.investment_interests WHERE id = $1`, [id]);
+
+const organizationSummaryColumns = `id, name, type, phone, email`;
+
+export const organizationsByIds = ids =>
+  ids.length
+    ? run(
+        "any",
+        `SELECT ${organizationSummaryColumns} FROM account.organizations WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+        [ids]
+      )
+    : Promise.resolve([]);

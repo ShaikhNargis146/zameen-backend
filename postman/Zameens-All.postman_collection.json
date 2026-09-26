@@ -3231,6 +3231,20 @@
 								},
 								"url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/close"
 							}
+						},
+						{
+							"name": "Admin: List investment interests",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/interests?status=NEW&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin: Get investment interest",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/interests/{{interestId}}"
+							}
 						}
 					]
 				},
@@ -3673,6 +3687,11 @@
 		},
 		{
 			"key": "granteeUserId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "interestId",
 			"value": "",
 			"type": "string"
 		},
