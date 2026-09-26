@@ -43,7 +43,7 @@ const activePlanRow = overrides => ({
   productId: "product-1",
   code: "PLAN_PRO",
   name: "Pro",
-  planType: "PAID",
+  planType: "PREMIUM",
   description: null,
   amountMinor: 99900,
   currency: "INR",
@@ -83,7 +83,7 @@ test("mySubscription reports every limit straight from the currently active DB p
       oneOrNone: mySubscriptionOneOrNoneRouter({
         activePlan: activePlanRow({
           listingLimit: 17,
-          features: { imagesPerProperty: 41, videosPerProperty: 6, featuredListingsPerMonth: 23, contactUnlocksPerMonth: 77 },
+          features: { imagesPerProperty: 41, videosPerProperty: 6, featuredListingsPerMonth: 23, contactUnlocks: 77 },
           aiMonthlyQuota: 13
         }),
         featuredUsedRow: { usedCount: 5 },
@@ -109,12 +109,12 @@ test("mySubscription reports every limit straight from the currently active DB p
 // active for this owner decides both the number AND which reset semantics
 // apply (see entitlements.service.js#consumeContactUnlock), never a fixed
 // choice made by this module.
-test("mySubscription reads the plan's LIFETIME contact-unlock cap (and queries the fixed lifetime period, not a calendar month) when the active plan sets contactUnlocksLifetime", async () => {
+test("mySubscription reads the FREE plan's lifetime contact-unlock cap from contactUnlocks", async () => {
   let contactUsageQuery;
   await withPgStubs(
     {
       oneOrNone: async (query, params) => {
-        if (/FROM commerce\.plan_subscriptions ps/.test(query)) return { ok: true, data: activePlanRow({ features: { contactUnlocksLifetime: 5 } }) };
+        if (/FROM commerce\.plan_subscriptions ps/.test(query)) return { ok: true, data: activePlanRow({ planType: "FREE", features: { contactUnlocks: 5 } }) };
         if (/FROM commerce\.subscription_usage/.test(query) && params[1] === "CONTACT_UNLOCKS") {
           contactUsageQuery = query;
           assert.deepEqual(params, ["user-1", "CONTACT_UNLOCKS", new Date(0)]);
@@ -133,14 +133,14 @@ test("mySubscription reads the plan's LIFETIME contact-unlock cap (and queries t
   assert.match(contactUsageQuery, /period_start = \$3/);
 });
 
-test("mySubscription reads the plan's MONTHLY contact-unlock allowance, anchored to this owner's own plan starts_at rather than the calendar month, when the active plan sets contactUnlocksPerMonth instead", async () => {
+test("mySubscription reads a paid plan's renewal-period contact-unlock allowance from contactUnlocks", async () => {
   const now = new Date("2026-09-20T00:00:00.000Z");
   const { periodStart: expectedPeriodStart } = resolveUsageCycle({ anchorStartsAt: "2026-09-01T00:00:00.000Z", now });
   let contactUsageQuery;
   await withPgStubs(
     {
       oneOrNone: async (query, params) => {
-        if (/FROM commerce\.plan_subscriptions ps/.test(query)) return { ok: true, data: activePlanRow({ features: { contactUnlocksPerMonth: 250 } }) };
+        if (/FROM commerce\.plan_subscriptions ps/.test(query)) return { ok: true, data: activePlanRow({ features: { contactUnlocks: 250 } }) };
         if (/FROM commerce\.subscription_usage/.test(query) && params[1] === "CONTACT_UNLOCKS") {
           contactUsageQuery = query;
           assert.deepEqual(params, ["user-1", "CONTACT_UNLOCKS", expectedPeriodStart]);
@@ -176,7 +176,7 @@ test("mySubscription reports a fresh (zero) contact-unlock usage window immediat
     {
       oneOrNone: async (query, params) => {
         if (/FROM commerce\.plan_subscriptions ps/.test(query))
-          return { ok: true, data: activePlanRow({ startsAt: renewedStartsAt, features: { contactUnlocksPerMonth: 250 } }) };
+          return { ok: true, data: activePlanRow({ startsAt: renewedStartsAt, features: { contactUnlocks: 250 } }) };
         if (/FROM commerce\.subscription_usage/.test(query) && params[1] === "CONTACT_UNLOCKS") {
           // The stale (pre-renewal) period still has usage on record, but it
           // must never be read once the anchor has moved to the new plan.
@@ -196,7 +196,7 @@ test("mySubscription reports a fresh (zero) contact-unlock usage window immediat
   );
 });
 
-test("mySubscription reports contactUnlocks as unlimited (limit: null) when the active plan sets neither contactUnlocksLifetime nor contactUnlocksPerMonth", async () => {
+test("mySubscription reports contactUnlocks as unlimited (limit: null) when the active plan omits contactUnlocks", async () => {
   await withPgStubs(
     {
       oneOrNone: mySubscriptionOneOrNoneRouter({
@@ -228,7 +228,8 @@ test("mySubscription falls back to the live, admin-editable PLAN_FREE catalog ro
           endsAt: undefined,
           code: "PLAN_FREE",
           listingLimit: 99,
-          features: { contactUnlocksLifetime: 42 },
+          planType: "FREE",
+          features: { contactUnlocks: 42 },
           aiMonthlyQuota: 88
         }),
         contactUsedRow: { usedCount: 1 }

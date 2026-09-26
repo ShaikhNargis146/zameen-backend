@@ -553,8 +553,8 @@ test("grantFeaturedListing returns promotion: null, alreadyFeatured: false once 
 // consumeContactUnlock — resolved through the BUYER's own personal plan
 // (never resolveEffectivePlanForOwner/an org), since a contact unlock is
 // spent by whoever does the unlocking, not the listing's owner. FREE uses a
-// lifetime cap (contactUnlocksLifetime); PRO/BUSINESS a monthly allowance
-// (contactUnlocksPerMonth) via the same consumeUsageWithinTx machinery
+// lifetime cap (contactUnlocks); PRO/BUSINESS reset the same contactUnlocks
+// allowance on renewal via the same consumeUsageWithinTx machinery
 // featured listings already uses, keyed under feature "CONTACT_UNLOCKS".
 // ---------------------------------------------------------------------------
 
@@ -571,7 +571,7 @@ test("consumeContactUnlock returns alreadyUnlocked: true without touching the us
   let usageTouched = false;
   await withPgStubs(
     {
-      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksLifetime: 5 } } }),
+      oneOrNone: async () => ({ ok: true, data: { planType: "FREE", features: { contactUnlocks: 5 } } }),
       tx: async fn => {
         const data = await fn({
           any: async () => {},
@@ -600,7 +600,7 @@ test("consumeContactUnlock on the FREE plan consumes one unit of the lifetime ca
   const calls = [];
   await withPgStubs(
     {
-      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksLifetime: 5 } } }),
+      oneOrNone: async () => ({ ok: true, data: { planType: "FREE", features: { contactUnlocks: 5 } } }),
       tx: async fn => {
         const data = await fn({
           any: async (query, params) => {
@@ -640,7 +640,7 @@ test("consumeContactUnlock throws PLAN_LIMIT_REACHED once the FREE plan's lifeti
   let unlockRecorded = false;
   await withPgStubs(
     {
-      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksLifetime: 5 } } }),
+      oneOrNone: async () => ({ ok: true, data: { planType: "FREE", features: { contactUnlocks: 5 } } }),
       tx: async fn => {
         const data = await fn({
           any: async () => {},
@@ -668,14 +668,14 @@ test("consumeContactUnlock throws PLAN_LIMIT_REACHED once the FREE plan's lifeti
   assert.equal(unlockRecorded, false);
 });
 
-test("consumeContactUnlock on a PRO/BUSINESS plan uses the monthly allowance (contactUnlocksPerMonth), anchored to this buyer's own plan starts_at, not the lifetime cap or the calendar month", async () => {
+test("consumeContactUnlock on a paid plan resets contactUnlocks from its own plan starts_at, not the calendar month", async () => {
   const planStartsAt = "2026-09-05T00:00:00.000Z";
   const now = new Date("2026-09-20T00:00:00.000Z");
   const { periodStart, periodEnd } = resolveUsageCycle({ anchorStartsAt: planStartsAt, now });
   let usageInsertParams;
   await withPgStubs(
     {
-      oneOrNone: async () => ({ ok: true, data: { features: { contactUnlocksPerMonth: 50 }, startsAt: planStartsAt } }),
+      oneOrNone: async () => ({ ok: true, data: { planType: "PREMIUM", features: { contactUnlocks: 50 }, startsAt: planStartsAt } }),
       tx: async fn => {
         const data = await fn({
           any: async () => {},
@@ -713,7 +713,7 @@ test("consumeContactUnlock's MONTHLY allowance keys on the buyer's CURRENT plan 
     {
       oneOrNone: async () => ({
         ok: true,
-        data: { features: { contactUnlocksPerMonth: 50 }, startsAt: "2026-09-20T09:00:00.000Z" }
+        data: { planType: "PREMIUM", features: { contactUnlocks: 50 }, startsAt: "2026-09-20T09:00:00.000Z" }
       }),
       tx: async fn => {
         const data = await fn({

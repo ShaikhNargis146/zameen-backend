@@ -657,9 +657,8 @@ CREATE TABLE commerce.plan_subscriptions (
 CREATE INDEX idx_commerce_plan_subscriptions_user_active ON commerce.plan_subscriptions(user_id, ends_at) WHERE status = 'ACTIVE';
 CREATE INDEX idx_commerce_plan_subscriptions_org_active ON commerce.plan_subscriptions(organization_id, ends_at) WHERE status = 'ACTIVE';
 
--- Generic monthly usage ledger for any "N included per month" allowance
--- resolved from commerce.plans.features -- today only featured listings
--- (features.featuredListingsPerMonth). See commerce.repository.js
+-- Generic usage ledger for plan allowances resolved from commerce.plans.features
+-- (today featuredListingsPerMonth and contactUnlocks). See commerce.repository.js
 -- #consumeSubscriptionUsage for the advisory-lock reserve/consume logic.
 CREATE TABLE commerce.subscription_usage (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

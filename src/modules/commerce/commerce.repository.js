@@ -130,7 +130,14 @@ const liveFreeTierPlan = async () => {
      JOIN commerce.products pr ON pr.id = pl.product_id
      WHERE pr.code = 'PLAN_FREE'`
   );
-  return freePlan && { subscriptionStatus: "ACTIVE", startsAt: null, endsAt: null, ...freePlan };
+  return (
+    freePlan && {
+      subscriptionStatus: "ACTIVE",
+      startsAt: null,
+      endsAt: null,
+      ...freePlan
+    }
+  );
 };
 
 // The plan that actually applies to this owner right now, for entitlement
@@ -148,13 +155,23 @@ const liveFreeTierPlan = async () => {
 export const resolveEffectivePlanForUser = async userId =>
   (await findActiveSubscriptionForUser(userId)) || liveFreeTierPlan();
 
-export const resolveEffectivePlanForOwner = async ({ userId, organizationId }) =>
-  (await findActiveSubscriptionForOwner({ userId, organizationId })) || liveFreeTierPlan();
+export const resolveEffectivePlanForOwner = async ({
+  userId,
+  organizationId
+}) =>
+  (await findActiveSubscriptionForOwner({ userId, organizationId })) ||
+  liveFreeTierPlan();
 
 // Grants a plan with no purchase behind it (e.g. the ambient FREE plan on
 // registration, see entitlements.service.js#grantFreePlan) — order_item_id
 // is nullable for exactly this case (see migrations/016_subscription_entitlements.sql).
-export const grantPlanDirectly = ({ userId, organizationId, planId, startsAt, endsAt }) =>
+export const grantPlanDirectly = ({
+  userId,
+  organizationId,
+  planId,
+  startsAt,
+  endsAt
+}) =>
   run(
     "one",
     `INSERT INTO commerce.plan_subscriptions (user_id, organization_id, plan_id, starts_at, ends_at, status)
@@ -194,11 +211,22 @@ const LIFETIME_PERIOD = {
 // deterministic testing -- real callers never need to pass it.
 const consumeUsageWithinTx = async (
   t,
-  { userId, organizationId, feature, limit, periodMode = "MONTHLY", anchorStartsAt = null, now = new Date() }
+  {
+    userId,
+    organizationId,
+    feature,
+    limit,
+    periodMode = "MONTHLY",
+    anchorStartsAt = null,
+    now = new Date()
+  }
 ) => {
   const lockKey = `${feature}:${organizationId || userId}`;
   await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
-  const period = periodMode === "LIFETIME" ? LIFETIME_PERIOD : resolveUsageCycle({ anchorStartsAt, now });
+  const period =
+    periodMode === "LIFETIME"
+      ? LIFETIME_PERIOD
+      : resolveUsageCycle({ anchorStartsAt, now });
   const existing = await t.oneOrNone(
     organizationId
       ? `SELECT id, used_count AS "usedCount" FROM commerce.subscription_usage
@@ -217,7 +245,13 @@ const consumeUsageWithinTx = async (
     await t.none(
       `INSERT INTO commerce.subscription_usage (user_id, organization_id, feature, used_count, period_start, period_end)
        VALUES ($1,$2,$3,1,$4,$5)`,
-      [organizationId ? null : userId, organizationId || null, feature, period.periodStart, period.periodEnd]
+      [
+        organizationId ? null : userId,
+        organizationId || null,
+        feature,
+        period.periodStart,
+        period.periodEnd
+      ]
     );
   return true;
 };
@@ -226,8 +260,24 @@ const consumeUsageWithinTx = async (
 // resolved from commerce.plans.features. Standalone entry point for a
 // feature whose entitlement *is* the counter itself, with no second write
 // needed (unlike featured listings below).
-export const consumeSubscriptionUsage = ({ userId, organizationId, feature, limit, anchorStartsAt, now }) =>
-  runTx(t => consumeUsageWithinTx(t, { userId, organizationId, feature, limit, anchorStartsAt, now }));
+export const consumeSubscriptionUsage = ({
+  userId,
+  organizationId,
+  feature,
+  limit,
+  anchorStartsAt,
+  now
+}) =>
+  runTx(t =>
+    consumeUsageWithinTx(t, {
+      userId,
+      organizationId,
+      feature,
+      limit,
+      anchorStartsAt,
+      now
+    })
+  );
 
 // Read-only, non-transactional twin of the already-featured check inside
 // grantFeaturedListingFromAllowance's transaction below — used by
@@ -310,9 +360,8 @@ export const grantFeaturedListingFromAllowance = ({
 // commits.
 //
 // periodMode is "LIFETIME" for the FREE plan's 5-lifetime cap and "MONTHLY"
-// for PRO/BUSINESS's N-per-month allowance (see consumeUsageWithinTx's
-// LIFETIME_PERIOD above) -- resolved by the caller from which feature key is
-// present on the plan (contactUnlocksLifetime vs contactUnlocksPerMonth).
+// for paid plans' renewal-period allowance (see consumeUsageWithinTx's
+// LIFETIME_PERIOD above) -- resolved by the caller from the plan type.
 //
 // Returns { unlocked: true, alreadyUnlocked: true } (no usage consumed) if
 // this buyer already unlocked this exact listing before; { unlocked: true,
@@ -321,7 +370,14 @@ export const grantFeaturedListingFromAllowance = ({
 // means unlimited, same convention as every other resolveXLimit in this
 // codebase); { unlocked: false, alreadyUnlocked: false } once the period's
 // allowance is exhausted.
-export const consumeContactUnlock = ({ userId, listingId, limit, periodMode, anchorStartsAt, now }) =>
+export const consumeContactUnlock = ({
+  userId,
+  listingId,
+  limit,
+  periodMode,
+  anchorStartsAt,
+  now
+}) =>
   runTx(async t => {
     const lockKey = `CONTACT_UNLOCKS:${userId}`;
     await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
@@ -365,7 +421,9 @@ export const countSubscriptionUsageThisPeriod = ({
   now
 }) => {
   const periodStart =
-    periodMode === "LIFETIME" ? LIFETIME_PERIOD.periodStart : resolveUsageCycle({ anchorStartsAt, now }).periodStart;
+    periodMode === "LIFETIME"
+      ? LIFETIME_PERIOD.periodStart
+      : resolveUsageCycle({ anchorStartsAt, now }).periodStart;
   return run(
     "oneOrNone",
     organizationId
@@ -398,7 +456,16 @@ export const createPlan = ({
     const product = await t.one(
       `INSERT INTO commerce.products (code, type, name, description, amount_minor, currency, is_active, gst_rate_bps, hsn_sac_code)
        VALUES ($1,'PLAN',$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [code, name, description, amountMinor, currency, isActive, gstRateBps ?? 1800, hsnSacCode ?? null]
+      [
+        code,
+        name,
+        description,
+        amountMinor,
+        currency,
+        isActive,
+        gstRateBps ?? 1800,
+        hsnSacCode ?? null
+      ]
     );
     const plan = await t.one(
       `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
@@ -442,7 +509,8 @@ export const updatePlan = ({ productId, planId, changes }) =>
     const productChanges = {};
     const planChanges = {};
     for (const [field, column] of Object.entries(productColumnMap))
-      if (Object.hasOwn(changes, field)) productChanges[column] = changes[field];
+      if (Object.hasOwn(changes, field))
+        productChanges[column] = changes[field];
     for (const [field, column] of Object.entries(planColumnMap))
       if (Object.hasOwn(changes, field)) planChanges[column] = changes[field];
 
@@ -457,11 +525,19 @@ export const updatePlan = ({ productId, planId, changes }) =>
     if (Object.keys(planChanges).length) {
       const columns = Object.keys(planChanges);
       const setSql = columns
-        .map((col, i) => (col === "features" ? `${col} = $${i + 2}::jsonb` : `${col} = $${i + 2}`))
+        .map((col, i) =>
+          col === "features"
+            ? `${col} = $${i + 2}::jsonb`
+            : `${col} = $${i + 2}`
+        )
         .join(", ");
       await t.none(`UPDATE commerce.plans SET ${setSql} WHERE id = $1`, [
         planId,
-        ...columns.map(col => (col === "features" ? JSON.stringify(planChanges[col]) : planChanges[col]))
+        ...columns.map(col =>
+          col === "features"
+            ? JSON.stringify(planChanges[col])
+            : planChanges[col]
+        )
       ]);
     }
     return true;
@@ -494,7 +570,10 @@ export const findProductsByIds = ids =>
 // Ownership check for a PROMOTION order item's targetId (Section 7 of
 // docs/razorpay-integration-plan.md) — the listing must belong to the buyer
 // or their purchasing organization.
-export const findOwnedListingForPromotion = (listingId, { actorId, organizationId }) =>
+export const findOwnedListingForPromotion = (
+  listingId,
+  { actorId, organizationId }
+) =>
   run(
     "oneOrNone",
     `SELECT id FROM marketplace.listings
@@ -528,12 +607,29 @@ const orderColumns = `
    ORDER BY p.created_at DESC LIMIT 1) AS "latestPaymentStatus"
 `;
 
-export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor, taxMinor, totalMinor, currency, items }) =>
+export const createOrder = ({
+  orderNumber,
+  userId,
+  organizationId,
+  subtotalMinor,
+  taxMinor,
+  totalMinor,
+  currency,
+  items
+}) =>
   runTx(async t => {
     const order = await t.one(
       `INSERT INTO commerce.orders (order_number, user_id, organization_id, status, subtotal_minor, tax_minor, total_minor, currency)
        VALUES ($1,$2,$3,'CREATED',$4,$5,$6,$7) RETURNING id`,
-      [orderNumber, userId, organizationId, subtotalMinor, taxMinor, totalMinor, currency]
+      [
+        orderNumber,
+        userId,
+        organizationId,
+        subtotalMinor,
+        taxMinor,
+        totalMinor,
+        currency
+      ]
     );
     for (const item of items) {
       await t.none(
@@ -548,7 +644,10 @@ export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor
           item.totalAmountMinor,
           item.gstRateBps || 0,
           item.hsnSacCode || null,
-          JSON.stringify({ targetType: item.targetType || null, targetId: item.targetId || null })
+          JSON.stringify({
+            targetType: item.targetType || null,
+            targetId: item.targetId || null
+          })
         ]
       );
       // Re-claim the service request inside the transaction, not just at the
@@ -573,7 +672,11 @@ export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor
   });
 
 export const findById = id =>
-  run("oneOrNone", `SELECT ${orderColumns} FROM commerce.orders o WHERE o.id = $1`, [id]);
+  run(
+    "oneOrNone",
+    `SELECT ${orderColumns} FROM commerce.orders o WHERE o.id = $1`,
+    [id]
+  );
 
 export const findOwnedByUser = (id, userId) =>
   run(
@@ -630,7 +733,10 @@ export const itemsForOrders = orderIds =>
   );
 
 export const setOrderStatus = (id, status) =>
-  run("none", `UPDATE commerce.orders SET status = $2 WHERE id = $1`, [id, status]);
+  run("none", `UPDATE commerce.orders SET status = $2 WHERE id = $1`, [
+    id,
+    status
+  ]);
 
 const paymentSelectColumns = `
   pay.id, pay.order_id AS "orderId", pay.provider, pay.provider_order_id AS "providerOrderId",
@@ -642,7 +748,14 @@ const paymentInsertColumns = paymentSelectColumns.replace(/pay\./g, "");
 // `id` is generated by the caller (not left to the column default) so it can
 // be embedded in the Razorpay Payment Link's notes before this row exists —
 // see commerce.service.js createPaymentIntent.
-export const createPayment = ({ id, orderId, provider, providerOrderId, amountMinor, currency }) =>
+export const createPayment = ({
+  id,
+  orderId,
+  provider,
+  providerOrderId,
+  amountMinor,
+  currency
+}) =>
   run(
     "one",
     `INSERT INTO commerce.payments (id, order_id, provider, provider_order_id, status, amount_minor, currency)
@@ -652,7 +765,11 @@ export const createPayment = ({ id, orderId, provider, providerOrderId, amountMi
   );
 
 export const findPaymentById = id =>
-  run("oneOrNone", `SELECT ${paymentSelectColumns} FROM commerce.payments pay WHERE pay.id = $1`, [id]);
+  run(
+    "oneOrNone",
+    `SELECT ${paymentSelectColumns} FROM commerce.payments pay WHERE pay.id = $1`,
+    [id]
+  );
 
 export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
   run(
@@ -813,9 +930,10 @@ export const capturePaymentAndApplyEntitlements = ({
           [order.userId, order.organizationId]
         );
         if (existing)
-          await t.none(`UPDATE commerce.plan_subscriptions SET status = 'EXPIRED' WHERE id = $1`, [
-            existing.id
-          ]);
+          await t.none(
+            `UPDATE commerce.plan_subscriptions SET status = 'EXPIRED' WHERE id = $1`,
+            [existing.id]
+          );
         const endsAt = computePlanEndsAt({
           existingEndsAt: existing?.endsAt,
           durationDays: item.durationDays,
@@ -826,16 +944,31 @@ export const capturePaymentAndApplyEntitlements = ({
              (user_id, organization_id, plan_id, order_item_id, starts_at, ends_at, status)
            VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')
            ON CONFLICT (order_item_id) DO NOTHING`,
-          [order.userId, order.organizationId, item.planId, item.orderItemId, now, endsAt]
+          [
+            order.userId,
+            order.organizationId,
+            item.planId,
+            item.orderItemId,
+            now,
+            endsAt
+          ]
         );
       } else if (item.type === "PROMOTION") {
-        const endsAt = new Date(now.getTime() + item.promotionDurationDays * 24 * 60 * 60 * 1000);
+        const endsAt = new Date(
+          now.getTime() + item.promotionDurationDays * 24 * 60 * 60 * 1000
+        );
         await t.none(
           `INSERT INTO marketplace.listing_promotions
              (listing_id, promotion_type, order_item_id, starts_at, ends_at, status)
            VALUES ($1,$2,$3,$4,$5,'ACTIVE')
            ON CONFLICT (order_item_id) WHERE order_item_id IS NOT NULL DO NOTHING`,
-          [item.metadata?.targetId, item.promotionType, item.orderItemId, now, endsAt]
+          [
+            item.metadata?.targetId,
+            item.promotionType,
+            item.orderItemId,
+            now,
+            endsAt
+          ]
         );
       } else if (item.type === "SERVICE") {
         await t.none(
@@ -854,13 +987,15 @@ export const capturePaymentAndApplyEntitlements = ({
     // (intra-state) since no buyer billing address exists anywhere in this
     // schema; an org-billed order can override that via its own gst_number.
     const org = order.organizationId
-      ? await t.oneOrNone(`SELECT gst_number AS "gstNumber" FROM account.organizations WHERE id = $1`, [
-          order.organizationId
-        ])
+      ? await t.oneOrNone(
+          `SELECT gst_number AS "gstNumber" FROM account.organizations WHERE id = $1`,
+          [order.organizationId]
+        )
       : null;
     const buyerGstin = org?.gstNumber || null;
     const sellerStateCode = stateCodeFromGstin(sellerGstin);
-    const placeOfSupplyStateCode = stateCodeFromGstin(buyerGstin) || sellerStateCode;
+    const placeOfSupplyStateCode =
+      stateCodeFromGstin(buyerGstin) || sellerStateCode;
     const isIntraState = placeOfSupplyStateCode === sellerStateCode;
 
     const totals = items.reduce(
@@ -878,7 +1013,9 @@ export const capturePaymentAndApplyEntitlements = ({
       { cgstMinor: 0, sgstMinor: 0, igstMinor: 0 }
     );
 
-    const { n: invoiceSeq } = await t.one(`SELECT nextval('commerce.invoice_number_seq') AS n`);
+    const { n: invoiceSeq } = await t.one(
+      `SELECT nextval('commerce.invoice_number_seq') AS n`
+    );
     const invoiceNumber = `INV-${String(invoiceSeq).padStart(6, "0")}`;
     await t.none(
       `UPDATE commerce.orders
@@ -899,7 +1036,12 @@ export const capturePaymentAndApplyEntitlements = ({
     // userId/organizationId are returned alongside the payment so the
     // caller can notify the buyer without a second round trip — payments
     // rows carry no user reference of their own, only orders do.
-    return { ...payment, userId: order.userId, organizationId: order.organizationId, invoiceNumber };
+    return {
+      ...payment,
+      userId: order.userId,
+      organizationId: order.organizationId,
+      invoiceNumber
+    };
   });
 
 // The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)
@@ -912,7 +1054,13 @@ export const capturePaymentAndApplyEntitlements = ({
 // and fails the WHERE clause instead of racing it to run capture/fail side
 // effects twice. Postgres holds the row lock for the conflicting key while
 // evaluating this, so concurrent deliveries for the same event serialize on it.
-export const insertWebhookEvent = ({ provider, eventId, eventType, payload, paymentId }) =>
+export const insertWebhookEvent = ({
+  provider,
+  eventId,
+  eventType,
+  payload,
+  paymentId
+}) =>
   run(
     "oneOrNone",
     `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload, payment_id)
@@ -924,7 +1072,13 @@ export const insertWebhookEvent = ({ provider, eventId, eventType, payload, paym
            processing_error = NULL
        WHERE commerce.payment_webhook_events.processing_error IS NOT NULL
      RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
-    [provider, eventId, eventType, JSON.stringify(payload || {}), paymentId || null]
+    [
+      provider,
+      eventId,
+      eventType,
+      JSON.stringify(payload || {}),
+      paymentId || null
+    ]
   );
 
 export const markWebhookProcessed = (id, error = null) =>
@@ -1008,7 +1162,15 @@ export const createServiceRequest = ({
     `INSERT INTO commerce.service_requests (service_id, user_id, property_id, listing_id, customer_notes, contact_phone, contact_email)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING ${serviceRequestInsertColumns}`,
-    [serviceId, userId, propertyId, listingId, customerNotes, contactPhone, contactEmail]
+    [
+      serviceId,
+      userId,
+      propertyId,
+      listingId,
+      customerNotes,
+      contactPhone,
+      contactEmail
+    ]
   );
 
 export const findServiceRequestById = id =>
@@ -1025,7 +1187,11 @@ export const findServiceRequestOwnedByUser = (id, userId) =>
     [id, userId]
   );
 
-export const listServiceRequestsForUser = (userId, { status }, { limit, offset }) =>
+export const listServiceRequestsForUser = (
+  userId,
+  { status },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${serviceRequestColumns}, count(*) OVER()::int AS total
@@ -1035,7 +1201,10 @@ export const listServiceRequestsForUser = (userId, { status }, { limit, offset }
     [userId, status, limit, offset]
   );
 
-export const listServiceRequestsAdmin = ({ status, serviceType, search }, { limit, offset }) =>
+export const listServiceRequestsAdmin = (
+  { status, serviceType, search },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${serviceRequestColumns}, count(*) OVER()::int AS total
@@ -1096,7 +1265,14 @@ export const insertServiceRequestFile = ({
     `INSERT INTO commerce.service_request_files (service_request_id, storage_key, file_name, mime_type, file_size_bytes, uploaded_by_user_id)
      VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING ${serviceRequestFileColumns.replace(/f\./g, "")}`,
-    [serviceRequestId, storageKey, fileName, mimeType, fileSizeBytes, uploadedByUserId]
+    [
+      serviceRequestId,
+      storageKey,
+      fileName,
+      mimeType,
+      fileSizeBytes,
+      uploadedByUserId
+    ]
   );
 
 export const filesForServiceRequests = serviceRequestIds =>

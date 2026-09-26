@@ -113,7 +113,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 0,\n  \"verificationIncluded\": false,\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"propertyPhotosLimit\": 8,\n    \"videoUploadsPerProperty\": 0,\n    \"buyerEnquiries\": \"LIMITED\",\n    \"aiAssistantTier\": \"BASIC\",\n    \"featuredListingsPerMonth\": 0,\n    \"searchPriority\": \"STANDARD\",\n    \"listingAnalyticsTier\": \"BASIC\",\n    \"verifiedBadge\": false,\n    \"leadDashboard\": false,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"NONE\",\n    \"listingDurationDays\": 30,\n    \"billingCadence\": \"NONE\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": null,\n  \"listingLimit\": 2,\n  \"featuredDays\": null,\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"imagesPerProperty\": 5,\n    \"videosPerProperty\": 0,\n    \"teamMembers\": 1,\n    \"featuredListingsPerMonth\": 0,\n    \"contactUnlocks\": 5\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -131,7 +131,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_PRO_MONTHLY\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 49900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 10,\n  \"verificationIncluded\": true,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 20,\n    \"videoUploadsPerProperty\": 1,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 2,\n    \"searchPriority\": \"HIGHER\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"PRIORITY\",\n    \"listingDurationDays\": 90,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_PRO\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 99900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 20,\n  \"featuredDays\": 15,\n  \"aiMonthlyQuota\": 100,\n  \"features\": {\n    \"imagesPerProperty\": 20,\n    \"videosPerProperty\": 2,\n    \"teamMembers\": 3,\n    \"featuredListingsPerMonth\": 2,\n    \"contactUnlocks\": 50\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -149,7 +149,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_BUSINESS_MONTHLY\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies/brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 149900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 50,\n  \"verificationIncluded\": true,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 30,\n    \"videoUploadsPerProperty\": 3,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 10,\n    \"searchPriority\": \"HIGHEST\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 5,\n    \"bulkPropertyUpload\": true,\n    \"supportTier\": \"DEDICATED\",\n    \"listingDurationDays\": null,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_BUSINESS\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies and brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 299900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": null,\n  \"featuredDays\": 30,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"imagesPerProperty\": 50,\n    \"videosPerProperty\": 5,\n    \"teamMembers\": 10,\n    \"featuredListingsPerMonth\": 10,\n    \"contactUnlocks\": 250\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },

@@ -20,7 +20,7 @@ A plan's numeric limits are **never** hardcoded in application code. Every enfor
 
 ## 2. The plan catalog today
 
-Seeded by `migrations/016_subscription_entitlements.sql` (limits) and `migrations/019_contact_unlock_entitlements.sql` (contact unlocks). These are just data — any of them can be changed by an admin at any time via `PATCH /admin/plans/:planId`, which is the entire point of storing them in the database instead of as constants.
+Seeded by `migrations/016_subscription_entitlements.sql` (limits) and `migrations/019_contact_unlock_entitlements.sql` (contact unlocks); `migrations/020_consolidate_contact_unlock_feature.sql` upgrades every database, including a clean one, to the single `contactUnlocks` field. These are just data — any of them can be changed by an admin at any time via `PATCH /admin/plans/:planId`, which is the entire point of storing them in the database instead of as constants.
 
 | Field | FREE (`PLAN_FREE`) | PRO (`PLAN_PRO`) | BUSINESS (`PLAN_BUSINESS`) |
 |---|---|---|---|
@@ -34,8 +34,7 @@ Seeded by `migrations/016_subscription_entitlements.sql` (limits) and `migration
 | `features.videosPerProperty` | 0 | 2 | 5 |
 | `features.teamMembers` | 1 | 3 | 10 |
 | `features.featuredListingsPerMonth` | 0 | 2 | 10 |
-| `features.contactUnlocksLifetime` | 5 (lifetime, never resets) | — | — |
-| `features.contactUnlocksPerMonth` | — | 50 | 250 |
+| `features.contactUnlocks` | 5 (lifetime, never resets) | 50 per renewal month | 250 per renewal month |
 | `features.advancedAnalytics` / `verifiedBadge` / `bulkUpload` | false / false / false | true / true / false | true / true / true |
 
 `features` is a free-form `jsonb` column (`commerce.plans.features`) — any key can be added without a schema migration; `optionalObject` in `commerce.validation.js` accepts whatever shape the admin sends.
@@ -119,7 +118,7 @@ These count *events over a window of time*, backed by a real ledger table, and �
 |---|---|---|---|
 | `aiMonthlyQuota` | `ai.usage_events` (one row per query attempt) | **Reserve → confirm/release**: a slot is reserved before the (possibly slow, possibly failing) LLM call starts; confirmed permanent on success, deleted on failure/abort — a rejected or failed question never costs quota. | `ai.service.js#reserveAiQuota`, called from `search`, `messageContext` (chat), `generateListing` |
 | `features.featuredListingsPerMonth` | `commerce.subscription_usage` (`feature = 'FEATURED_LISTINGS'`) | **Consume-and-grant atomically**: the usage increment and the `marketplace.listing_promotions` insert happen in the same transaction, so a failure can never leave the allowance spent with nothing featured. An already-featured listing is a free no-op (`alreadyFeatured: true`), checked *before* touching the ledger. | `entitlements.service.js#grantFeaturedListing` → `listings.service.js#feature` (→ `POST /listings/:listingId/feature`) |
-| `features.contactUnlocksLifetime` (FREE) / `contactUnlocksPerMonth` (PRO/BUSINESS) | `commerce.subscription_usage` (`feature = 'CONTACT_UNLOCKS'`) + `marketplace.contact_unlocks` (dedup table) | Same atomic pattern as featured listings: already-unlocked check, usage consume, and the unlock record insert all in one transaction. Re-viewing an already-unlocked listing is always free. | `entitlements.service.js#consumeContactUnlock` → `enquiries.service.js#contactReveal` (→ `POST /listings/:listingId/contact-reveal`) |
+| `features.contactUnlocks` | `commerce.subscription_usage` (`feature = 'CONTACT_UNLOCKS'`) + `marketplace.contact_unlocks` (dedup table) | Same atomic pattern as featured listings: already-unlocked check, usage consume, and the unlock record insert all in one transaction. FREE plans use a lifetime period; paid plans reset on renewal. Re-viewing an already-unlocked listing is always free. | `entitlements.service.js#consumeContactUnlock` → `enquiries.service.js#contactReveal` (→ `POST /listings/:listingId/contact-reveal`) |
 
 Every one of these is an **advisory-locked** transaction (`pg_advisory_xact_lock`, keyed per feature *and* per owner) — the same TOCTOU-safety as the live-count limits, so two concurrent requests against a quota of 1 can't both pass.
 
@@ -151,7 +150,7 @@ This also means a renewal **before** the natural cycle would have ended still re
 
 **Org-pooled features (AI quota, featured listings) inherit this correctly**: the anchor used is the organization's own active plan row, so a renewal by *any* member resets the shared pool for *every* member reading it — not just whoever happened to complete the purchase.
 
-**The one exception:** `contactUnlocksLifetime` (FREE tier) is never period-scoped to begin with — it uses a fixed sentinel period (`LIFETIME_PERIOD`, epoch to year 9999) that never resets, on purpose, matching the pricing page's "5, for the lifetime of your free account" framing.
+**The one exception:** `contactUnlocks` on a FREE plan is never period-scoped to begin with — it uses a fixed sentinel period (`LIFETIME_PERIOD`, epoch to year 9999) that never resets, on purpose, matching the pricing page's "5, for the lifetime of your free account" framing. The same key resets on each paid-plan renewal; the plan type selects the behavior.
 
 **The one fallback that keeps calendar-month behavior:** when there's no real subscription instance to anchor to at all (the ambient last-resort case from §3d, step 3 — `PLAN_FREE` itself unseeded), `resolveUsageCycle` falls back to the plain calendar month, same as the pre-existing last-resort behavior everywhere else in this system.
 
@@ -165,7 +164,7 @@ This also means a renewal **before** the natural cycle would have ended still re
 
 **A buyer on FREE reveals a seller's contact.** First reveal of a listing consumes 1 of their 5 lifetime contact unlocks. Viewing the same listing's contact again later is free (`alreadyUnlocked: true`, no ledger write). After 5 distinct listings, the 6th throws `PLAN_LIMIT_REACHED` with `{ feature: "CONTACT_UNLOCKS", used: 5, limit: 5 }`.
 
-**An admin edits `PLAN_PRO`'s `contactUnlocksPerMonth` from 50 to 100** via `PATCH /admin/plans/:planId`. There is no cache to invalidate and no deploy to run — the very next `resolveEffectivePlanForUser` call (whether from an enforcement check or `GET /me/subscription`) reads the updated `commerce.plans` row directly.
+**An admin edits `PLAN_PRO`'s `contactUnlocks` from 50 to 100** via `PATCH /admin/plans/:planId`. There is no cache to invalidate and no deploy to run — the very next `resolveEffectivePlanForUser` call (whether from an enforcement check or `GET /me/subscription`) reads the updated `commerce.plans` row directly.
 
 ---
 
@@ -184,7 +183,7 @@ This also means a renewal **before** the natural cycle would have ended still re
 | `POST /properties/:propertyId/media/complete` | owner | Enforces `imagesPerProperty`/`videosPerProperty` |
 | `POST /organizations/:organizationId/members` | org admin/owner | Enforces `teamMembers` |
 | `POST /listings/:listingId/feature` | owner | Consumes `featuredListingsPerMonth` allowance |
-| `POST /listings/:listingId/contact-reveal` | buyer | Consumes `contactUnlocksLifetime`/`contactUnlocksPerMonth` |
+| `POST /listings/:listingId/contact-reveal` | buyer | Consumes `contactUnlocks` |
 | `GET/POST /admin/plans`, `PATCH /admin/plans/:planId`, `.../activate`, `.../deactivate` | admin | Catalog CRUD — this is the *only* way plan numbers change |
 
 ## 8. `GET /me/subscription` — example response
@@ -197,7 +196,7 @@ For a user on PRO who's used 8/20 listings, 42/100 AI queries this cycle, 1/2 fe
   "status": "ACTIVE",
   "currentPeriodStart": "2026-09-05T08:15:00.000Z",
   "currentPeriodEnd": "2026-10-05T08:15:00.000Z",
-  "features": { "imagesPerProperty": 20, "videosPerProperty": 2, "teamMembers": 3, "featuredListingsPerMonth": 2, "contactUnlocksPerMonth": 50, "advancedAnalytics": true, "verifiedBadge": true, "bulkUpload": false },
+  "features": { "imagesPerProperty": 20, "videosPerProperty": 2, "teamMembers": 3, "featuredListingsPerMonth": 2, "contactUnlocks": 50, "advancedAnalytics": true, "verifiedBadge": true, "bulkUpload": false },
   "limits": {
     "activeListings": { "used": 8, "limit": 20, "remaining": 12 },
     "imagesPerProperty": { "limit": 20 },

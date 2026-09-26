@@ -75,8 +75,12 @@ export const resolveMediaLimits = async owner => {
 // Returns null for unlimited/not-set, matching the plan-lookup convention
 // used everywhere else in this file.
 export const resolveTeamMemberLimit = async organizationId => {
-  const active = await repository.resolveEffectivePlanForOwner({ organizationId });
-  const limit = active ? active.features?.teamMembers : DEFAULT_FREE_TEAM_MEMBERS;
+  const active = await repository.resolveEffectivePlanForOwner({
+    organizationId
+  });
+  const limit = active
+    ? active.features?.teamMembers
+    : DEFAULT_FREE_TEAM_MEMBERS;
   return limit === null || limit === undefined ? null : limit;
 };
 
@@ -90,10 +94,15 @@ export const assertFeature = async ({ userId, organizationId }, key) => {
     : await repository.resolveEffectivePlanForUser(userId);
   const features = active ? active.features : {};
   if (!features?.[key])
-    throw new HttpError(403, "FEATURE_NOT_AVAILABLE", `${featureLabels[key] || key} is not available on your plan.`, {
-      feature: key,
-      upgradeRequired: true
-    });
+    throw new HttpError(
+      403,
+      "FEATURE_NOT_AVAILABLE",
+      `${featureLabels[key] || key} is not available on your plan.`,
+      {
+        feature: key,
+        upgradeRequired: true
+      }
+    );
 };
 
 // Consumes one unit of the owner's plan-included monthly featured-listing
@@ -151,23 +160,27 @@ export const grantFeaturedListing = async (owner, listingId, { now } = {}) => {
 // quota defaults to the caller's own personal plan absent an explicit
 // organizationId.
 //
-// FREE's cap is a lifetime total (features.contactUnlocksLifetime) since the
-// FREE plan itself never expires/resets (see grantFreePlan); PRO/BUSINESS
-// are a monthly allowance (features.contactUnlocksPerMonth), consistent with
-// every other "N per month" feature. A plan with neither key set (limit
-// null) is treated as unlimited, same convention as every other resolveXLimit
-// in this file.
-export const consumeContactUnlock = async (actorId, listingId, { now } = {}) => {
+// `features.contactUnlocks` is the single contact-reveal allowance. It is a
+// lifetime cap for FREE plans and a renewal-period allowance for paid plans.
+// The plan type, not a duplicate feature key, selects the reset behaviour.
+// A plan with this key unset/null is unlimited, matching every other optional
+// limit in this module.
+export const consumeContactUnlock = async (
+  actorId,
+  listingId,
+  { now } = {}
+) => {
   const active = await repository.resolveEffectivePlanForUser(actorId);
   // No active row AND no seeded FREE catalog row either (liveFreeTierPlan
   // found nothing) -- fall back to the ambient Free-tier default rather than
   // treating a missing seed as "unlimited", matching resolveListingLimit/
   // resolveTeamMemberLimit's fallback convention above.
   const features = active?.features || {};
-  const lifetimeLimit = active ? features.contactUnlocksLifetime : DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME;
-  const hasLifetimeLimit = lifetimeLimit !== null && lifetimeLimit !== undefined;
-  const limit = hasLifetimeLimit ? lifetimeLimit : (features.contactUnlocksPerMonth ?? null);
-  const periodMode = hasLifetimeLimit ? "LIFETIME" : "MONTHLY";
+  const limit = active
+    ? features.contactUnlocks ?? null
+    : DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME;
+  const periodMode =
+    !active || active.planType === "FREE" ? "LIFETIME" : "MONTHLY";
 
   const result = await repository.consumeContactUnlock({
     userId: actorId,
@@ -175,7 +188,7 @@ export const consumeContactUnlock = async (actorId, listingId, { now } = {}) => 
     limit,
     periodMode,
     // Irrelevant for LIFETIME mode (never resets), but anchors a MONTHLY
-    // allowance (PRO/BUSINESS's contactUnlocksPerMonth) to this buyer's own
+    // allowance to this buyer's own
     // current plan's starts_at, same renewal-resets-usage rule as every
     // other periodic feature -- see grantFeaturedListing above.
     anchorStartsAt: active?.startsAt,
@@ -213,8 +226,14 @@ export const consumeContactUnlock = async (actorId, listingId, { now } = {}) => 
 // so it narrows the race rather than closing it completely — sufficient
 // given how tight the actual window is (createUser/addDefaultRoles must both
 // complete on one request before the other reaches this check).
-export const grantFreePlan = async ({ userId = null, organizationId = null }) => {
-  const existing = await repository.findActiveSubscriptionForOwner({ userId, organizationId });
+export const grantFreePlan = async ({
+  userId = null,
+  organizationId = null
+}) => {
+  const existing = await repository.findActiveSubscriptionForOwner({
+    userId,
+    organizationId
+  });
   if (existing) return;
   const freePlan = await repository.findPlanByCode("PLAN_FREE");
   if (!freePlan) return;

@@ -1,7 +1,11 @@
 import { randomUUID } from "crypto";
 import { isNonProductionEnv } from "../../config/env.js";
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
+import {
+  parsePagination,
+  paginationMeta,
+  splitCountedRows
+} from "../../shared/pagination.js";
 import { sha256 } from "../../utils/crypto.js";
 import logger from "../../utils/logger.js";
 import {
@@ -18,27 +22,40 @@ import * as organizationsRepository from "../organizations/organizations.reposit
 import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./commerce.repository.js";
 import { DEFAULT_FREE_AI_MONTHLY_QUOTA } from "../ai/ai.service.js";
-import { DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME, DEFAULT_FREE_LISTING_LIMIT } from "./entitlements.service.js";
+import {
+  DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME,
+  DEFAULT_FREE_LISTING_LIMIT
+} from "./entitlements.service.js";
 import { renderInvoicePdf } from "./invoice.pdf.js";
 import * as razorpayProvider from "./providers/razorpay.provider.js";
 import { splitGstMinor } from "./tax.js";
 
 const razorpayKeyId = process.env.RAZORPAY_KEY_ID || "dev-razorpay-key-id";
-const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
-const razorpayWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || razorpayKeySecret;
-const razorpayApiTimeoutMs = Number(process.env.RAZORPAY_API_TIMEOUT_MS || 10000);
+const razorpayKeySecret =
+  process.env.RAZORPAY_KEY_SECRET || "dev-razorpay-secret-change-me";
+const razorpayWebhookSecret =
+  process.env.RAZORPAY_WEBHOOK_SECRET || razorpayKeySecret;
+const razorpayApiTimeoutMs = Number(
+  process.env.RAZORPAY_API_TIMEOUT_MS || 10000
+);
 // The base URL Razorpay redirects the customer's browser to after payment —
 // must be our own deployed, publicly reachable API origin, not localhost, in
 // any environment Razorpay can actually call back to.
-const apiPublicBaseUrl = process.env.API_PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 8080}`;
+const apiPublicBaseUrl =
+  process.env.API_PUBLIC_BASE_URL ||
+  `http://localhost:${process.env.PORT || 8080}`;
 // Where we redirect the browser after handling the Payment Link callback.
-const commerceReturnBaseUrl = process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:3000";
+const commerceReturnBaseUrl =
+  process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:3000";
 // The invoice's "Sold By" block — this business's own GST registration.
 // Its state-code prefix (first 2 digits) is also what decides CGST+SGST vs
 // IGST on every invoice (see capturePaymentAndApplyEntitlements).
-const invoiceSellerLegalName = process.env.INVOICE_SELLER_LEGAL_NAME || "Zameens Investments";
-const invoiceSellerGstin = process.env.INVOICE_SELLER_GSTIN || "27DEVTESTGSTIN1Z5";
-const invoiceSellerAddress = process.env.INVOICE_SELLER_ADDRESS || "Address not configured";
+const invoiceSellerLegalName =
+  process.env.INVOICE_SELLER_LEGAL_NAME || "Zameens Investments";
+const invoiceSellerGstin =
+  process.env.INVOICE_SELLER_GSTIN || "27DEVTESTGSTIN1Z5";
+const invoiceSellerAddress =
+  process.env.INVOICE_SELLER_ADDRESS || "Address not configured";
 if (!isNonProductionEnv) {
   for (const [name, value] of [
     ["RAZORPAY_KEY_ID", process.env.RAZORPAY_KEY_ID],
@@ -98,7 +115,8 @@ const toPlanAdmin = row =>
     updatedAt: row.updatedAt
   };
 
-export const listPlans = async audience => (await repository.listActivePlans(audience)).map(toPlan);
+export const listPlans = async audience =>
+  (await repository.listActivePlans(audience)).map(toPlan);
 
 export const getPlan = async planId => {
   const row = await repository.findPlanById(planId);
@@ -108,9 +126,16 @@ export const getPlan = async planId => {
 
 export const adminListPlans = async ({ filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listPlansAdmin({ ...filters, limit, offset });
+  const counted = await repository.listPlansAdmin({
+    ...filters,
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: rows.map(toPlanAdmin), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: rows.map(toPlanAdmin),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const adminGetPlan = async planId => {
@@ -122,14 +147,19 @@ export const adminGetPlan = async planId => {
 export const createPlan = async input => {
   const existing = await repository.findPlanByCode(input.code);
   if (existing)
-    throw new HttpError(409, "PLAN_CODE_EXISTS", "A plan with this code already exists.");
+    throw new HttpError(
+      409,
+      "PLAN_CODE_EXISTS",
+      "A plan with this code already exists."
+    );
   const planId = await repository.createPlan(input);
   return getPlan(planId);
 };
 
 export const updatePlan = async ({ planId, changes }) => {
   const existing = await repository.findPlanById(planId);
-  if (!existing) throw new HttpError(404, "PLAN_NOT_FOUND", "Plan was not found.");
+  if (!existing)
+    throw new HttpError(404, "PLAN_NOT_FOUND", "Plan was not found.");
 
   if (Object.hasOwn(changes, "code") && changes.code !== existing.code) {
     if (await repository.planHasOrders(planId))
@@ -140,16 +170,25 @@ export const updatePlan = async ({ planId, changes }) => {
       );
     const duplicate = await repository.findPlanByCode(changes.code);
     if (duplicate && duplicate.id !== planId)
-      throw new HttpError(409, "PLAN_CODE_EXISTS", "A plan with this code already exists.");
+      throw new HttpError(
+        409,
+        "PLAN_CODE_EXISTS",
+        "A plan with this code already exists."
+      );
   }
 
-  await repository.updatePlan({ productId: existing.productId, planId, changes });
+  await repository.updatePlan({
+    productId: existing.productId,
+    planId,
+    changes
+  });
   return getPlan(planId);
 };
 
 export const setPlanActive = async (planId, isActive) => {
   const result = await repository.setPlanActive(planId, isActive);
-  if (!result) throw new HttpError(404, "PLAN_NOT_FOUND", "Plan was not found.");
+  if (!result)
+    throw new HttpError(404, "PLAN_NOT_FOUND", "Plan was not found.");
   return getPlan(planId);
 };
 
@@ -162,7 +201,14 @@ export const setPlanActive = async (planId, isActive) => {
 // server-side push notification for this (see docs/razorpay-integration-plan.md).
 export const myPlanSubscription = async actorId => {
   const row = await repository.findActiveSubscriptionForUser(actorId);
-  if (!row) return { hasActivePlan: false, plan: null, status: null, startsAt: null, endsAt: null };
+  if (!row)
+    return {
+      hasActivePlan: false,
+      plan: null,
+      status: null,
+      startsAt: null,
+      endsAt: null
+    };
   return {
     hasActivePlan: true,
     plan: toPlan(row),
@@ -188,11 +234,11 @@ const FREE_PLAN_DEFAULTS = {
   listingLimit: DEFAULT_FREE_LISTING_LIMIT,
   featuredDays: null,
   verificationIncluded: false,
-  // contactUnlocksLifetime mirrors entitlements.service.js#consumeContactUnlock's
+  // contactUnlocks mirrors entitlements.service.js#consumeContactUnlock's
   // own DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME fallback -- without it, this
   // display path would report contactUnlocks as unlimited (limit: null) while
   // enforcement still caps it at 5, the moment PLAN_FREE itself isn't seeded.
-  features: { contactUnlocksLifetime: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME },
+  features: { contactUnlocks: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME },
   isActive: true,
   aiMonthlyQuota: DEFAULT_FREE_AI_MONTHLY_QUOTA
 };
@@ -211,15 +257,12 @@ const limitBlock = (used, limit) =>
 export const mySubscription = async (actorId, { now } = {}) => {
   const active = await repository.resolveEffectivePlanForUser(actorId);
   const plan = active ? toPlan(active) : FREE_PLAN_DEFAULTS;
-  // contactUnlocksLifetime (FREE) vs contactUnlocksPerMonth (PRO/BUSINESS) --
-  // see entitlements.service.js#consumeContactUnlock for why these are two
-  // distinct feature keys with different reset semantics.
-  const hasContactLifetimeLimit =
-    plan.features.contactUnlocksLifetime !== null && plan.features.contactUnlocksLifetime !== undefined;
-  const contactUnlockLimit = hasContactLifetimeLimit
-    ? plan.features.contactUnlocksLifetime
-    : (plan.features.contactUnlocksPerMonth ?? null);
-  const contactUnlockPeriodMode = hasContactLifetimeLimit ? "LIFETIME" : "MONTHLY";
+  // The single contactUnlocks allowance is lifetime on FREE and renews with
+  // any paid plan. The plan type determines the period, avoiding duplicate
+  // configuration keys for one entitlement.
+  const contactUnlockLimit = plan.features.contactUnlocks ?? null;
+  const contactUnlockPeriodMode =
+    plan.planType === "FREE" ? "LIFETIME" : "MONTHLY";
   // Anchors every MONTHLY counter below to this user's own current plan's
   // starts_at (undefined when active is the ambient FREE_PLAN_DEFAULTS
   // fallback, which has no real subscription instance to anchor to --
@@ -228,8 +271,16 @@ export const mySubscription = async (actorId, { now } = {}) => {
   // entitlements.service.js#consumeContactUnlock/grantFeaturedListing, which
   // enforce against this exact same anchor.
   const anchorStartsAt = active?.startsAt;
-  const [listingsUsed, aiUsed, featuredUsed, contactUnlocksUsed] = await Promise.all([
-    listingsRepository.countLiveForOwner({ userId: actorId, organizationId: null }),
+  const [
+    listingsUsed,
+    aiUsed,
+    featuredUsed,
+    contactUnlocksUsed
+  ] = await Promise.all([
+    listingsRepository.countLiveForOwner({
+      userId: actorId,
+      organizationId: null
+    }),
     aiRepository.countMonthlyUsageForUser(actorId, { anchorStartsAt, now }),
     repository.countSubscriptionUsageThisPeriod({
       userId: actorId,
@@ -248,7 +299,11 @@ export const mySubscription = async (actorId, { now } = {}) => {
     })
   ]);
   return {
-    plan: { code: plan.code, name: plan.name, monthlyPrice: plan.amountMinor / 100 },
+    plan: {
+      code: plan.code,
+      name: plan.name,
+      monthlyPrice: plan.amountMinor / 100
+    },
     status: active ? active.subscriptionStatus : "ACTIVE",
     currentPeriodStart: active ? active.startsAt : null,
     currentPeriodEnd: active ? active.endsAt : null,
@@ -257,7 +312,10 @@ export const mySubscription = async (actorId, { now } = {}) => {
       activeListings: limitBlock(listingsUsed, plan.listingLimit),
       imagesPerProperty: { limit: plan.features.imagesPerProperty ?? null },
       videosPerProperty: { limit: plan.features.videosPerProperty ?? null },
-      featuredListings: limitBlock(featuredUsed, plan.features.featuredListingsPerMonth ?? null),
+      featuredListings: limitBlock(
+        featuredUsed,
+        plan.features.featuredListingsPerMonth ?? null
+      ),
       aiQueries: limitBlock(aiUsed, plan.aiMonthlyQuota),
       contactUnlocks: limitBlock(contactUnlocksUsed, contactUnlockLimit)
     }
@@ -306,10 +364,19 @@ const toOrder = async row => (await toOrders([row]))[0];
 // (docs/razorpay-integration-plan.md Section 7). This is the only point where
 // the buyer's identity and the target are both known ahead of any payment, so
 // ownership cannot be deferred to capture/webhook time.
-const validateOrderItemTarget = async ({ product, item, actorId, organizationId }) => {
+const validateOrderItemTarget = async ({
+  product,
+  item,
+  actorId,
+  organizationId
+}) => {
   if (product.type === "PLAN") {
     if (item.targetType || item.targetId)
-      throw new HttpError(400, "INVALID_TARGET", "PLAN items must not include a target.");
+      throw new HttpError(
+        400,
+        "INVALID_TARGET",
+        "PLAN items must not include a target."
+      );
     return;
   }
   if (product.type === "PROMOTION") {
@@ -325,12 +392,19 @@ const validateOrderItemTarget = async ({ product, item, actorId, organizationId 
         "PRODUCT_MISCONFIGURED",
         "This promotion product has no catalog configuration."
       );
-    const listing = await repository.findOwnedListingForPromotion(item.targetId, {
-      actorId,
-      organizationId
-    });
+    const listing = await repository.findOwnedListingForPromotion(
+      item.targetId,
+      {
+        actorId,
+        organizationId
+      }
+    );
     if (!listing)
-      throw new HttpError(409, "TARGET_NOT_OWNED", "You do not own the listing you are promoting.");
+      throw new HttpError(
+        409,
+        "TARGET_NOT_OWNED",
+        "You do not own the listing you are promoting."
+      );
     return;
   }
   if (product.type === "SERVICE") {
@@ -340,7 +414,10 @@ const validateOrderItemTarget = async ({ product, item, actorId, organizationId 
         "INVALID_TARGET",
         "SERVICE items require targetType SERVICE_REQUEST and a targetId."
       );
-    const serviceRequest = await repository.findPayableServiceRequest(item.targetId, actorId);
+    const serviceRequest = await repository.findPayableServiceRequest(
+      item.targetId,
+      actorId
+    );
     if (!serviceRequest)
       throw new HttpError(
         409,
@@ -352,7 +429,10 @@ const validateOrderItemTarget = async ({ product, item, actorId, organizationId 
 
 export const createOrder = async ({ actorId, input }) => {
   if (input.organizationId) {
-    const membership = await organizationsRepository.findMembership(input.organizationId, actorId);
+    const membership = await organizationsRepository.findMembership(
+      input.organizationId,
+      actorId
+    );
     if (!membership || membership.status !== "ACTIVE")
       throw new HttpError(
         403,
@@ -375,7 +455,12 @@ export const createOrder = async ({ actorId, input }) => {
         "INVALID_PRODUCT",
         `productId ${item.productId} is not a purchasable product.`
       );
-    await validateOrderItemTarget({ product, item, actorId, organizationId: input.organizationId });
+    await validateOrderItemTarget({
+      product,
+      item,
+      actorId,
+      organizationId: input.organizationId
+    });
     const unitAmountMinor = Number(product.amountMinor);
     const totalAmountMinor = unitAmountMinor * item.quantity;
     subtotalMinor += totalAmountMinor;
@@ -440,10 +525,17 @@ const ownedOrderRow = async (orderId, actorId) => {
 // from data already persisted at capture time.
 export const generateOrderInvoice = async ({ orderId, actor }) => {
   const isAdmin = Boolean(actor.roles?.includes("ADMIN"));
-  const row = await repository.findOrderInvoiceRow(orderId, isAdmin ? null : actor.id);
+  const row = await repository.findOrderInvoiceRow(
+    orderId,
+    isAdmin ? null : actor.id
+  );
   if (!row) throw new HttpError(404, "ORDER_NOT_FOUND", "Order was not found.");
   if (!row.invoiceNumber)
-    throw new HttpError(409, "INVOICE_NOT_AVAILABLE", "This order has not been paid yet.");
+    throw new HttpError(
+      409,
+      "INVOICE_NOT_AVAILABLE",
+      "This order has not been paid yet."
+    );
 
   // The order-level cgst/sgst/igst_minor columns only hold the *summed*
   // split (that's all capturePaymentAndApplyEntitlements needs to persist);
@@ -453,10 +545,18 @@ export const generateOrderInvoice = async ({ orderId, actor }) => {
   const isIntraState = Number(row.igstMinor) === 0;
   const items = (await repository.itemsForOrders([row.id])).map(item => ({
     ...item,
-    ...splitGstMinor({ totalAmountMinor: item.totalAmountMinor, gstRateBps: item.gstRateBps, isIntraState })
+    ...splitGstMinor({
+      totalAmountMinor: item.totalAmountMinor,
+      gstRateBps: item.gstRateBps,
+      isIntraState
+    })
   }));
   const buffer = await renderInvoicePdf({
-    seller: { legalName: invoiceSellerLegalName, gstin: invoiceSellerGstin, address: invoiceSellerAddress },
+    seller: {
+      legalName: invoiceSellerLegalName,
+      gstin: invoiceSellerGstin,
+      address: invoiceSellerAddress
+    },
     order: row,
     items
   });
@@ -465,15 +565,25 @@ export const generateOrderInvoice = async ({ orderId, actor }) => {
 
 export const listMyOrders = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listForUser(actorId, filters, { limit, offset });
+  const counted = await repository.listForUser(actorId, filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: await toOrders(rows), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: await toOrders(rows),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const createPaymentIntent = async ({ actorId, orderId, input }) => {
   const order = await ownedOrderRow(orderId, actorId);
   if (order.status === "PAID")
-    throw new HttpError(409, "ORDER_ALREADY_PAID", "Order has already been paid.");
+    throw new HttpError(
+      409,
+      "ORDER_ALREADY_PAID",
+      "Order has already been paid."
+    );
   if (!["CREATED", "PAYMENT_PENDING"].includes(order.status))
     throw new HttpError(
       409,
@@ -541,7 +651,8 @@ export const createPaymentIntent = async ({ actorId, orderId, input }) => {
     amountMinor: Number(order.totalMinor),
     currency: order.currency
   });
-  if (order.status !== "PAYMENT_PENDING") await repository.setOrderStatus(order.id, "PAYMENT_PENDING");
+  if (order.status !== "PAYMENT_PENDING")
+    await repository.setOrderStatus(order.id, "PAYMENT_PENDING");
 
   return {
     paymentId: payment.id,
@@ -564,7 +675,8 @@ export const paymentMatchesProvider = ({
 }) =>
   providerStatus === "captured" &&
   Number(providerAmountMinor) === Number(payment.amountMinor) &&
-  String(providerCurrency || "").toUpperCase() === String(payment.currency || "").toUpperCase();
+  String(providerCurrency || "").toUpperCase() ===
+    String(payment.currency || "").toUpperCase();
 
 // Fired once a payment is actually captured, from both the callback and
 // webhook paths — previously neither notified the buyer at all.
@@ -597,9 +709,13 @@ export const paymentCallback = async ({ query }) => {
     },
     keySecret: razorpayKeySecret
   });
-  if (!signatureValid) return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
+  if (!signatureValid)
+    return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
 
-  const payment = await repository.findPaymentByProviderOrderId("RAZORPAY", paymentLinkId);
+  const payment = await repository.findPaymentByProviderOrderId(
+    "RAZORPAY",
+    paymentLinkId
+  );
   if (!payment) return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
 
   if (payment.status !== "CAPTURED" && status === "paid") {
@@ -622,13 +738,22 @@ export const paymentCallback = async ({ query }) => {
           providerStatus: providerPayment?.status
         })
       )
-        return { redirectUrl: paymentResultUrl({ orderId: payment.orderId, status: "pending" }) };
+        return {
+          redirectUrl: paymentResultUrl({
+            orderId: payment.orderId,
+            status: "pending"
+          })
+        };
 
       const captured = await repository.capturePaymentAndApplyEntitlements({
         id: payment.id,
         orderId: payment.orderId,
         providerPaymentId: paymentId,
-        providerPayload: { source: "payment_link_callback", query, providerPayment },
+        providerPayload: {
+          source: "payment_link_callback",
+          query,
+          providerPayment
+        },
         sellerGstin: invoiceSellerGstin
       });
       await notifyPaymentCaptured(captured);
@@ -636,7 +761,12 @@ export const paymentCallback = async ({ query }) => {
       // The webhook is authoritative and will retry this independently — the
       // browser must still get a redirect, not a raw error page, so surface
       // a "pending" status rather than letting this throw out of the handler.
-      return { redirectUrl: paymentResultUrl({ orderId: payment.orderId, status: "pending" }) };
+      return {
+        redirectUrl: paymentResultUrl({
+          orderId: payment.orderId,
+          status: "pending"
+        })
+      };
     }
   }
 
@@ -713,18 +843,28 @@ const toPaymentAdminDetail = async row => {
 
 export const adminListPayments = async ({ filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listPaymentsAdmin(filters, { limit, offset });
+  const counted = await repository.listPaymentsAdmin(filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: rows.map(toPaymentAdmin), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: rows.map(toPaymentAdmin),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const adminGetPayment = async paymentId => {
   const row = await repository.findPaymentByIdAdmin(paymentId);
-  if (!row) throw new HttpError(404, "PAYMENT_NOT_FOUND", "Payment was not found.");
+  if (!row)
+    throw new HttpError(404, "PAYMENT_NOT_FOUND", "Payment was not found.");
   return toPaymentAdminDetail(row);
 };
 
-const capturableWebhookEvents = new Set(["payment.captured", "payment_link.paid"]);
+const capturableWebhookEvents = new Set([
+  "payment.captured",
+  "payment_link.paid"
+]);
 
 export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   const provider = "RAZORPAY";
@@ -741,7 +881,8 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
     );
 
   const eventType = body?.event || "UNKNOWN";
-  const eventId = body?.id || sha256(rawBody?.length ? rawBody : JSON.stringify(body || {}));
+  const eventId =
+    body?.id || sha256(rawBody?.length ? rawBody : JSON.stringify(body || {}));
   // Resolved via the notes we set ourselves at Payment Link creation time,
   // not via order_id/payment_link_id field names on the webhook payload —
   // those differ by event type in ways not worth depending on here. Resolved
@@ -751,7 +892,9 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   // of querying twice.
   const paymentEntity = body?.payload?.payment?.entity;
   const internalPaymentId = paymentEntity?.notes?.internalPaymentId || null;
-  const payment = internalPaymentId ? await repository.findPaymentById(internalPaymentId) : null;
+  const payment = internalPaymentId
+    ? await repository.findPaymentById(internalPaymentId)
+    : null;
 
   const event = await repository.insertWebhookEvent({
     provider,
@@ -763,7 +906,11 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   if (!event) return { received: true, duplicate: true };
 
   try {
-    if (payment && capturableWebhookEvents.has(eventType) && payment.status !== "CAPTURED") {
+    if (
+      payment &&
+      capturableWebhookEvents.has(eventType) &&
+      payment.status !== "CAPTURED"
+    ) {
       // Never trust the event type alone — confirm the payment entity's own
       // amount, currency, and status against what we quoted when the
       // Payment Link was created before marking anything captured.
@@ -788,8 +935,15 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
         sellerGstin: invoiceSellerGstin
       });
       await notifyPaymentCaptured(captured);
-    } else if (payment && eventType === "payment.failed" && payment.status === "CREATED") {
-      const failed = await repository.failPayment({ id: payment.id, providerPayload: body });
+    } else if (
+      payment &&
+      eventType === "payment.failed" &&
+      payment.status === "CREATED"
+    ) {
+      const failed = await repository.failPayment({
+        id: payment.id,
+        providerPayload: body
+      });
       if (!failed.ok) throw failed.error;
     }
     await repository.markWebhookProcessed(event.id);
@@ -822,7 +976,8 @@ export const listServices = async serviceType =>
 
 export const getService = async serviceId => {
   const row = await repository.findServiceById(serviceId);
-  if (!row) throw new HttpError(404, "SERVICE_NOT_FOUND", "Service was not found.");
+  if (!row)
+    throw new HttpError(404, "SERVICE_NOT_FOUND", "Service was not found.");
   return toServiceItem(row);
 };
 
@@ -840,7 +995,9 @@ const toServiceRequests = async (rows, { includeInternal = false } = {}) => {
     repository.servicesByIds([...new Set(rows.map(row => row.serviceId))]),
     repository.filesForServiceRequests(rows.map(row => row.id))
   ]);
-  const serviceById = new Map(services.map(row => [row.id, toServiceItem(row)]));
+  const serviceById = new Map(
+    services.map(row => [row.id, toServiceItem(row)])
+  );
   const filesByRequest = new Map();
   for (const file of fileRows) {
     const list = filesByRequest.get(file.serviceRequestId) || [];
@@ -856,7 +1013,9 @@ const toServiceRequests = async (rows, { includeInternal = false } = {}) => {
       status: row.status,
       orderId: row.orderId,
       customerNotes: row.customerNotes,
-      files: await Promise.all((filesByRequest.get(row.id) || []).map(serviceFileResponse)),
+      files: await Promise.all(
+        (filesByRequest.get(row.id) || []).map(serviceFileResponse)
+      ),
       reportDownloadUrl:
         row.status === "COMPLETED" && row.completedReportStorageKey
           ? await signedReadUrl(row.completedReportStorageKey)
@@ -875,14 +1034,23 @@ const toServiceRequests = async (rows, { includeInternal = false } = {}) => {
     }))
   );
 };
-const toServiceRequest = async (row, opts) => (await toServiceRequests([row], opts))[0];
+const toServiceRequest = async (row, opts) =>
+  (await toServiceRequests([row], opts))[0];
 
 export const createServiceRequest = async ({ actorId, input }) => {
   const service = await repository.findServiceById(input.serviceId);
   if (!service || !service.isActive)
-    throw new HttpError(400, "INVALID_SERVICE", "serviceId is not a purchasable service.");
+    throw new HttpError(
+      400,
+      "INVALID_SERVICE",
+      "serviceId is not a purchasable service."
+    );
   if (service.requiresProperty && !input.propertyId)
-    throw new HttpError(400, "PROPERTY_REQUIRED", "propertyId is required for this service.");
+    throw new HttpError(
+      400,
+      "PROPERTY_REQUIRED",
+      "propertyId is required for this service."
+    );
 
   const result = await repository.createServiceRequest({
     serviceId: input.serviceId,
@@ -895,15 +1063,27 @@ export const createServiceRequest = async ({ actorId, input }) => {
   });
   if (!result.ok) {
     if (result.error?.code === "23503")
-      throw new HttpError(400, "INVALID_REFERENCE", "propertyId or listingId does not exist.");
+      throw new HttpError(
+        400,
+        "INVALID_REFERENCE",
+        "propertyId or listingId does not exist."
+      );
     throw result.error;
   }
   return toServiceRequest(result.data);
 };
 
 export const ownedServiceRequest = async (requestId, actorId) => {
-  const row = await repository.findServiceRequestOwnedByUser(requestId, actorId);
-  if (!row) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  const row = await repository.findServiceRequestOwnedByUser(
+    requestId,
+    actorId
+  );
+  if (!row)
+    throw new HttpError(
+      404,
+      "SERVICE_REQUEST_NOT_FOUND",
+      "Service request was not found."
+    );
   return row;
 };
 
@@ -912,24 +1092,43 @@ export const serviceRequestForActor = async ({ requestId, actor }) => {
   const row = isAdmin
     ? await repository.findServiceRequestById(requestId)
     : await repository.findServiceRequestOwnedByUser(requestId, actor.id);
-  if (!row) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  if (!row)
+    throw new HttpError(
+      404,
+      "SERVICE_REQUEST_NOT_FOUND",
+      "Service request was not found."
+    );
   return toServiceRequest(row, { includeInternal: isAdmin });
 };
 
 export const myServiceRequests = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listServiceRequestsForUser(actorId, filters, { limit, offset });
+  const counted = await repository.listServiceRequestsForUser(
+    actorId,
+    filters,
+    { limit, offset }
+  );
   const { data: rows, total } = splitCountedRows(counted);
-  return { data: await toServiceRequests(rows), meta: paginationMeta({ page, limit, total }) };
+  return {
+    data: await toServiceRequests(rows),
+    meta: paginationMeta({ page, limit, total })
+  };
 };
 
 export const createServiceRequestFileUpload = ({ requestId, input }) =>
   signedWriteUrl({
-    storageKey: createServiceRequestStorageKey({ requestId, fileName: input.fileName }),
+    storageKey: createServiceRequestStorageKey({
+      requestId,
+      fileName: input.fileName
+    }),
     mimeType: input.mimeType
   });
 
-export const completeServiceRequestFile = async ({ requestId, actorId, input }) => {
+export const completeServiceRequestFile = async ({
+  requestId,
+  actorId,
+  input
+}) => {
   if (!belongsToServiceRequest({ requestId, storageKey: input.storageKey }))
     throw new HttpError(
       400,
@@ -949,7 +1148,10 @@ export const completeServiceRequestFile = async ({ requestId, actorId, input }) 
 
 export const listServiceRequestsAdmin = async ({ filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listServiceRequestsAdmin(filters, { limit, offset });
+  const counted = await repository.listServiceRequestsAdmin(filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
   return {
     data: await toServiceRequests(rows, { includeInternal: true }),
@@ -959,15 +1161,30 @@ export const listServiceRequestsAdmin = async ({ filters, query }) => {
 
 export const adminGetServiceRequest = async requestId => {
   const row = await repository.findServiceRequestById(requestId);
-  if (!row) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  if (!row)
+    throw new HttpError(
+      404,
+      "SERVICE_REQUEST_NOT_FOUND",
+      "Service request was not found."
+    );
   return toServiceRequest(row, { includeInternal: true });
 };
 
-const reportableStates = new Set(["REQUESTED", "PAYMENT_PENDING", "IN_PROGRESS", "DOCUMENTS_REQUIRED"]);
+const reportableStates = new Set([
+  "REQUESTED",
+  "PAYMENT_PENDING",
+  "IN_PROGRESS",
+  "DOCUMENTS_REQUIRED"
+]);
 
 export const updateServiceRequestStatus = async ({ requestId, changes }) => {
   const existing = await repository.findServiceRequestById(requestId);
-  if (!existing) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  if (!existing)
+    throw new HttpError(
+      404,
+      "SERVICE_REQUEST_NOT_FOUND",
+      "Service request was not found."
+    );
   const result = await repository.setServiceRequestStatus({
     id: requestId,
     status: changes.status,
@@ -979,16 +1196,29 @@ export const updateServiceRequestStatus = async ({ requestId, changes }) => {
 
 export const createServiceReportUpload = async ({ requestId, input }) => {
   const existing = await repository.findServiceRequestById(requestId);
-  if (!existing) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  if (!existing)
+    throw new HttpError(
+      404,
+      "SERVICE_REQUEST_NOT_FOUND",
+      "Service request was not found."
+    );
   return signedWriteUrl({
-    storageKey: createServiceReportStorageKey({ requestId, fileName: input.fileName }),
+    storageKey: createServiceReportStorageKey({
+      requestId,
+      fileName: input.fileName
+    }),
     mimeType: input.mimeType
   });
 };
 
 export const submitServiceReport = async ({ requestId, input }) => {
   const existing = await repository.findServiceRequestById(requestId);
-  if (!existing) throw new HttpError(404, "SERVICE_REQUEST_NOT_FOUND", "Service request was not found.");
+  if (!existing)
+    throw new HttpError(
+      404,
+      "SERVICE_REQUEST_NOT_FOUND",
+      "Service request was not found."
+    );
   if (!reportableStates.has(existing.status))
     throw new HttpError(
       409,
