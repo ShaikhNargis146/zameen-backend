@@ -74,6 +74,9 @@ export const archiveContent = async (req, res) =>
 export const marketTrends = async (req, res) =>
   ok(res, await service.listMarketTrends(validation.marketTrendQuery(req.query || {})));
 
+export const adminGetSeries = async (req, res) =>
+  ok(res, await service.getSeriesAdmin(validation.uuid(req.params.seriesId, "seriesId")));
+
 export const createSeries = async (req, res) =>
   created(res, await service.createSeries(validation.createSeries(req.body || {})));
 

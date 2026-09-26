@@ -301,6 +301,122 @@ export const sellerListings = async input => {
     limit: input.limit
   };
 };
+// Shared by publicDetail (buyer-facing, PUBLISHED-only) and adminListing
+// (any status, moderation-only fields included). Admin-only source columns
+// (rejectionReason, submittedAt, approvedAt, soldAt, createdAt, updatedAt,
+// sellerPhoneE164, sellerEmail) are simply absent on the public row, so they
+// come through here as undefined and JSON.stringify drops them from the
+// response — the public payload never has to filter them back out.
+const buildListingDetail = async (
+  listing,
+  { media, amenities, parcelSummary, verification, landPassport, scanner, promotions }
+) => ({
+  listing: {
+    id: listing.listingId,
+    listingCode: listing.listingCode,
+    propertyId: listing.propertyId,
+    transactionType: listing.transactionType,
+    title: listing.title,
+    description: listing.description,
+    priceAmountMinor: listing.priceAmountMinor,
+    currency: listing.currency,
+    isNegotiable: listing.isNegotiable,
+    reviewStatus: listing.reviewStatus,
+    status: listing.listingStatus,
+    rejectionReason: listing.rejectionReason,
+    submittedAt: listing.submittedAt,
+    approvedAt: listing.approvedAt,
+    publishedAt: listing.publishedAt,
+    expiresAt: listing.expiresAt,
+    soldAt: listing.soldAt,
+    createdAt: listing.createdAt,
+    updatedAt: listing.updatedAt
+  },
+  property: {
+    id: listing.propertyId,
+    publicCode: listing.propertyCode,
+    source: listing.propertySource,
+    status: listing.propertyStatus,
+    propertyType: {
+      id: listing.propertyTypeId,
+      code: listing.propertyTypeCode,
+      name: listing.propertyType
+    },
+    landUseType: listing.landUseTypeId
+      ? {
+          id: listing.landUseTypeId,
+          code: listing.landUseTypeCode,
+          name: listing.landUseType
+        }
+      : null,
+    ownershipType: listing.ownershipTypeId
+      ? {
+          id: listing.ownershipTypeId,
+          code: listing.ownershipTypeCode,
+          name: listing.ownershipType
+        }
+      : null,
+    completionPercent: scanner.readinessScore
+  },
+  landDetails: {
+    areaValue: listing.areaValue,
+    areaUnitId: listing.areaUnitId,
+    areaUnitCode: listing.areaUnitCode,
+    normalizedAreaSqft: listing.areaSqft,
+    lengthValue: listing.lengthValue,
+    widthValue: listing.widthValue,
+    dimensionUnit: listing.dimensionUnit,
+    frontageM: listing.frontageM,
+    roadWidthM: listing.roadWidthM,
+    roadType: listing.roadType,
+    facing: listing.facing,
+    openSides: listing.openSides,
+    isCornerPlot: listing.isCornerPlot,
+    hasBoundaryWall: listing.hasBoundaryWall,
+    terrain: listing.terrain,
+    roadAccessType: listing.roadAccessType
+  },
+  location: listing.locationId
+    ? {
+        locationId: listing.locationId,
+        location: {
+          id: listing.locationId,
+          name: listing.locationName,
+          type: listing.locationType,
+          parentId: listing.locationParentId,
+          stateCode: listing.locationStateCode
+        },
+        pincode: listing.pincode,
+        addressLine: listing.addressLine,
+        landmark: listing.landmark,
+        formattedAddress: listing.formattedAddress,
+        latitude: listing.latitude,
+        longitude: listing.longitude,
+        locationPrecision: listing.locationPrecision,
+        showExactLocation: listing.showExactLocation
+      }
+    : null,
+  media: await signMedia(media),
+  amenities,
+  parcelSummary,
+  seller: {
+    id: listing.sellerId,
+    displayName: listing.sellerDisplayName,
+    phoneE164: listing.sellerPhoneE164,
+    email: listing.sellerEmail,
+    organization: listing.organizationId
+      ? {
+          id: listing.organizationId,
+          name: listing.organizationName,
+          type: listing.organizationType
+        }
+      : null
+  },
+  verification,
+  landPassport,
+  scanner,
+  promotions: promotions.map(item => item.promotionType)
+});
 export const publicDetail = async (id, actorId = null) => {
   const listing = await repository.publishedDetail(id);
   if (!listing)
@@ -331,103 +447,15 @@ export const publicDetail = async (id, actorId = null) => {
     propertyScanner(listing.propertyId)
   ]);
   return {
-    listing: {
-      id: listing.listingId,
-      listingCode: listing.listingCode,
-      propertyId: listing.propertyId,
-      transactionType: listing.transactionType,
-      title: listing.title,
-      description: listing.description,
-      priceAmountMinor: listing.priceAmountMinor,
-      currency: listing.currency,
-      isNegotiable: listing.isNegotiable,
-      reviewStatus: listing.reviewStatus,
-      status: listing.listingStatus,
-      publishedAt: listing.publishedAt,
-      expiresAt: listing.expiresAt
-    },
-    property: {
-      id: listing.propertyId,
-      publicCode: listing.propertyCode,
-      source: listing.propertySource,
-      status: listing.propertyStatus,
-      propertyType: {
-        id: listing.propertyTypeId,
-        code: listing.propertyTypeCode,
-        name: listing.propertyType
-      },
-      landUseType: listing.landUseTypeId
-        ? {
-            id: listing.landUseTypeId,
-            code: listing.landUseTypeCode,
-            name: listing.landUseType
-          }
-        : null,
-      ownershipType: listing.ownershipTypeId
-        ? {
-            id: listing.ownershipTypeId,
-            code: listing.ownershipTypeCode,
-            name: listing.ownershipType
-          }
-        : null,
-      completionPercent: scanner.readinessScore
-    },
-    landDetails: {
-      areaValue: listing.areaValue,
-      areaUnitId: listing.areaUnitId,
-      areaUnitCode: listing.areaUnitCode,
-      normalizedAreaSqft: listing.areaSqft,
-      lengthValue: listing.lengthValue,
-      widthValue: listing.widthValue,
-      dimensionUnit: listing.dimensionUnit,
-      frontageM: listing.frontageM,
-      roadWidthM: listing.roadWidthM,
-      roadType: listing.roadType,
-      facing: listing.facing,
-      openSides: listing.openSides,
-      isCornerPlot: listing.isCornerPlot,
-      hasBoundaryWall: listing.hasBoundaryWall,
-      terrain: listing.terrain,
-      roadAccessType: listing.roadAccessType
-    },
-    location: listing.locationId
-      ? {
-          locationId: listing.locationId,
-          location: {
-            id: listing.locationId,
-            name: listing.locationName,
-            type: listing.locationType,
-            parentId: listing.locationParentId,
-            stateCode: listing.locationStateCode
-          },
-          pincode: listing.pincode,
-          addressLine: listing.addressLine,
-          landmark: listing.landmark,
-          formattedAddress: listing.formattedAddress,
-          latitude: listing.latitude,
-          longitude: listing.longitude,
-          locationPrecision: listing.locationPrecision,
-          showExactLocation: listing.showExactLocation
-        }
-      : null,
-    media: await signMedia(media),
-    amenities,
-    parcelSummary,
-    seller: {
-      id: listing.sellerId,
-      displayName: listing.sellerDisplayName,
-      organization: listing.organizationId
-        ? {
-            id: listing.organizationId,
-            name: listing.organizationName,
-            type: listing.organizationType
-          }
-        : null
-    },
-    verification,
-    landPassport,
-    scanner,
-    promotions: promotions.map(item => item.promotionType),
+    ...(await buildListingDetail(listing, {
+      media,
+      amenities,
+      parcelSummary,
+      verification,
+      landPassport,
+      scanner,
+      promotions
+    })),
     isFavorite: favorite.isFavorite
   };
 };
@@ -456,13 +484,35 @@ export const adminListings = async input => {
   };
 };
 export const adminListing = async id => {
-  const listing = await repository.adminListing(id);
+  const listing = await repository.adminDetail(id);
   if (!listing)
     throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
-  return {
-    ...listing,
-    ...(await listingPropertyContext(listing.propertyId))
-  };
+  const [
+    media,
+    amenities,
+    promotions,
+    parcelSummary,
+    verification,
+    landPassport,
+    scanner
+  ] = await Promise.all([
+    repository.media(listing.propertyId),
+    repository.amenities(listing.propertyId),
+    repository.promotions(id),
+    repository.parcelSummary(listing.propertyId),
+    verificationSummary(listing.propertyId),
+    propertyPassport(listing.propertyId),
+    propertyScanner(listing.propertyId)
+  ]);
+  return buildListingDetail(listing, {
+    media,
+    amenities,
+    parcelSummary,
+    verification,
+    landPassport,
+    scanner,
+    promotions
+  });
 };
 export const approve = async ({ id, approval, actorId }) => {
   const before = await repository.summary(id);

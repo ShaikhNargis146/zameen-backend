@@ -739,6 +739,20 @@
       "name": "Market Trends",
       "item": [
         {
+          "name": "Admin: List market trend series",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/market-trends"
+          }
+        },
+        {
+          "name": "Admin: Market trend series details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/market-trends/{{seriesId}}"
+          }
+        },
+        {
           "name": "Admin: Create market trend series",
           "request": {
             "method": "POST",

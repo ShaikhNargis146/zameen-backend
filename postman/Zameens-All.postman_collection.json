@@ -1,0 +1,3805 @@
+{
+	"info": {
+		"name": "Zameens \u2014 Full API (merged)",
+		"description": "Merged from Zameens-Admin, Zameens-Commerce-Payments, Zameens-Dev1, Zameens-Dev2 and Zameens-Organizations into a single collection, deduplicated by module. Auth defaults to {{accessToken}}; everything under Admin defaults to {{adminAccessToken}} via a folder-level auth override.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{accessToken}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Request OTP (User \u2014 phone)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('challengeId', body.data.challengeId);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"destination\": \"9876543210\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\",\n  \"countryCode\": \"+91\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/otp/request"
+					}
+				},
+				{
+					"name": "Verify OTP (User) \u2192 sets accessToken",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) {",
+									"  pm.collectionVariables.set('accessToken', body.data.accessToken);",
+									"  pm.collectionVariables.set('refreshToken', body.data.refreshToken || '');",
+									"  pm.collectionVariables.set('userId', body.data.user.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"replace-with-delivered-otp\",\n  \"deviceId\": \"postman\",\n  \"deviceName\": \"Postman\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/otp/verify"
+					}
+				},
+				{
+					"name": "Refresh session (User)",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/refresh"
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/auth/logout"
+					}
+				},
+				{
+					"name": "Logout all sessions",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/auth/logout-all"
+					}
+				},
+				{
+					"name": "Request OTP (Admin \u2014 phone)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"auth": {
+							"type": "noauth"
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"destination\": \"9876511111\",\n  \"countryCode\": \"+91\",\n  \"channel\": \"SMS\",\n  \"purpose\": \"LOGIN\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/otp/request"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"challengeId\", json.data.challengeId);",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Verify OTP (Admin) \u2192 sets adminAccessToken",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"auth": {
+							"type": "noauth"
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"{{otp}}\",\n  \"deviceId\": \"admin-postman\",\n  \"deviceName\": \"Postman Admin Collection\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/otp/verify"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"adminAccessToken\", json.data.accessToken);",
+									"  pm.collectionVariables.set(\"adminRefreshToken\", json.data.refreshToken);",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Refresh token (Admin)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"auth": {
+							"type": "noauth"
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"{{adminRefreshToken}}\",\n  \"deviceId\": \"admin-postman\",\n  \"deviceName\": \"Postman Admin Collection\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/refresh"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"adminAccessToken\", json.data.accessToken);",
+									"  pm.collectionVariables.set(\"adminRefreshToken\", json.data.refreshToken);",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Request OTP (Member \u2014 email)",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"destination\": \"{{memberEmail}}\",\n  \"channel\": \"EMAIL\",\n  \"purpose\": \"LOGIN\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/otp/request"
+					},
+					"description": "Run Members / Add member (invite by email) first \u2014 this logs in as the account that invite just created (or reused) for {{memberEmail}}.",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"challengeId\", json.data.challengeId);",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Verify OTP (Member) \u2192 sets memberAccessToken",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"challengeId\": \"{{challengeId}}\",\n  \"otp\": \"{{otp}}\",\n  \"deviceId\": \"orgs-postman-member-user\",\n  \"deviceName\": \"Zameens Organizations Postman \\u2014 Member User\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/otp/verify"
+					},
+					"description": "OTP is logged to the server console in non-production \u2014 set the {{otp}} collection variable from there before running this.",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"memberAccessToken\", json.data.accessToken);",
+									"  pm.collectionVariables.set(\"memberRefreshToken\", json.data.refreshToken);",
+									"  pm.collectionVariables.set(\"memberUserId\", json.data.user.id);",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Refresh token (Member)",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"{{memberRefreshToken}}\"\n}"
+						},
+						"url": "{{baseUrl}}/auth/refresh"
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"memberAccessToken\", json.data.accessToken);",
+									"  pm.collectionVariables.set(\"memberRefreshToken\", json.data.refreshToken);",
+									"}"
+								]
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "My profile",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/users/me"
+					}
+				},
+				{
+					"name": "Update profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"displayName\": \"Test Seller\",\n  \"preferredLanguage\": \"en\"\n}"
+						},
+						"url": "{{baseUrl}}/users/me"
+					}
+				},
+				{
+					"name": "My roles",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/users/me/roles"
+					}
+				},
+				{
+					"name": "Add a self-service role",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"roleCode\": \"BROKER\"\n}"
+						},
+						"url": "{{baseUrl}}/users/me/roles"
+					}
+				}
+			]
+		},
+		{
+			"name": "Masters & Reference Data",
+			"item": [
+				{
+					"name": "Property types",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/property-types"
+					}
+				},
+				{
+					"name": "Land use types",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/land-use-types"
+					}
+				},
+				{
+					"name": "Ownership types",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/ownership-types"
+					}
+				},
+				{
+					"name": "Area units",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/area-units?stateCode=MH"
+					}
+				},
+				{
+					"name": "Amenities",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/amenities"
+					}
+				},
+				{
+					"name": "Document types",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/document-types?stateCode=MH"
+					}
+				},
+				{
+					"name": "Parcel config",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/parcel-config/MH"
+					}
+				},
+				{
+					"name": "Location search",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/search?q=panvel&types=LOCALITY,CITY&stateCode=MH&limit=10"
+					}
+				},
+				{
+					"name": "Location detail",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/{{locationId}}"
+					}
+				},
+				{
+					"name": "Location children",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/{{locationId}}/children?type=LOCALITY"
+					}
+				},
+				{
+					"name": "Locations by pincode",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/pincode/410206"
+					}
+				},
+				{
+					"name": "States",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/states"
+					}
+				},
+				{
+					"name": "State districts",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/states/{{locationId}}/districts"
+					}
+				},
+				{
+					"name": "District cities",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/districts/{{locationId}}/cities"
+					}
+				},
+				{
+					"name": "City localities",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/locations/cities/{{locationId}}/localities"
+					}
+				},
+				{
+					"name": "Geocode",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/geo/geocode?q=Panvel&limit=10"
+					}
+				},
+				{
+					"name": "Reverse geocode",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/geo/reverse-geocode?lat=18.9894&lng=73.1175"
+					}
+				}
+			]
+		},
+		{
+			"name": "Properties",
+			"item": [
+				{
+					"name": "Create property",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('propertyId', body.data.id);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"landUseTypeId\": \"{{landUseTypeId}}\",\n  \"ownershipTypeId\": \"{{ownershipTypeId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/properties"
+					}
+				},
+				{
+					"name": "My properties",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/me?page=1&limit=20"
+					}
+				},
+				{
+					"name": "Property details",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}"
+					}
+				},
+				{
+					"name": "Update property",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"landUseTypeId\": \"{{landUseTypeId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}"
+					}
+				},
+				{
+					"name": "Archive property",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/properties/{{propertyId}}"
+					}
+				},
+				{
+					"name": "Land details",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/land-details"
+					}
+				},
+				{
+					"name": "Save land details",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"areaValue\": 22,\n  \"areaUnitId\": \"{{areaUnitId}}\",\n  \"lengthValue\": 22,\n  \"widthValue\": 33,\n  \"dimensionUnit\": \"M\",\n  \"frontageM\": 2,\n  \"roadWidthM\": 2,\n  \"roadType\": \"OTHER\",\n  \"facing\": \"SW\",\n  \"openSides\": 1,\n  \"isCornerPlot\": false,\n  \"hasBoundaryWall\": true,\n  \"terrain\": \"UNEVEN\",\n  \"roadAccessType\": \"NO_DIRECT\"\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/land-details"
+					}
+				},
+				{
+					"name": "Parcel identifiers",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/parcel-identifiers"
+					}
+				},
+				{
+					"name": "Save parcel identifiers",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"identifiers\": [\n    { \"type\": \"GAT_NUMBER\", \"value\": \"123/4\" }\n  ]\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/parcel-identifiers"
+					}
+				},
+				{
+					"name": "Property location",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/location"
+					}
+				},
+				{
+					"name": "Save property location",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"locationId\": \"{{locationId}}\",\n  \"pincode\": \"410206\",\n  \"latitude\": 18.9894,\n  \"longitude\": 73.1175,\n  \"locationPrecision\": \"EXACT\",\n  \"showExactLocation\": false\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/location"
+					}
+				},
+				{
+					"name": "Property amenities",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/amenities"
+					}
+				},
+				{
+					"name": "Save amenities",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amenities\": [\n    { \"amenityId\": \"{{amenityId}}\", \"valueText\": \"Available\" }\n  ]\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/amenities"
+					}
+				},
+				{
+					"name": "Request verification",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"checkTypes\": [\"LOCATION\", \"LAND_DETAILS\"],\n  \"note\": \"Please review the submitted property details.\"\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/verification/request"
+					}
+				},
+				{
+					"name": "Verification summary",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/verification"
+					}
+				},
+				{
+					"name": "Land Passport",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/land-passport"
+					}
+				},
+				{
+					"name": "Scanner Lite",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/scanner"
+					}
+				}
+			]
+		},
+		{
+			"name": "Property Media & Documents",
+			"item": [
+				{
+					"name": "Create media upload ticket",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('storageKey', body.data.storageKey);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\"\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url"
+					}
+				},
+				{
+					"name": "Complete media upload",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('mediaId', body.data.id);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"fileName\": \"plot.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 200000,\n  \"mediaType\": \"IMAGE\",\n  \"isCover\": true\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/complete"
+					}
+				},
+				{
+					"name": "Create media upload tickets (batch)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    { \"fileName\": \"plot-1.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 200000, \"mediaType\": \"IMAGE\" },\n    { \"fileName\": \"plot-2.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 180000, \"mediaType\": \"IMAGE\" }\n  ]\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/upload-url"
+					},
+					"description": "Selecting multiple files at once: pass a `files` array (up to 20) instead of a single file object. The response returns `{ \"files\": [...] }` with one upload ticket per file, in the same order."
+				},
+				{
+					"name": "Complete media upload (batch)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    { \"storageKey\": \"{{storageKey}}\", \"fileName\": \"plot-1.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 200000, \"mediaType\": \"IMAGE\", \"isCover\": true },\n    { \"storageKey\": \"{{storageKey}}\", \"fileName\": \"plot-2.jpg\", \"mimeType\": \"image/jpeg\", \"fileSizeBytes\": 180000, \"mediaType\": \"IMAGE\" }\n  ]\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/complete"
+					},
+					"description": "Each entry needs the storageKey returned by its own upload ticket. All files are saved atomically in one request; the response returns `{ \"files\": [...] }` with the created media records."
+				},
+				{
+					"name": "List media",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media"
+					}
+				},
+				{
+					"name": "Update media",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"caption\": \"Main road frontage\",\n  \"sortOrder\": 0\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}"
+					}
+				},
+				{
+					"name": "Reorder media",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"mediaIds\": [\"{{mediaId}}\"]\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/order"
+					}
+				},
+				{
+					"name": "Set media cover",
+					"request": {
+						"method": "PUT",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}/cover"
+					}
+				},
+				{
+					"name": "Delete media",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/media/{{mediaId}}"
+					}
+				},
+				{
+					"name": "Create document upload ticket",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('storageKey', body.data.storageKey);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/upload-url"
+					}
+				},
+				{
+					"name": "Complete document upload",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('documentId', body.data.id);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"storageKey\": \"{{storageKey}}\",\n  \"documentTypeId\": \"{{documentTypeId}}\",\n  \"fileName\": \"sale-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 200000,\n  \"visibility\": \"APPROVED_BUYERS\"\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/complete"
+					}
+				},
+				{
+					"name": "List documents",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents"
+					}
+				},
+				{
+					"name": "Document detail",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}"
+					}
+				},
+				{
+					"name": "List document access grants",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}/access-grants"
+					}
+				},
+				{
+					"name": "Grant document access",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('grantId', body.data.id);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"granteeUserId\": \"{{granteeUserId}}\",\n  \"expiresAt\": \"2027-01-01T00:00:00.000Z\"\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}/access-grants"
+					}
+				},
+				{
+					"name": "Revoke document access",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}/access-grants/{{grantId}}"
+					}
+				},
+				{
+					"name": "Delete document",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/properties/{{propertyId}}/documents/{{documentId}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "Listings",
+			"item": [
+				{
+					"name": "Create listing",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('listingId', body.data.id);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"transactionType\": \"SALE\",\n  \"title\": \"Land parcel for sale in Panvel\",\n  \"description\": \"Well located land parcel with direct road access and clear documentation.\",\n  \"priceAmountMinor\": 100000000,\n  \"currency\": \"INR\",\n  \"isNegotiable\": true\n}"
+						},
+						"url": "{{baseUrl}}/properties/{{propertyId}}/listings"
+					}
+				},
+				{
+					"name": "Seller listings",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/seller/listings?page=1&limit=20"
+					}
+				},
+				{
+					"name": "My listing",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/listings/{{listingId}}"
+					}
+				},
+				{
+					"name": "Update listing",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"priceAmountMinor\": 95000000,\n  \"isNegotiable\": true\n}"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}"
+					}
+				},
+				{
+					"name": "Delete listing",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/listings/{{listingId}}"
+					}
+				},
+				{
+					"name": "Submit listing for admin review (seller)",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/listings/{{listingId}}/submit"
+					}
+				},
+				{
+					"name": "Pause listing",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/listings/{{listingId}}/pause"
+					}
+				},
+				{
+					"name": "Resume paused listing (seller)",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/listings/{{listingId}}/resume"
+					}
+				},
+				{
+					"name": "Withdraw listing",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Seller requested withdrawal\"\n}"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/withdraw"
+					}
+				},
+				{
+					"name": "Mark listing sold",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Completed sale\"\n}"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/mark-sold"
+					}
+				},
+				{
+					"name": "Feature listing (plan allowance, falls back to paid checkout)",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/listings/{{listingId}}/feature"
+					},
+					"description": "No request body. Draws one unit from the listing owner's plan-included monthly featuredListingsPerMonth allowance and grants the promotion immediately \u2014 no checkout, no payment. On success: `{ \"listingId\", \"promotionType\": \"FEATURED\", \"endsAt\" }`.\n\n- 409 LISTING_ALREADY_FEATURED if the listing already has an active FEATURED promotion (from either this endpoint or a paid purchase) \u2014 nothing is consumed.\n- 403 PLAN_LIMIT_REACHED (`error.details.feature: \"FEATURED_LISTINGS\", upgradeRequired: true, checkoutRequired: true`) if the owner's plan has no allowance left this month (or none at all) \u2014 fall back to the paid flow: POST /orders with a PROMOTION product targeting this listing (see the Commerce & Plans collection, \"Create order \u2014 Promotion\")."
+				},
+				{
+					"name": "Public listing detail",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/detail"
+					}
+				},
+				{
+					"name": "Publication Flow (run in order)",
+					"item": [
+						{
+							"name": "1. Submit complete listing for moderation (seller)",
+							"request": {
+								"method": "POST",
+								"url": "{{baseUrl}}/listings/{{listingId}}/submit"
+							}
+						},
+						{
+							"name": "2. Approve and publish submitted listing (admin)",
+							"request": {
+								"method": "POST",
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{adminAccessToken}}",
+											"type": "string"
+										}
+									]
+								},
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"note\": \"Listing approved after review\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}/approve"
+							}
+						},
+						{
+							"name": "3. Verify published public detail",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "noauth"
+								},
+								"url": "{{baseUrl}}/listings/{{listingId}}/detail"
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Discovery",
+			"item": [
+				{
+					"name": "Search listings",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"search\": \"plot\",\n  \"transactionTypes\": [\"SALE\"],\n  \"minPriceMinor\": 50000000,\n  \"maxPriceMinor\": 150000000,\n  \"sort\": \"NEWEST\",\n  \"page\": 1,\n  \"limit\": 20\n}"
+						},
+						"url": "{{baseUrl}}/search/listings"
+					}
+				},
+				{
+					"name": "Search suggestions",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/search/suggestions?q=panvel&limit=10"
+					}
+				},
+				{
+					"name": "Search map",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bounds\": { \"north\": 19.1, \"south\": 18.8, \"east\": 73.3, \"west\": 73.0 },\n  \"filters\": { \"search\": \"plot\", \"transactionTypes\": [\"SALE\"] },\n  \"maxPins\": 100\n}"
+						},
+						"url": "{{baseUrl}}/search/map"
+					}
+				},
+				{
+					"name": "Similar listings",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/similar?limit=10"
+					}
+				},
+				{
+					"name": "Compare listings",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"listingIds\": [\"{{listingId}}\", \"replace-with-second-listing-id\"]\n}"
+						},
+						"url": "{{baseUrl}}/listings/compare"
+					}
+				}
+			]
+		},
+		{
+			"name": "AI Assistant",
+			"item": [
+				{
+					"name": "Natural-language search",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"verified land for sale under 1 crore\",\n  \"language\": \"en\",\n  \"page\": 1,\n  \"limit\": 20,\n  \"organizationId\": \"{{organizationId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/ai/search"
+					},
+					"description": "organizationId is optional and only meaningful when logged in (anonymous requests have no quota to pool). Leave {{organizationId}} empty for a personal search \u2014 it is never auto-selected from the caller's org memberships, even if they belong to an org with a bigger AI quota. Set it (and be an ACTIVE member of that org) to explicitly draw from that org's shared quota instead."
+				},
+				{
+					"name": "Create AI conversation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.success) pm.collectionVariables.set('conversationId', body.data.id);"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"contextType\": \"GENERAL\",\n  \"initialQuery\": \"Help me find suitable land.\"\n}"
+						},
+						"url": "{{baseUrl}}/ai/conversations"
+					}
+				},
+				{
+					"name": "My AI conversation history",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/ai/conversations?page=1&limit=20"
+					}
+				},
+				{
+					"name": "Send AI message (SSE stream)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"content\": \"What should I check before buying?\",\n  \"language\": \"en\",\n  \"organizationId\": \"{{organizationId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/ai/conversations/{{conversationId}}/messages"
+					},
+					"description": "organizationId is optional \u2014 leave {{organizationId}} empty to draw from the sender's own personal plan/free tier (the default; never auto-picked from their org memberships). Set it to explicitly pool this message against that org's shared AI quota; the caller must be an ACTIVE member or this returns 403 ORGANIZATION_ACCESS_DENIED."
+				},
+				{
+					"name": "AI conversation detail",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/ai/conversations/{{conversationId}}"
+					}
+				},
+				{
+					"name": "Generate listing draft",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"propertyId\": \"{{propertyId}}\",\n  \"priceText\": \"\u20b995 lakh\",\n  \"highlights\": [\"Direct road access\", \"Clear title documents\"],\n  \"language\": \"en\",\n  \"organizationId\": \"{{organizationId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/ai/listing/generate"
+					},
+					"description": "organizationId is optional and rarely needs setting explicitly here: if propertyId refers to a property owned by an organization (not the caller personally), this draft's AI quota is automatically drawn from that org's plan \u2014 no organizationId needed. Set {{organizationId}} only to override that with a different org. With no propertyId at all, this always draws from the caller's personal plan."
+				}
+			]
+		},
+		{
+			"name": "Organizations & Members",
+			"item": [
+				{
+					"name": "Create organization",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Test Brokerage\",\n  \"type\": \"BROKERAGE\",\n  \"phone\": \"+919876543210\",\n  \"email\": \"broker@example.com\",\n  \"gstNumber\": \"27AAAPL1234C1ZV\",\n  \"reraNumber\": \"P51700012345\",\n  \"logoStorageKey\": null\n}"
+						},
+						"url": "{{baseUrl}}/organizations"
+					},
+					"description": "The creator is auto-added as OWNER, and the org is also granted a real, admin-editable Free plan row (same as an individual gets on registration).",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const json = pm.response.json();",
+									"if (json.success) {",
+									"  pm.collectionVariables.set(\"organizationId\", json.data.id);",
+									"}"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "My organizations",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/organizations/me?page=1&limit=20&search=brok&type=BROKERAGE&status=ACTIVE&role=OWNER"
+					},
+					"description": "Scoped to the caller's own memberships only \u2014 for a platform-wide listing (any org, any status), see Admin \u2014 Organizations / List organizations. Filters: search, name, type, slug, phone, email, gstNumber, reraNumber, status, role."
+				},
+				{
+					"name": "Organization details",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/organizations/{{organizationId}}"
+					},
+					"description": "Public/optional-auth \u2014 works with or without a bearer token. 404s a PENDING or SUSPENDED organization unless the caller is one of its active members (admins are not exempt \u2014 see Admin \u2014 Organizations / Organization detail for the admin-safe equivalent)."
+				},
+				{
+					"name": "Update organization",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Brokerage Name\",\n  \"phone\": \"+919876543211\"\n}"
+						},
+						"url": "{{baseUrl}}/organizations/{{organizationId}}"
+					},
+					"description": "Requires the caller to be an active OWNER or ADMIN of the org. Only send the fields you want to change."
+				},
+				{
+					"name": "List members",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/organizations/{{organizationId}}/members"
+					},
+					"description": "Requires the caller to already be an active member of the org (any role) \u2014 this is what 403s a non-member admin, see Admin \u2014 Organizations / Organization detail for the workaround."
+				},
+				{
+					"name": "Add member (invite by email)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\",\n  \"role\": \"MEMBER\"\n}"
+						},
+						"url": "{{baseUrl}}/organizations/{{organizationId}}/members"
+					},
+					"description": "Invite-by-email only \u2014 there is no explicit-userId variant. Requires the caller to be an active OWNER or ADMIN of the org. If {{memberEmail}} already belongs to an existing user, that account is added as-is (name untouched) \u2014 otherwise a new, unverified account is created (email_verified_at stays null until proven via Auth \u2014 Member User below). Grants no platform role. role only accepts ADMIN or MEMBER \u2014 there is no way to grant OWNER here. Adding a genuinely new member is checked against the org's plan team-member limit \u2014 returns 403 PLAN_LIMIT_REACHED once at the plan's teamMembers cap (ACTIVE + INVITED both count). A brand-new org's FREE plan defaults to teamMembers: 1 (DEFAULT_FREE_TEAM_MEMBERS), and the OWNER already occupies that one seat \u2014 so this very first invite can 403 immediately on a fresh org. Confirmed live: this needs a real commerce.plan_subscriptions row for the org with a higher teamMembers to get past it (see the Zameens \u2014 Commerce & Payments collection's Admin \u2014 plan catalog / checkout flow for the real purchase path \u2014 there's no dev seed script for this yet). Run this BEFORE Auth \u2014 Member User."
+				},
+				{
+					"name": "Accept membership (as member user)",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{memberAccessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"url": "{{baseUrl}}/organizations/{{organizationId}}/members/me/accept"
+					},
+					"description": "Run as the invited user, not the org owner \u2014 uses {{memberAccessToken}} (from Auth \u2014 Member User), not the collection default {{accessToken}}. The only path that moves a membership from INVITED to ACTIVE."
+				},
+				{
+					"name": "Remove member",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/organizations/{{organizationId}}/members/{{memberUserId}}"
+					},
+					"description": "Requires the caller to be an active OWNER or ADMIN of the org (and OWNER specifically to remove another OWNER). Blocks with 400 LAST_OWNER if the target is the org's only active owner. For an admin override that bypasses the OWNER/ADMIN requirement (and can also reactivate a REMOVED member), see Admin \u2014 Members / Update member status."
+				}
+			]
+		},
+		{
+			"name": "Favorites",
+			"item": [
+				{
+					"name": "Add favorite",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/favorites/{{listingId}}"
+					}
+				},
+				{
+					"name": "Remove favorite",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/favorites/{{listingId}}"
+					}
+				},
+				{
+					"name": "List favorites",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/favorites?page=1&limit=20&search=villa&transactionType=SALE&status=PUBLISHED&propertyTypeId={{propertyTypeId}}&locationId={{locationId}}&minPrice=5000000&maxPrice=100000000"
+					}
+				}
+			]
+		},
+		{
+			"name": "Recently Viewed",
+			"item": [
+				{
+					"name": "Record listing view",
+					"request": {
+						"method": "POST",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/recently-viewed/{{listingId}}"
+					}
+				},
+				{
+					"name": "List recently viewed",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/recently-viewed?page=1&limit=20&search=villa&transactionType=SALE&status=PUBLISHED&propertyTypeId={{propertyTypeId}}&locationId={{locationId}}&minPrice=5000000&maxPrice=100000000"
+					}
+				}
+			]
+		},
+		{
+			"name": "Buyer Requirements",
+			"item": [
+				{
+					"name": "Create buyer requirement",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"3 acre industrial plot near highway\",\n  \"locationId\": \"{{locationId}}\",\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"minArea\": 1,\n  \"maxArea\": 5,\n  \"areaUnitId\": \"{{areaUnitId}}\",\n  \"minBudgetMinor\": 5000000000,\n  \"maxBudgetMinor\": 20000000000,\n  \"purpose\": \"INDUSTRIAL\",\n  \"roadWidthMinM\": 12,\n  \"verifiedOnly\": true,\n  \"status\": \"ACTIVE\"\n}"
+						},
+						"url": "{{baseUrl}}/buyer-requirements"
+					}
+				},
+				{
+					"name": "List buyer requirements",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/buyer-requirements?page=1&limit=20&search=highway&status=ACTIVE&purpose=INDUSTRIAL&locationId={{locationId}}&propertyTypeId={{propertyTypeId}}&verifiedOnly=true"
+					}
+				},
+				{
+					"name": "Buyer requirement details",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/buyer-requirements/{{requirementId}}"
+					}
+				},
+				{
+					"name": "Update buyer requirement",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"PAUSED\",\n  \"maxBudgetMinor\": 25000000000\n}"
+						},
+						"url": "{{baseUrl}}/buyer-requirements/{{requirementId}}"
+					}
+				},
+				{
+					"name": "Delete buyer requirement",
+					"request": {
+						"method": "DELETE",
+						"url": "{{baseUrl}}/buyer-requirements/{{requirementId}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "Enquiries",
+			"item": [
+				{
+					"name": "Create enquiry",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enquiryType\": \"CONTACT\",\n  \"message\": \"Interested in this plot, please share more details.\",\n  \"preferredContactChannel\": \"PHONE\"\n}"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/enquiries",
+						"description": "Each valid call creates an enquiry. UI must disable duplicate submission while this request is in flight. Any earlier unlinked, non-cancelled site visit for the buyer and listing is linked to this enquiry and changes its status to SITE_VISIT."
+					}
+				},
+				{
+					"name": "Buyer: List enquiries",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/buyer/enquiries?status=NEW&listingId={{listingId}}"
+					}
+				},
+				{
+					"name": "Buyer: Enquiry details",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/buyer/enquiries/{{enquiryId}}"
+					}
+				},
+				{
+					"name": "Seller: List enquiries",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/seller/enquiries?status=NEW&listingId={{listingId}}&search=plot"
+					}
+				},
+				{
+					"name": "Seller: Enquiry details",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/seller/enquiries/{{enquiryId}}"
+					}
+				},
+				{
+					"name": "Seller: Update enquiry status",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"CONTACTED\"\n}"
+						},
+						"url": "{{baseUrl}}/seller/enquiries/{{enquiryId}}/status"
+					}
+				},
+				{
+					"name": "Seller: Add enquiry note",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"note\": \"Called the buyer, following up next week.\"\n}"
+						},
+						"url": "{{baseUrl}}/seller/enquiries/{{enquiryId}}/notes"
+					}
+				},
+				{
+					"name": "Reveal listing contact",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"preferredChannel\": \"WHATSAPP\"\n}"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/contact-reveal"
+					}
+				}
+			]
+		},
+		{
+			"name": "Site Visits",
+			"item": [
+				{
+					"name": "Create site visit",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"preferredDate\": \"2026-09-01\",\n  \"preferredTimeSlot\": \"MORNING\",\n  \"visitorCount\": 2,\n  \"note\": \"Would like to see the boundary markers.\"\n}"
+						},
+						"url": "{{baseUrl}}/listings/{{listingId}}/site-visits",
+						"description": "Links to the buyer's current active enquiry for this listing when one exists and changes it to SITE_VISIT atomically. Otherwise the visit remains unlinked until a later enquiry is created. It never creates a hidden enquiry. Repeating the same preferredDate + preferredTimeSlot while a non-cancelled visit already holds that slot fails with 409 SITE_VISIT_DUPLICATE, whose error.details carries the existing visitId."
+					}
+				},
+				{
+					"name": "Buyer: List site visits",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/buyer/site-visits?status=REQUESTED&fromDate=2026-08-01&toDate=2026-09-30"
+					}
+				},
+				{
+					"name": "Seller: List site visits",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/seller/site-visits?status=REQUESTED&fromDate=2026-08-01&toDate=2026-09-30"
+					}
+				},
+				{
+					"name": "Seller: Confirm site visit",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"scheduledAt\": \"2026-09-02T05:30:00.000Z\",\n  \"sellerNote\": \"Confirmed, will meet at the site entrance.\"\n}"
+						},
+						"url": "{{baseUrl}}/site-visits/{{visitId}}/confirm"
+					}
+				},
+				{
+					"name": "Reschedule site visit",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"scheduledAt\": \"2026-09-05T05:30:00.000Z\",\n  \"note\": \"Need to move to a later date.\"\n}"
+						},
+						"url": "{{baseUrl}}/site-visits/{{visitId}}/reschedule"
+					}
+				},
+				{
+					"name": "Cancel site visit",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"No longer interested.\"\n}"
+						},
+						"url": "{{baseUrl}}/site-visits/{{visitId}}/cancel"
+					}
+				},
+				{
+					"name": "Seller: Complete site visit",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"sellerNote\": \"Visit completed, buyer is interested.\",\n  \"enquiryStatus\": \"INTERESTED\"\n}"
+						},
+						"url": "{{baseUrl}}/site-visits/{{visitId}}/complete"
+					}
+				}
+			]
+		},
+		{
+			"name": "Seller Dashboard",
+			"item": [
+				{
+					"name": "Dashboard summary",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/seller/dashboard?from=2026-08-01&to=2026-08-22&organizationId={{organizationId}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "Commerce \u2014 Plans, Orders & Checkout",
+			"item": [
+				{
+					"name": "Catalog (public)",
+					"item": [
+						{
+							"name": "List plans",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "noauth"
+								},
+								"url": "{{baseUrl}}/plans"
+							},
+							"response": [],
+							"description": "This is the pricing page's data source and the only place a client should read plan prices/limits from.\n\n- Each plan returns `productId` \u2014 this, not the plan's own `id`, is what POST /orders needs.\n- `aiMonthlyQuota` (integer, or null = unlimited) is the live source of truth for the AI Property Assistant's monthly question limit on that plan \u2014 don't hardcode this in the frontend."
+						},
+						{
+							"name": "List services",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "noauth"
+								},
+								"url": "{{baseUrl}}/services"
+							},
+							"response": [],
+							"description": "Each service returns `productId` \u2014 required for POST /orders when purchasing it. The service's own `id` is only used for POST /service-requests, never for ordering.\n\nNote: there is currently no public endpoint to discover PROMOTION products (their productId/price) \u2014 confirm with backend how a listing-boost screen should source that catalog before building it."
+						},
+						{
+							"name": "Get service",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "noauth"
+								},
+								"url": "{{baseUrl}}/services/{{serviceId}}"
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Checkout (orders \u2192 Razorpay Payment Link)",
+					"item": [
+						{
+							"name": "(Service purchase only) Create service request first",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"listingId\": \"{{listingId}}\",\n  \"customerNotes\": \"Please review before purchase.\",\n  \"contactPhone\": \"+919876543210\",\n  \"contactEmail\": \"buyer@example.com\"\n}"
+								},
+								"url": "{{baseUrl}}/service-requests"
+							},
+							"response": [],
+							"description": "Only needed before purchasing a SERVICE product. Response is a ServiceRequest with `status: \"REQUESTED\"` and `orderId: null` \u2014 keep its `id`, it becomes `targetId` on the order below. Skip this step entirely for plans and promotions."
+						},
+						{
+							"name": "Create order \u2014 Plan",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"items\": [\n    { \"productId\": \"{{proProductId}}\", \"quantity\": 1 }\n  ]\n}"
+								},
+								"url": "{{baseUrl}}/orders"
+							},
+							"response": [],
+							"description": "For a plan, send only productId/quantity \u2014 no targetType/targetId (a PLAN item with a target is rejected with 400 INVALID_TARGET).\n\nResponse is the Order: `id`, `orderNumber`, `status: \"CREATED\"`, `items[]`, `subtotalMinor`, `taxMinor`, `totalMinor`, `currency`, `createdAt`, `paidAt`. The server always computes the price from the product row \u2014 nothing about price is client-controlled. Copy `id` \u2192 `orderId`. For the Pro plan above, expect `totalMinor: 49900`."
+						},
+						{
+							"name": "Create order \u2014 Promotion (boost a listing)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"targetType\": \"LISTING\", \"targetId\": \"{{listingId}}\" }\n  ]\n}"
+								},
+								"url": "{{baseUrl}}/orders"
+							},
+							"response": [],
+							"description": "`targetType` must be the literal string \"LISTING\" \u2014 anything else is rejected with 400. `targetId` must be a listing the logged-in user (or their organization) owns, or the order is rejected with 409 TARGET_NOT_OWNED. Only ever offer this action from the seller's own listing management screen.\n\nBefore sending the seller down this paid checkout path, try the free alternative first: POST /listings/{listingId}/feature (see the Dev 1 collection, Listings and moderation) draws from the plan's included monthly featuredListingsPerMonth allowance with no payment at all, and only falls back to 403 PLAN_LIMIT_REACHED (`checkoutRequired: true`) once that allowance is exhausted \u2014 that's the signal to offer this paid flow instead."
+						},
+						{
+							"name": "Create order \u2014 Paid service",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"targetType\": \"SERVICE_REQUEST\", \"targetId\": \"{{serviceRequestId}}\" }\n  ]\n}"
+								},
+								"url": "{{baseUrl}}/orders"
+							},
+							"response": [],
+							"description": "`targetType` must be the literal string \"SERVICE_REQUEST\". `targetId` is the ServiceRequest id from the step above \u2014 it must belong to the current user and still be unpaid (`status: REQUESTED`, `orderId: null`), or this is rejected with 409 SERVICE_REQUEST_NOT_PAYABLE."
+						},
+						{
+							"name": "Create payment \u2014 returns a redirect URL, not a checkout payload",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"provider\": \"RAZORPAY\"\n}"
+								},
+								"url": "{{baseUrl}}/payments/{{orderId}}/create"
+							},
+							"response": [],
+							"description": "`provider` defaults to \"RAZORPAY\" if omitted; it's the only provider actually implemented. Requires the order to belong to the caller and be CREATED or PAYMENT_PENDING (409 ORDER_ALREADY_PAID / ORDER_NOT_PAYABLE otherwise).\n\nResponse is only `{ paymentId, provider, redirectUrl }` \u2014 there is no `checkoutPayload`/`providerPublicKey`, no Razorpay key, SDK, or signature on the client. `redirectUrl` is a Razorpay-hosted Payment Link.\n\nFrontend contract:\n1. Do NOT load Razorpay Checkout.js or open a modal/iframe.\n2. Do a full-page navigation: `window.location.href = redirectUrl`.\n3. There is no POST /payments/verify endpoint \u2014 it does not exist; do not call it.\n4. `returnUrl` is not an accepted field on this request \u2014 the redirect target is fixed server-side via COMMERCE_RETURN_BASE_URL.\n\nCalling this again for the same order (e.g. the customer went back and retried) is safe \u2014 the previous Payment Link attempt is invalidated server-side and a fresh one is issued. Copy `paymentId` \u2192 `paymentId`."
+						},
+						{
+							"name": "GET order \u2014 poll this after redirect, don't trust the URL alone",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/orders/{{orderId}}"
+							},
+							"response": [],
+							"description": "After the customer lands back on your `/payments/result?orderId=...&status=...` page, use this to confirm `status: \"PAID\"` rather than trusting the `status` query param alone for anything business-critical (e.g. don't unlock a feature purely because the URL said success \u2014 the query param can only drive which screen to show).\n\n`/payments/result` status handling (docs/razorpay-client-integration-guide.md Section 5):\n- `success` \u2014 captured, entitlement applied. Show success.\n- `pending` \u2014 signature/lookup was fine but capture hasn't finished synchronously; poll this endpoint every few seconds (give up after ~30s) until `status: \"PAID\"`.\n- `invalid` \u2014 signature didn't verify or the reference is unknown. Treat as failed, offer to retry.\n- anything else (`cancelled`, `expired`, ...) \u2014 Razorpay's own status passed through as-is. Treat as not-paid, offer to retry via POST /payments/{orderId}/create again.\n\n**`latestPaymentStatus` (new field, sits alongside `status`)** is the most recent payment attempt's own status (`CREATED`, `FAILED`, `CAPTURED`, ...). `status` alone cannot tell \"still waiting on the current attempt\" apart from \"the last attempt failed, please retry\" \u2014 both leave `status: \"PAYMENT_PENDING\"` on purpose, so a retry (POST /payments/{orderId}/create again) can reuse the same order instead of the order dead-ending. Check `latestPaymentStatus === \"FAILED\"` to show a retry prompt immediately on the result page instead of polling for up to 30s first."
+						},
+						{
+							"name": "Download invoice (PDF) \u2014 only once status is PAID",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/orders/{{orderId}}/invoice"
+							},
+							"response": [],
+							"description": "Returns the tax invoice as a PDF (`Content-Type: application/pdf`, `Content-Disposition: attachment`), not JSON. 409 `INVOICE_NOT_AVAILABLE` if the order has never been captured \u2014 an invoice number is only assigned at payment-capture time, so there's nothing to generate before then. 404 `ORDER_NOT_FOUND` if the order doesn't belong to the caller (same owner-or-404 rule as GET order above).\n\nGST breakdown (CGST+SGST vs IGST) is a display-only split of the already GST-inclusive plan/product price \u2014 it never changes `order.totalMinor` or what was actually charged."
+						},
+						{
+							"name": "GET my orders",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/orders/me?status=PAID"
+							},
+							"response": [],
+							"description": "Auth'd, paginated (`page`, `limit`), optional `status` filter (CREATED, PAYMENT_PENDING, PAID, FAILED, CANCELLED, REFUNDED \u2014 the validation layer accepts all six, but in practice no code path currently ever sets an order's own `status` to FAILED/CANCELLED/REFUNDED; a declined/expired payment attempt only ever shows up as that order's `latestPaymentStatus`, per the note above, while `status` stays PAYMENT_PENDING so the same order remains retryable)."
+						},
+						{
+							"name": "GET my current plan",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/plans/me"
+							},
+							"response": [],
+							"description": "Answers \"what plan am I on and when does it end?\" \u2014 a billing-status indicator (did I actually purchase something, and is it currently active), distinct from GET /me/subscription below (what effectively applies to me right now, features + limits + usage in one response). Use this one for a \"my billing/plan\" screen; use /me/subscription for anything that needs to show remaining quota/limits.\n\nResponse when the user has an active personal plan:\n```json\n{\n  \"hasActivePlan\": true,\n  \"plan\": { \"id\": \"...\", \"productId\": \"...\", \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", ... },\n  \"status\": \"ACTIVE\",\n  \"startsAt\": \"2026-09-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-10-01T00:00:00.000Z\"\n}\n```\nWhen there's no active plan (never purchased one, or it already lapsed): `{ \"hasActivePlan\": false, \"plan\": null, \"status\": null, \"startsAt\": null, \"endsAt\": null }` \u2014 deliberately still `false`/`null` even for an owner who's effectively on the Free plan by default; this endpoint only ever reports a REAL purchase/grant row, never the ambient Free-tier fallback.\n\nThere is no background sweep and no notification behind this \u2014 the query filters on `endsAt` lazily at read time, so a lapsed plan just stops being returned. The client is expected to read `endsAt` and decide for itself when to show \"expiring soon\"/\"expired\" messaging.\n\nOrganization-scoped plans are not returned here (personal plans only) \u2014 there is no equivalent \"my org's plan\" endpoint yet."
+						},
+						{
+							"name": "GET my full entitlement view (plan + limits + usage)",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/me/subscription"
+							},
+							"response": [],
+							"description": "The single response meant to power every UI surface that needs to show plan/usage together \u2014 My Zameens, the subscription/pricing page, upgrade banners, usage bars. Always returns a plan (never `null`/`hasActivePlan: false` like GET /plans/me above): if the caller has no real active purchase, this falls back to the live, admin-editable Free plan \u2014 not a hardcoded default, so an admin changing Free-tier limits via Admin: update plan is reflected here immediately, even for an owner who purchased something once and let it lapse.\n\n```json\n{\n  \"plan\": { \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", \"monthlyPrice\": 499 },\n  \"status\": \"ACTIVE\",\n  \"currentPeriodStart\": \"2026-09-01T00:00:00.000Z\",\n  \"currentPeriodEnd\": \"2026-10-01T00:00:00.000Z\",\n  \"features\": { \"featuredListingsPerMonth\": 2, \"...\": \"...\" },\n  \"limits\": {\n    \"activeListings\": { \"used\": 3, \"limit\": 10, \"remaining\": 7 },\n    \"imagesPerProperty\": { \"limit\": 20 },\n    \"videosPerProperty\": { \"limit\": 1 },\n    \"featuredListings\": { \"used\": 0, \"limit\": 2, \"remaining\": 2 },\n    \"aiQueries\": { \"used\": 4, \"limit\": null }\n  }\n}\n```\n`limit: null` on any block means unlimited (no `remaining` key in that case). This is personal-only, same as GET /plans/me \u2014 there is no organization-scoped equivalent yet."
+						},
+						{
+							"name": "My service requests",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/service-requests/me?status=REQUESTED"
+							}
+						},
+						{
+							"name": "Service request details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/service-requests/{{serviceRequestId}}"
+							}
+						},
+						{
+							"name": "Service request file upload URL",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"fileName\": \"title-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 204800\n}"
+								},
+								"url": "{{baseUrl}}/service-requests/{{serviceRequestId}}/files/upload-url"
+							}
+						},
+						{
+							"name": "Complete service request file",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"fileName\": \"title-deed.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 204800,\n  \"storageKey\": \"service-requests/{{serviceRequestId}}/title-deed.pdf\"\n}"
+								},
+								"url": "{{baseUrl}}/service-requests/{{serviceRequestId}}/files/complete"
+							}
+						}
+					]
+				},
+				{
+					"name": "Reference only \u2014 never called by the client directly",
+					"item": [
+						{
+							"name": "Payment callback (Razorpay redirects the BROWSER here)",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "noauth"
+								},
+								"url": "{{baseUrl}}/payments/callback?razorpay_payment_id=pay_example&razorpay_payment_link_id=plink_example&razorpay_payment_link_reference_id=example-payment-id&razorpay_payment_link_status=paid&razorpay_signature=invalid-example-will-redirect-as-invalid"
+							},
+							"response": [],
+							"description": "The frontend never fetches this with XHR/fetch \u2014 Razorpay's hosted Payment Link page redirects the customer's browser here after payment, and this endpoint itself responds with an HTTP 302 onward to `{COMMERCE_RETURN_BASE_URL}/payments/result?orderId=...&status=...`.\n\nWith a real (valid) signature and `razorpay_payment_link_status=paid`, the handler additionally calls Razorpay's GET /payments/{id} to confirm the payment's amount, currency, and captured status match the recorded payment before marking anything PAID \u2014 a mismatch or lookup failure redirects with `status=pending` instead (the webhook remains authoritative and will resolve it independently)."
+						},
+						{
+							"name": "Payment webhook (server-to-server, Razorpay \u2192 our server)",
+							"request": {
+								"method": "POST",
+								"auth": {
+									"type": "noauth"
+								},
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									},
+									{
+										"key": "x-razorpay-signature",
+										"value": "replace-with-a-real-HMAC-of-the-body-using-RAZORPAY_WEBHOOK_SECRET"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_test_001\",\n        \"amount\": 49900,\n        \"currency\": \"INR\",\n        \"status\": \"captured\",\n        \"notes\": {\n          \"internalOrderId\": \"{{orderId}}\",\n          \"internalPaymentId\": \"{{paymentId}}\"\n        }\n      }\n    }\n  }\n}"
+								},
+								"url": "{{baseUrl}}/payments/webhook"
+							},
+							"response": [],
+							"description": "No UI relevance \u2014 included only so backend/QA can exercise the capture \u2192 entitlement path locally without a live Razorpay payment. The signature check rejects a fake header unless you compute a real HMAC-SHA256 of the exact raw body with your local RAZORPAY_WEBHOOK_SECRET (see .env).\n\n`payload.payment.entity.amount`, `.currency`, and `.status` must match the payment record exactly (amount in paise, currency case-insensitive, status literally \"captured\") \u2014 the handler now verifies all three against the stored payment before capturing, rejecting a mismatch with 409 PAYMENT_MISMATCH instead of silently marking the order paid. Set `amount` to the order's `totalMinor` and `status` to `\"captured\"` or this request will fail validation.\n\nDuplicate delivery of the same event id is a safe no-op (`{ received: true, duplicate: true }`), in either arrival order relative to the callback above."
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Content & Market Trends",
+			"item": [
+				{
+					"name": "List content",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/content?type=NEWS&language=en&page=1&limit=20"
+					}
+				},
+				{
+					"name": "Content details by slug",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/content/{{contentSlug}}?language=en"
+					}
+				},
+				{
+					"name": "List market trends",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/market-trends"
+					}
+				}
+			]
+		},
+		{
+			"name": "Channel Partners",
+			"item": [
+				{
+					"name": "Apply as channel partner",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"organizationId\": \"{{organizationId}}\",\n  \"reraNumber\": \"RERA123456\",\n  \"experienceYears\": 5,\n  \"locationIds\": [\"{{locationId}}\"],\n  \"about\": \"Experienced land broker covering the western suburbs.\"\n}"
+						},
+						"url": "{{baseUrl}}/channel-partners/apply",
+						"description": "organizationId is optional, but if set the caller must be an ACTIVE member of that organization (run Create organization first, which auto-adds the creator as OWNER) or the request fails with 403 ORGANIZATION_MEMBERSHIP_REQUIRED."
+					}
+				},
+				{
+					"name": "My channel partner profile",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/channel-partners/me"
+					}
+				},
+				{
+					"name": "Update my channel partner profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reraNumber\": \"RERA654321\",\n  \"experienceYears\": 6,\n  \"about\": \"Updated coverage and experience.\"\n}"
+						},
+						"url": "{{baseUrl}}/channel-partners/me"
+					}
+				}
+			]
+		},
+		{
+			"name": "Investment Opportunities",
+			"item": [
+				{
+					"name": "List investment opportunities",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/investment-opportunities?locationId={{locationId}}&investmentType=REIT&page=1&limit=20"
+					}
+				},
+				{
+					"name": "Investment opportunity details",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/investment-opportunities/{{opportunityId}}"
+					}
+				},
+				{
+					"name": "Express investment interest",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"message\": \"Interested, please share the brochure.\",\n  \"contactPhone\": \"+919876543210\",\n  \"contactEmail\": \"investor@example.com\",\n  \"organizationId\": \"{{organizationId}}\"\n}"
+						},
+						"url": "{{baseUrl}}/investment-opportunities/{{opportunityId}}/interest"
+					}
+				}
+			]
+		},
+		{
+			"name": "Auctions",
+			"item": [
+				{
+					"name": "List auctions",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/auctions?locationId={{locationId}}&status=UPCOMING&fromDate=2026-01-01&toDate=2026-12-31&page=1&limit=20"
+					}
+				},
+				{
+					"name": "Auction details",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/auctions/{{auctionId}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "Advertisements",
+			"item": [
+				{
+					"name": "List active ads by placement",
+					"request": {
+						"method": "GET",
+						"auth": {
+							"type": "noauth"
+						},
+						"url": "{{baseUrl}}/ads?placement=HOME_TOP"
+					}
+				}
+			]
+		},
+		{
+			"name": "Notifications",
+			"item": [
+				{
+					"name": "List notifications",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/notifications?page=1&limit=20&unreadOnly=false&type="
+					}
+				},
+				{
+					"name": "Mark notification read",
+					"request": {
+						"method": "PATCH",
+						"url": "{{baseUrl}}/notifications/{{notificationId}}/read"
+					}
+				},
+				{
+					"name": "Mark all notifications read",
+					"request": {
+						"method": "POST",
+						"url": "{{baseUrl}}/notifications/read-all"
+					}
+				},
+				{
+					"name": "Get notification preferences",
+					"request": {
+						"method": "GET",
+						"url": "{{baseUrl}}/notification-preferences"
+					}
+				},
+				{
+					"name": "Update notification preferences",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"emailEnabled\": true,\n  \"smsEnabled\": true,\n  \"whatsappEnabled\": false,\n  \"marketingEnabled\": false\n}"
+						},
+						"url": "{{baseUrl}}/notification-preferences"
+					}
+				}
+			]
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "User Administration",
+					"item": [
+						{
+							"name": "Admin \u2014 list users",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/users?page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin \u2014 user detail",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/users/{{userId}}"
+							}
+						},
+						{
+							"name": "Admin \u2014 change user status",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"status\": \"ACTIVE\",\n  \"reason\": \"Account reviewed\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/users/{{userId}}/status"
+							}
+						},
+						{
+							"name": "Admin \u2014 replace user roles",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"roles\": [\"BUYER\", \"SELLER\"],\n  \"reason\": \"Account role update\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/users/{{userId}}/roles"
+							}
+						}
+					]
+				},
+				{
+					"name": "Dashboard",
+					"item": [
+						{
+							"name": "Admin: Dashboard summary",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/dashboard"
+							}
+						}
+					]
+				},
+				{
+					"name": "Listing Moderation",
+					"item": [
+						{
+							"name": "Admin \u2014 list listings",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/listings?reviewStatus=PENDING&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin \u2014 listing detail",
+							"request": {
+								"method": "GET",
+								"description": "Response includes media (full array, each item with a signed url/thumbnailUrl) and documents (full array, each item with a signed downloadUrl) for the listing's property, same signing behavior as the public /listings/{listingId}/detail endpoint. Also includes location (location, pincode, addressLine, landmark, formattedAddress, latitude, longitude, locationPrecision, showExactLocation), or null if the property has no location saved yet \u2014 unlike the public endpoint, latitude/longitude are always exact here regardless of showExactLocation.",
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}"
+							}
+						},
+						{
+							"name": "Admin \u2014 remove listing photo",
+							"request": {
+								"method": "DELETE",
+								"description": "Removes one photo from the listing's property (e.g. inappropriate content). Audits the removal and notifies the seller with the given reason, or a default message if omitted.",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Photo did not meet our content guidelines.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}/media/{{mediaId}}"
+							}
+						},
+						{
+							"name": "Admin \u2014 approve and publish listing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"note\": \"Listing approved after review\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}/approve"
+							},
+							"response": [],
+							"description": "Now also re-checks the seller's (or their organization's) active-listing plan limit at approval time, not just at submit time \u2014 a seller can submit several listings while under the limit and have several approved back-to-back, so this closes that gap. Returns 403 PLAN_LIMIT_REACHED (same nested `error.details.{feature,used,limit,upgradeRequired}` shape as everywhere else) if approving this one would push the owner over their plan's listingLimit, even though it was validly submitted while under the limit at the time."
+						},
+						{
+							"name": "Admin \u2014 reject listing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Please provide clearer property documents.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}/reject"
+							}
+						},
+						{
+							"name": "Admin \u2014 suspend listing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Listing requires compliance review.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}/suspend"
+							}
+						},
+						{
+							"name": "Admin \u2014 reinstate listing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Compliance review complete, listing reinstated.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/listings/{{listingId}}/reinstate"
+							}
+						},
+						{
+							"name": "Admin \u2014 bulk upload template",
+							"request": {
+								"method": "GET",
+								"description": "Downloads a blank CSV template (correct headers/columns) for bulk listing import.",
+								"url": "{{baseUrl}}/admin/listings/bulk-upload/template"
+							}
+						},
+						{
+							"name": "Admin \u2014 bulk upload listings",
+							"request": {
+								"method": "POST",
+								"description": "Multipart upload of a filled-in CSV (field name `file`). .csv only, max 10MB \u2014 rejects with INVALID_FILE_TYPE or FILE_TOO_LARGE otherwise.",
+								"body": {
+									"mode": "formdata",
+									"formdata": [
+										{
+											"key": "file",
+											"type": "file",
+											"src": ""
+										}
+									]
+								},
+								"url": "{{baseUrl}}/admin/listings/bulk-upload"
+							}
+						}
+					]
+				},
+				{
+					"name": "Verification",
+					"item": [
+						{
+							"name": "Admin \u2014 verification queue",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/verifications?status=PENDING&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin \u2014 verification detail",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/verifications/{{verificationId}}"
+							}
+						},
+						{
+							"name": "Admin \u2014 update verification",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"checkType\": \"LOCATION\",\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/verifications/{{verificationId}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "Plans",
+					"item": [
+						{
+							"name": "Seed the 3 pricing-table plans",
+							"item": [
+								{
+									"name": "Create Free plan",
+									"request": {
+										"method": "POST",
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{adminAccessToken}}",
+													"type": "string"
+												}
+											]
+										},
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": null,\n  \"listingLimit\": 2,\n  \"featuredDays\": null,\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"imagesPerProperty\": 5,\n    \"videosPerProperty\": 0,\n    \"teamMembers\": 1,\n    \"featuredListingsPerMonth\": 0,\n    \"contactUnlocks\": 5\n  }\n}"
+										},
+										"url": "{{baseUrl}}/admin/plans"
+									},
+									"response": [],
+									"description": "amountMinor is 0 \u2014 catalog/display only. Do not run this through POST /orders \u2192 POST /payments/create; a \u20b90 Razorpay Payment Link request fails. Copy the response's `id` \u2192 `freePlanId`, `productId` \u2192 `freeProductId`."
+								},
+								{
+									"name": "Create Pro plan",
+									"request": {
+										"method": "POST",
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{adminAccessToken}}",
+													"type": "string"
+												}
+											]
+										},
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"code\": \"PLAN_PRO\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 99900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 20,\n  \"featuredDays\": 15,\n  \"aiMonthlyQuota\": 100,\n  \"features\": {\n    \"imagesPerProperty\": 20,\n    \"videosPerProperty\": 2,\n    \"teamMembers\": 3,\n    \"featuredListingsPerMonth\": 2,\n    \"contactUnlocks\": 50\n  }\n}"
+										},
+										"url": "{{baseUrl}}/admin/plans"
+									},
+									"response": [],
+									"description": "Modeled as ONE_TIME (30-day pass, manually repurchased) because recurring subscriptions (POST /subscriptions) are not implemented in this codebase \u2014 see docs/razorpay-integration-plan.md Section 9/17 Phase 4. Copy `id` \u2192 `proPlanId`, `productId` \u2192 `proProductId`."
+								},
+								{
+									"name": "Create Business plan",
+									"request": {
+										"method": "POST",
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{adminAccessToken}}",
+													"type": "string"
+												}
+											]
+										},
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"code\": \"PLAN_BUSINESS\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies and brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 299900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": null,\n  \"featuredDays\": 30,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"imagesPerProperty\": 50,\n    \"videosPerProperty\": 5,\n    \"teamMembers\": 10,\n    \"featuredListingsPerMonth\": 10,\n    \"contactUnlocks\": 250\n  }\n}"
+										},
+										"url": "{{baseUrl}}/admin/plans"
+									},
+									"response": [],
+									"description": "planType is forced to \"BROKER\" \u2014 commerce.plans.plan_type only allows FREE/PREMIUM/BROKER, and Business's team-member/bulk-upload features fit the existing BROKER tier best. Copy `id` \u2192 `businessPlanId`, `productId` \u2192 `businessProductId`."
+								}
+							]
+						},
+						{
+							"name": "Admin: list plans",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{adminAccessToken}}",
+											"type": "string"
+										}
+									]
+								},
+								"url": "{{baseUrl}}/admin/plans"
+							},
+							"response": []
+						},
+						{
+							"name": "Admin: get plan",
+							"request": {
+								"method": "GET",
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{adminAccessToken}}",
+											"type": "string"
+										}
+									]
+								},
+								"url": "{{baseUrl}}/admin/plans/{{planId}}"
+							},
+							"response": []
+						},
+						{
+							"name": "Admin: update plan (change AI quota)",
+							"request": {
+								"method": "PATCH",
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{adminAccessToken}}",
+											"type": "string"
+										}
+									]
+								},
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"aiMonthlyQuota\": 100\n}"
+								},
+								"url": "{{baseUrl}}/admin/plans/{{planId}}"
+							},
+							"response": [],
+							"description": "Changing aiMonthlyQuota only affects future usage windows \u2014 it never retroactively alters a customer's already-counted usage this month. Note: `code` cannot be changed once the plan has any orders against it (409 PLAN_CODE_LOCKED)."
+						},
+						{
+							"name": "Admin: activate plan",
+							"request": {
+								"method": "POST",
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{adminAccessToken}}",
+											"type": "string"
+										}
+									]
+								},
+								"url": "{{baseUrl}}/admin/plans/{{planId}}/activate"
+							},
+							"response": []
+						},
+						{
+							"name": "Admin: deactivate plan",
+							"request": {
+								"method": "POST",
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{adminAccessToken}}",
+											"type": "string"
+										}
+									]
+								},
+								"url": "{{baseUrl}}/admin/plans/{{planId}}/deactivate"
+							},
+							"response": [],
+							"description": "Deactivated plans drop out of GET /plans and cannot be ordered, but do not affect anyone who already purchased them."
+						}
+					]
+				},
+				{
+					"name": "Payments",
+					"item": [
+						{
+							"name": "Admin: List payments",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/payments?status=CAPTURED&provider=RAZORPAY&search=ZMN-O&fromDate=2026-01-01&toDate=2026-12-31&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin: Payment details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/payments/{{paymentId}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "Service Requests",
+					"item": [
+						{
+							"name": "Admin: List service requests",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/service-requests?status=REQUESTED&serviceType=LEGAL_REVIEW&search=deed"
+							}
+						},
+						{
+							"name": "Admin: Service request details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}"
+							}
+						},
+						{
+							"name": "Admin: Update service request status",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"status\": \"IN_PROGRESS\",\n  \"internalNote\": \"Assigned to legal team for review.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}/status"
+							}
+						},
+						{
+							"name": "Admin: Service report upload URL",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"fileName\": \"title-report.pdf\",\n  \"mimeType\": \"application/pdf\",\n  \"fileSizeBytes\": 524288\n}"
+								},
+								"url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}/report/upload-url"
+							}
+						},
+						{
+							"name": "Admin: Submit service report",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"storageKey\": \"service-requests/{{serviceRequestId}}/report.pdf\",\n  \"summary\": \"Title verified, no encumbrances found.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/service-requests/{{serviceRequestId}}/report"
+							}
+						}
+					]
+				},
+				{
+					"name": "Content CMS",
+					"item": [
+						{
+							"name": "Admin: List content",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/content?status=DRAFT&type=NEWS&language=en&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin: Content details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/content/{{contentId}}"
+							}
+						},
+						{
+							"name": "Admin: Create content",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"type\": \"NEWS\",\n  \"locationId\": \"{{locationId}}\",\n  \"coverStorageKey\": null,\n  \"sourceName\": \"Economic Times\",\n  \"sourceUrl\": \"https://example.com/article\",\n  \"translations\": [\n    {\n      \"language\": \"en\",\n      \"slug\": \"land-prices-rise-in-panvel\",\n      \"title\": \"Land prices rise in Panvel\",\n      \"summary\": \"A short summary of the article.\",\n      \"body\": \"Full article body goes here.\"\n    }\n  ]\n}"
+								},
+								"url": "{{baseUrl}}/admin/content"
+							}
+						},
+						{
+							"name": "Admin: Update content",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"sourceName\": \"Updated Source\",\n  \"translations\": [\n    {\n      \"language\": \"en\",\n      \"slug\": \"land-prices-rise-in-panvel\",\n      \"title\": \"Land prices rise in Panvel (updated)\",\n      \"summary\": \"Updated summary.\",\n      \"body\": \"Updated article body.\"\n    }\n  ]\n}"
+								},
+								"url": "{{baseUrl}}/admin/content/{{contentId}}"
+							}
+						},
+						{
+							"name": "Admin: Publish content",
+							"request": {
+								"method": "POST",
+								"url": "{{baseUrl}}/admin/content/{{contentId}}/publish"
+							}
+						},
+						{
+							"name": "Admin: Archive content",
+							"request": {
+								"method": "POST",
+								"url": "{{baseUrl}}/admin/content/{{contentId}}/archive"
+							}
+						},
+						{
+							"name": "Admin: Delete content",
+							"request": {
+								"method": "DELETE",
+								"url": "{{baseUrl}}/admin/content/{{contentId}}"
+							}
+						},
+						{
+							"name": "Admin: Content cover upload URL",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"fileName\": \"land-prices-rise.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 153600\n}"
+								},
+								"url": "{{baseUrl}}/admin/content/media/upload-url"
+							}
+						},
+						{
+							"name": "Admin: Complete content cover upload",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"storageKey\": \"content/covers/replace-with-storage-key.jpg\",\n  \"fileName\": \"land-prices-rise.jpg\",\n  \"mimeType\": \"image/jpeg\",\n  \"fileSizeBytes\": 153600\n}"
+								},
+								"url": "{{baseUrl}}/admin/content/media/complete"
+							}
+						}
+					]
+				},
+				{
+					"name": "Market Trends",
+					"item": [
+						{
+							"name": "Admin: List market trend series",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/market-trends"
+							}
+						},
+						{
+							"name": "Admin: Market trend series details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/market-trends/{{seriesId}}"
+							}
+						},
+						{
+							"name": "Admin: Create market trend series",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"locationId\": \"{{locationId}}\",\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"metric\": \"ASKING_PRICE\",\n  \"unit\": \"INR_PER_SQFT\",\n  \"sourceName\": \"Registrar Office\",\n  \"sourceUrl\": \"https://example.com/rates\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/market-trends"
+							}
+						},
+						{
+							"name": "Admin: Update market trend series",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"sourceName\": \"Updated Registrar Office\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/market-trends/{{seriesId}}"
+							}
+						},
+						{
+							"name": "Admin: Delete market trend series",
+							"request": {
+								"method": "DELETE",
+								"url": "{{baseUrl}}/admin/market-trends/{{seriesId}}"
+							}
+						},
+						{
+							"name": "Admin: Add market trend point",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"periodDate\": \"2026-01-01\",\n  \"value\": 5500\n}"
+								},
+								"url": "{{baseUrl}}/admin/market-trends/{{seriesId}}/points"
+							}
+						},
+						{
+							"name": "Admin: Update market trend point",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"periodDate\": \"2026-01-01\",\n  \"value\": 5750\n}"
+								},
+								"url": "{{baseUrl}}/admin/market-trends/{{seriesId}}/points/{{pointId}}"
+							}
+						},
+						{
+							"name": "Admin: Delete market trend point",
+							"request": {
+								"method": "DELETE",
+								"url": "{{baseUrl}}/admin/market-trends/{{seriesId}}/points/{{pointId}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "Channel Partners",
+					"item": [
+						{
+							"name": "Admin: List channel partners",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/channel-partners?status=PENDING&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin: Channel partner details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}"
+							}
+						},
+						{
+							"name": "Admin: Approve channel partner",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"note\": \"Documents verified.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}/approve"
+							}
+						},
+						{
+							"name": "Admin: Reject channel partner",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"RERA number could not be verified.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}/reject"
+							}
+						},
+						{
+							"name": "Admin: Suspend channel partner",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Compliance issue flagged.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/channel-partners/{{partnerId}}/suspend"
+							}
+						}
+					]
+				},
+				{
+					"name": "Investment Opportunities",
+					"item": [
+						{
+							"name": "Admin: Create investment opportunity",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"title\": \"Prime Farmland Investment\",\n  \"locationId\": \"{{locationId}}\",\n  \"investmentType\": \"REIT\",\n  \"minimumInvestmentMinor\": 5000000,\n  \"description\": \"A great opportunity to invest in prime farmland near the highway corridor.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/investment-opportunities"
+							}
+						},
+						{
+							"name": "Admin: Update investment opportunity",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"minimumInvestmentMinor\": 7500000\n}"
+								},
+								"url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}"
+							}
+						},
+						{
+							"name": "Admin: Publish investment opportunity",
+							"request": {
+								"method": "POST",
+								"url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/publish"
+							}
+						},
+						{
+							"name": "Admin: Close investment opportunity",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"Fully subscribed.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/investment-opportunities/{{opportunityId}}/close"
+							}
+						}
+					]
+				},
+				{
+					"name": "Auctions",
+					"item": [
+						{
+							"name": "Admin: Create auction",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"title\": \"Bank Auction - Prime Plot\",\n  \"institutionName\": \"State Bank of India\",\n  \"locationId\": \"{{locationId}}\",\n  \"reservePriceMinor\": 50000000,\n  \"emdAmountMinor\": 500000,\n  \"auctionAt\": \"2026-09-15T10:00:00.000Z\",\n  \"officialUrl\": \"https://example.com/auction/1\",\n  \"description\": \"Prime residential plot e-auction.\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/auctions"
+							}
+						},
+						{
+							"name": "Admin: Update auction",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reservePriceMinor\": 60000000,\n  \"status\": \"CLOSED\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/auctions/{{auctionId}}"
+							}
+						},
+						{
+							"name": "Admin: Delete auction",
+							"request": {
+								"method": "DELETE",
+								"url": "{{baseUrl}}/admin/auctions/{{auctionId}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "Advertisements",
+					"item": [
+						{
+							"name": "Admin: List ads",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/ads?status=ACTIVE&placement=HOME_TOP&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin: Ad details",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/ads/{{adId}}"
+							}
+						},
+						{
+							"name": "Admin: Create ad",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"name\": \"Homepage Banner\",\n  \"placement\": \"HOME_TOP\",\n  \"targetUrl\": \"https://example.com/promo\",\n  \"startsAt\": \"2026-01-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-12-31T00:00:00.000Z\",\n  \"status\": \"ACTIVE\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/ads"
+							}
+						},
+						{
+							"name": "Admin: Update ad",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"status\": \"INACTIVE\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/ads/{{adId}}"
+							}
+						},
+						{
+							"name": "Admin: Delete ad",
+							"request": {
+								"method": "DELETE",
+								"url": "{{baseUrl}}/admin/ads/{{adId}}"
+							}
+						},
+						{
+							"name": "Admin: Ad media upload URL",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800\n}"
+								},
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media/upload-url"
+							}
+						},
+						{
+							"name": "Admin: Complete ad media upload",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"storageKey\": \"ads/{{adId}}/media/replace-with-storage-key.png\",\n  \"fileName\": \"homepage-banner.png\",\n  \"mimeType\": \"image/png\",\n  \"fileSizeBytes\": 204800,\n  \"isCover\": true\n}"
+								},
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media/complete"
+							}
+						},
+						{
+							"name": "Admin: List ad media",
+							"request": {
+								"method": "GET",
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media"
+							}
+						},
+						{
+							"name": "Admin: Update ad media",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"sortOrder\": 0\n}"
+								},
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}"
+							}
+						},
+						{
+							"name": "Admin: Reorder ad media",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"mediaIds\": [\"{{mediaId}}\"]\n}"
+								},
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media/order"
+							}
+						},
+						{
+							"name": "Admin: Set ad media cover",
+							"request": {
+								"method": "PUT",
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}/cover"
+							}
+						},
+						{
+							"name": "Admin: Delete ad media",
+							"request": {
+								"method": "DELETE",
+								"url": "{{baseUrl}}/admin/ads/{{adId}}/media/{{mediaId}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "Organizations & Members",
+					"item": [
+						{
+							"name": "Admin \u2014 list organizations",
+							"request": {
+								"method": "GET",
+								"description": "Platform-wide listing, not scoped to the caller's own memberships (unlike GET /organizations/me) \u2014 so PENDING and SUSPENDED organizations are visible here too, which the member-gated public GET /organizations/{organizationId} would otherwise 404 for a non-member admin. Filters: search, name, type, slug, phone, email, gstNumber, reraNumber, status.",
+								"url": "{{baseUrl}}/admin/organizations?status=PENDING&page=1&limit=20"
+							}
+						},
+						{
+							"name": "Admin \u2014 organization detail",
+							"request": {
+								"method": "GET",
+								"description": "Same as the public GET /organizations/{organizationId} but bypasses its active-membership visibility gate, so a PENDING or SUSPENDED organization can be reviewed before/without approving it. Also inlines a `members` array (user, role, status, joinedAt for each) \u2014 the public detail response never includes this, and the dedicated GET /organizations/{organizationId}/members endpoint would 403 an admin who isn't themselves a member.",
+								"url": "{{baseUrl}}/admin/organizations/{{organizationId}}"
+							}
+						},
+						{
+							"name": "Admin \u2014 approve organization",
+							"request": {
+								"method": "POST",
+								"description": "PENDING \u2192 ACTIVE. Fails with 409 INVALID_TRANSITION if the organization isn't currently PENDING.",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"note\": \"Documents verified\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/organizations/{{organizationId}}/approve"
+							}
+						},
+						{
+							"name": "Admin \u2014 suspend organization",
+							"request": {
+								"method": "POST",
+								"description": "PENDING or ACTIVE \u2192 SUSPENDED (there's no separate REJECTED status, so this doubles as rejecting a pending organization). reason is required. Fails with 409 INVALID_TRANSITION if the organization is already SUSPENDED.",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"reason\": \"GST number could not be verified\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/organizations/{{organizationId}}/suspend"
+							}
+						},
+						{
+							"name": "Admin \u2014 reinstate organization",
+							"request": {
+								"method": "POST",
+								"description": "SUSPENDED \u2192 ACTIVE. Fails with 409 INVALID_TRANSITION if the organization isn't currently SUSPENDED.",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"note\": \"Compliance review complete\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/organizations/{{organizationId}}/reinstate"
+							}
+						},
+						{
+							"name": "Admin \u2014 update member status",
+							"request": {
+								"method": "PATCH",
+								"description": "Admin-only: sets an organization member's status directly to ACTIVE, INVITED, or REMOVED, bypassing the org's own OWNER/ADMIN requirement (unlike the self-service Remove member request under Organizations). Unlike Remove member, this can also reactivate a REMOVED member straight to ACTIVE/INVITED with no fresh invite-accept cycle and no team-member seat-limit re-check \u2014 a deliberate admin override. Still blocks 400 LAST_OWNER if the target is the org's only active OWNER and the new status isn't ACTIVE. There's no SUSPENDED status distinct from REMOVED without a schema migration.",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"status\": \"REMOVED\"\n}"
+								},
+								"url": "{{baseUrl}}/admin/organizations/{{organizationId}}/members/{{memberUserId}}/status"
+							}
+						}
+					]
+				}
+			],
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{adminAccessToken}}",
+						"type": "string"
+					}
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "accessToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refreshToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "adminAccessToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "adminRefreshToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "memberEmail",
+			"value": "new.hire@example.com",
+			"type": "string"
+		},
+		{
+			"key": "memberAccessToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "memberRefreshToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "memberUserId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "userId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "challengeId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "otp",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "adId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "amenityId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "areaUnitId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "auctionId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "businessPlanId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "businessProductId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "contentId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "contentSlug",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "conversationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "documentId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "documentTypeId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "enquiryId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "freePlanId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "freeProductId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "grantId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "granteeUserId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "landUseTypeId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "listingId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "locationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "mediaId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "notificationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "opportunityId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "orderId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "organizationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "ownershipTypeId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "partnerId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "paymentId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "planId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "pointId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "proPlanId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "proProductId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "productId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "propertyId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "propertyTypeId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "requirementId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "seriesId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "serviceId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "serviceRequestId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "storageKey",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "verificationId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "visitId",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

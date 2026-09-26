@@ -72,6 +72,8 @@ test("the consolidated admin Postman collection covers every mounted admin endpo
     "POST {{baseUrl}}/admin/content/{{contentId}}/archive",
     "POST {{baseUrl}}/admin/content/media/upload-url",
     "POST {{baseUrl}}/admin/content/media/complete",
+    "GET {{baseUrl}}/admin/market-trends",
+    "GET {{baseUrl}}/admin/market-trends/{{seriesId}}",
     "POST {{baseUrl}}/admin/market-trends",
     "PATCH {{baseUrl}}/admin/market-trends/{{seriesId}}",
     "DELETE {{baseUrl}}/admin/market-trends/{{seriesId}}",
