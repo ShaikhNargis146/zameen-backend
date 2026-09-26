@@ -105,7 +105,7 @@ export const completeMedia = async (req, res) => {
   const batch = Array.isArray(req.body?.files);
   const input = validation.mediaComplete(req.body || {});
   const items = await service.completeMedia({
-    propertyId: req.property.id,
+    property: req.property,
     actorId: req.actor.id,
     input
   });

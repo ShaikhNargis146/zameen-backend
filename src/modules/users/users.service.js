@@ -1,6 +1,10 @@
 import { HttpError } from "../../shared/http.js";
-import { rolesFor } from "../auth/auth.service.js";
+import { hashWithPepper, safeEqualHex } from "../../utils/crypto.js";
+import AuthService, { rolesFor } from "../auth/auth.service.js";
+import * as authRepository from "../auth/auth.repository.js";
 import * as repository from "./users.repository.js";
+
+const EMAIL_CHANGE_PURPOSE = "VERIFY_EMAIL";
 
 const withRoles = async user =>
   user ? { ...user, roles: await rolesFor(user.id) } : null;
@@ -17,6 +21,67 @@ export const updateProfile = async (id, changes) => {
   if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User was not found.");
   return user;
 };
+// Step 1 of a verified email change: send an OTP to the NEW address. Reuses
+// AuthService.requestOtp for its cooldown/rate-limit/delivery logic, just
+// not its login/account-creation side effects (confirmEmailChange below
+// handles the outcome itself instead of AuthService.verifyOtp).
+export const requestEmailChange = async ({ actorId, email, ip }) => {
+  const existing = await authRepository.findUserByDestination(email, "EMAIL");
+  if (existing && existing.id !== actorId)
+    throw new HttpError(409, "EMAIL_IN_USE", "Email is already in use.");
+  const result = await AuthService.requestOtp({
+    email,
+    purpose: EMAIL_CHANGE_PURPOSE,
+    ip
+  });
+  if (!result.ok) throw new HttpError(result.status, result.code, result.message);
+  return result.data;
+};
+
+// Step 2: the OTP that only the new address's real owner could have
+// received is what proves ownership — the change is applied to whoever is
+// currently authenticated (actorId), not to anything read off the
+// challenge, so there is nothing here an attacker could redirect to a
+// different account by supplying their own challengeId/otp pair (they'd
+// need the code delivered to the address they don't control either way).
+export const confirmEmailChange = async ({ actorId, challengeId, otp }) => {
+  const challenge = await authRepository.challengeById(challengeId);
+  if (
+    !challenge ||
+    challenge.purpose !== EMAIL_CHANGE_PURPOSE ||
+    challenge.verified_at ||
+    new Date(challenge.expires_at) <= new Date()
+  )
+    throw new HttpError(410, "OTP_EXPIRED", "OTP has expired.");
+  if (challenge.attempt_count >= challenge.max_attempts)
+    throw new HttpError(429, "OTP_MAX_ATTEMPTS", "Too many OTP attempts.");
+  const expected = hashWithPepper(
+    `${challenge.destination}:${challenge.purpose}:${otp}`
+  );
+  if (!safeEqualHex(challenge.otp_hash, expected)) {
+    const failed = await authRepository.recordFailedAttempt(challenge.id);
+    if (!failed || failed.attempt_count >= failed.max_attempts)
+      throw new HttpError(429, "OTP_MAX_ATTEMPTS", "Too many OTP attempts.");
+    throw new HttpError(401, "INVALID_OTP", "Invalid OTP.");
+  }
+  const verified = await authRepository.consumeChallenge(challenge.id, expected);
+  if (!verified)
+    throw new HttpError(
+      410,
+      "OTP_UNAVAILABLE",
+      "OTP has expired or was already used."
+    );
+  const result = await repository.setVerifiedEmail(actorId, challenge.destination);
+  if (!result.ok) {
+    if (result.error?.code === "23505")
+      throw new HttpError(409, "EMAIL_IN_USE", "Email is already in use.");
+    throw result.error;
+  }
+  const user = await profile(actorId);
+  if (!user) throw new HttpError(404, "USER_NOT_FOUND", "User was not found.");
+  return user;
+};
+
 export const addSelfRole = async (id, role) => {
   await repository.addRole(id, role);
   return roleDetails(id);

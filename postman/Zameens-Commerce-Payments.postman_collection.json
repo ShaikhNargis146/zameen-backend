@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Zameens — Commerce, Plans & Razorpay Checkout",
-    "description": "Single source of truth for the commerce module: plan/service catalog, the ONE_TIME redirect-checkout flow (orders → Razorpay Payment Link → callback/webhook → entitlement), plan administration, and the AI monthly-quota interaction with plans. Consolidates the former 'Zameens — Pricing Plans' and 'Zameens — Razorpay Checkout & AI Quota' collections into one, re-verified against the current route/controller/validation code in src/modules/commerce and src/modules/ai (2026-09-20, including the amount/currency/status re-verification on callback+webhook and the `latestPaymentStatus` order field). See docs/razorpay-integration-plan.md (design) and docs/razorpay-client-integration-guide.md (frontend walkthrough + full /payments/result status table).\n\nSetup: run 'Auth' to get accessToken (any logged-in user). adminAccessToken needs a separate ADMIN-role user for the Admin folders — this backend has no self-service admin signup, so get one from whoever seeds ADMIN accounts in your environment.",
+    "description": "Single source of truth for the commerce module: plan/service catalog, the ONE_TIME redirect-checkout flow (orders → Razorpay Payment Link → callback/webhook → entitlement), plan administration, and the AI monthly-quota interaction with plans. Consolidates the former 'Zameens — Pricing Plans' and 'Zameens — Razorpay Checkout & AI Quota' collections into one, re-verified against the current route/controller/validation code in src/modules/commerce and src/modules/ai (2026-09-22, updated for the full subscription-entitlements work: GET /me/subscription, the plan-included featured-listing allowance at POST /listings/{listingId}/feature, and the corrected AI org-quota resolution rules — see docs/subscription-entitlements-changes-summary.md). See docs/razorpay-integration-plan.md (design) and docs/razorpay-client-integration-guide.md (frontend walkthrough + full /payments/result status table).\n\nSetup: run 'Auth' to get accessToken (any logged-in user). adminAccessToken needs a separate ADMIN-role user for the Admin folders — this backend has no self-service admin signup, so get one from whoever seeds ADMIN accounts in your environment.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -25,7 +25,8 @@
     { "key": "listingId", "value": "" },
     { "key": "orderId", "value": "" },
     { "key": "paymentId", "value": "" },
-    { "key": "conversationId", "value": "" }
+    { "key": "conversationId", "value": "" },
+    { "key": "organizationId", "value": "" }
   ],
   "item": [
     {
@@ -112,7 +113,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 0,\n  \"verificationIncluded\": false,\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"propertyPhotosLimit\": 8,\n    \"videoUploadsPerProperty\": 0,\n    \"buyerEnquiries\": \"LIMITED\",\n    \"aiAssistantTier\": \"BASIC\",\n    \"featuredListingsPerMonth\": 0,\n    \"searchPriority\": \"STANDARD\",\n    \"listingAnalyticsTier\": \"BASIC\",\n    \"verifiedBadge\": false,\n    \"leadDashboard\": false,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"NONE\",\n    \"listingDurationDays\": 30,\n    \"billingCadence\": \"NONE\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_FREE\",\n  \"name\": \"Free\",\n  \"planType\": \"FREE\",\n  \"description\": \"Free tier for sellers listing a few properties.\",\n  \"amountMinor\": 0,\n  \"currency\": \"INR\",\n  \"durationDays\": null,\n  \"listingLimit\": 2,\n  \"featuredDays\": null,\n  \"aiMonthlyQuota\": 5,\n  \"features\": {\n    \"imagesPerProperty\": 5,\n    \"videosPerProperty\": 0,\n    \"teamMembers\": 1,\n    \"featuredListingsPerMonth\": 0,\n    \"contactUnlocks\": 5\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -130,7 +131,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_PRO_MONTHLY\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 49900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 10,\n  \"verificationIncluded\": true,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 20,\n    \"videoUploadsPerProperty\": 1,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 2,\n    \"searchPriority\": \"HIGHER\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 1,\n    \"bulkPropertyUpload\": false,\n    \"supportTier\": \"PRIORITY\",\n    \"listingDurationDays\": 90,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_PRO\",\n  \"name\": \"Pro\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"For active sellers who need more listings, visibility, and lead tools.\",\n  \"amountMinor\": 99900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 20,\n  \"featuredDays\": 15,\n  \"aiMonthlyQuota\": 100,\n  \"features\": {\n    \"imagesPerProperty\": 20,\n    \"videosPerProperty\": 2,\n    \"teamMembers\": 3,\n    \"featuredListingsPerMonth\": 2,\n    \"contactUnlocks\": 50\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -148,7 +149,7 @@
                 "header": [{ "key": "Content-Type", "value": "application/json" }],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"code\": \"PLAN_BUSINESS_MONTHLY\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies/brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 149900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 50,\n  \"verificationIncluded\": true,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"propertyPhotosLimit\": 30,\n    \"videoUploadsPerProperty\": 3,\n    \"buyerEnquiries\": \"UNLIMITED\",\n    \"aiAssistantTier\": \"ADVANCED\",\n    \"featuredListingsPerMonth\": 10,\n    \"searchPriority\": \"HIGHEST\",\n    \"listingAnalyticsTier\": \"ADVANCED\",\n    \"verifiedBadge\": true,\n    \"leadDashboard\": true,\n    \"maxTeamMembers\": 5,\n    \"bulkPropertyUpload\": true,\n    \"supportTier\": \"DEDICATED\",\n    \"listingDurationDays\": null,\n    \"billingCadence\": \"MONTHLY\"\n  }\n}"
+                  "raw": "{\n  \"code\": \"PLAN_BUSINESS\",\n  \"name\": \"Business\",\n  \"planType\": \"BROKER\",\n  \"description\": \"For agencies and brokers managing a large, team-run inventory.\",\n  \"amountMinor\": 299900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": null,\n  \"featuredDays\": 30,\n  \"aiMonthlyQuota\": null,\n  \"features\": {\n    \"imagesPerProperty\": 50,\n    \"videosPerProperty\": 5,\n    \"teamMembers\": 10,\n    \"featuredListingsPerMonth\": 10,\n    \"contactUnlocks\": 250\n  }\n}"
                 },
                 "url": "{{baseUrl}}/admin/plans"
               },
@@ -254,7 +255,7 @@
             "url": "{{baseUrl}}/orders"
           },
           "response": [],
-          "description": "`targetType` must be the literal string \"LISTING\" — anything else is rejected with 400. `targetId` must be a listing the logged-in user (or their organization) owns, or the order is rejected with 409 TARGET_NOT_OWNED. Only ever offer this action from the seller's own listing management screen."
+          "description": "`targetType` must be the literal string \"LISTING\" — anything else is rejected with 400. `targetId` must be a listing the logged-in user (or their organization) owns, or the order is rejected with 409 TARGET_NOT_OWNED. Only ever offer this action from the seller's own listing management screen.\n\nBefore sending the seller down this paid checkout path, try the free alternative first: POST /listings/{listingId}/feature (see the Dev 1 collection, Listings and moderation) draws from the plan's included monthly featuredListingsPerMonth allowance with no payment at all, and only falls back to 403 PLAN_LIMIT_REACHED (`checkoutRequired: true`) once that allowance is exhausted — that's the signal to offer this paid flow instead."
         },
         {
           "name": "Create order — Paid service",
@@ -294,6 +295,15 @@
           "description": "After the customer lands back on your `/payments/result?orderId=...&status=...` page, use this to confirm `status: \"PAID\"` rather than trusting the `status` query param alone for anything business-critical (e.g. don't unlock a feature purely because the URL said success — the query param can only drive which screen to show).\n\n`/payments/result` status handling (docs/razorpay-client-integration-guide.md Section 5):\n- `success` — captured, entitlement applied. Show success.\n- `pending` — signature/lookup was fine but capture hasn't finished synchronously; poll this endpoint every few seconds (give up after ~30s) until `status: \"PAID\"`.\n- `invalid` — signature didn't verify or the reference is unknown. Treat as failed, offer to retry.\n- anything else (`cancelled`, `expired`, ...) — Razorpay's own status passed through as-is. Treat as not-paid, offer to retry via POST /payments/{orderId}/create again.\n\n**`latestPaymentStatus` (new field, sits alongside `status`)** is the most recent payment attempt's own status (`CREATED`, `FAILED`, `CAPTURED`, ...). `status` alone cannot tell \"still waiting on the current attempt\" apart from \"the last attempt failed, please retry\" — both leave `status: \"PAYMENT_PENDING\"` on purpose, so a retry (POST /payments/{orderId}/create again) can reuse the same order instead of the order dead-ending. Check `latestPaymentStatus === \"FAILED\"` to show a retry prompt immediately on the result page instead of polling for up to 30s first."
         },
         {
+          "name": "Download invoice (PDF) — only once status is PAID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/{{orderId}}/invoice"
+          },
+          "response": [],
+          "description": "Returns the tax invoice as a PDF (`Content-Type: application/pdf`, `Content-Disposition: attachment`), not JSON. 409 `INVOICE_NOT_AVAILABLE` if the order has never been captured — an invoice number is only assigned at payment-capture time, so there's nothing to generate before then. 404 `ORDER_NOT_FOUND` if the order doesn't belong to the caller (same owner-or-404 rule as GET order above).\n\nGST breakdown (CGST+SGST vs IGST) is a display-only split of the already GST-inclusive plan/product price — it never changes `order.totalMinor` or what was actually charged."
+        },
+        {
           "name": "GET my orders",
           "request": {
             "method": "GET",
@@ -309,7 +319,16 @@
             "url": "{{baseUrl}}/plans/me"
           },
           "response": [],
-          "description": "Answers \"what plan am I on and when does it end?\" — previously only checked internally (e.g. for gating the AI Assistant's monthly quota), never exposed to the buyer.\n\nResponse when the user has an active personal plan:\n```json\n{\n  \"hasActivePlan\": true,\n  \"plan\": { \"id\": \"...\", \"productId\": \"...\", \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", ... },\n  \"status\": \"ACTIVE\",\n  \"startsAt\": \"2026-09-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-10-01T00:00:00.000Z\"\n}\n```\nWhen there's no active plan (never purchased one, or it already lapsed): `{ \"hasActivePlan\": false, \"plan\": null, \"status\": null, \"startsAt\": null, \"endsAt\": null }`.\n\nThere is no background sweep and no notification behind this — the query filters on `endsAt` lazily at read time, so a lapsed plan just stops being returned. The client is expected to read `endsAt` and decide for itself when to show \"expiring soon\"/\"expired\" messaging.\n\nOrganization-scoped plans are not returned here (personal plans only, same restriction as the AI-quota check) — there is no equivalent \"my org's plan\" endpoint yet."
+          "description": "Answers \"what plan am I on and when does it end?\" — a billing-status indicator (did I actually purchase something, and is it currently active), distinct from GET /me/subscription below (what effectively applies to me right now, features + limits + usage in one response). Use this one for a \"my billing/plan\" screen; use /me/subscription for anything that needs to show remaining quota/limits.\n\nResponse when the user has an active personal plan:\n```json\n{\n  \"hasActivePlan\": true,\n  \"plan\": { \"id\": \"...\", \"productId\": \"...\", \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", ... },\n  \"status\": \"ACTIVE\",\n  \"startsAt\": \"2026-09-01T00:00:00.000Z\",\n  \"endsAt\": \"2026-10-01T00:00:00.000Z\"\n}\n```\nWhen there's no active plan (never purchased one, or it already lapsed): `{ \"hasActivePlan\": false, \"plan\": null, \"status\": null, \"startsAt\": null, \"endsAt\": null }` — deliberately still `false`/`null` even for an owner who's effectively on the Free plan by default; this endpoint only ever reports a REAL purchase/grant row, never the ambient Free-tier fallback.\n\nThere is no background sweep and no notification behind this — the query filters on `endsAt` lazily at read time, so a lapsed plan just stops being returned. The client is expected to read `endsAt` and decide for itself when to show \"expiring soon\"/\"expired\" messaging.\n\nOrganization-scoped plans are not returned here (personal plans only) — there is no equivalent \"my org's plan\" endpoint yet."
+        },
+        {
+          "name": "GET my full entitlement view (plan + limits + usage)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/me/subscription"
+          },
+          "response": [],
+          "description": "The single response meant to power every UI surface that needs to show plan/usage together — My Zameens, the subscription/pricing page, upgrade banners, usage bars. Always returns a plan (never `null`/`hasActivePlan: false` like GET /plans/me above): if the caller has no real active purchase, this falls back to the live, admin-editable Free plan — not a hardcoded default, so an admin changing Free-tier limits via Admin: update plan is reflected here immediately, even for an owner who purchased something once and let it lapse.\n\n```json\n{\n  \"plan\": { \"code\": \"PLAN_PRO_MONTHLY\", \"name\": \"Pro\", \"monthlyPrice\": 499 },\n  \"status\": \"ACTIVE\",\n  \"currentPeriodStart\": \"2026-09-01T00:00:00.000Z\",\n  \"currentPeriodEnd\": \"2026-10-01T00:00:00.000Z\",\n  \"features\": { \"featuredListingsPerMonth\": 2, \"...\": \"...\" },\n  \"limits\": {\n    \"activeListings\": { \"used\": 3, \"limit\": 10, \"remaining\": 7 },\n    \"imagesPerProperty\": { \"limit\": 20 },\n    \"videosPerProperty\": { \"limit\": 1 },\n    \"featuredListings\": { \"used\": 0, \"limit\": 2, \"remaining\": 2 },\n    \"aiQueries\": { \"used\": 4, \"limit\": null }\n  }\n}\n```\n`limit: null` on any block means unlimited (no `remaining` key in that case). This is personal-only, same as GET /plans/me — there is no organization-scoped equivalent yet."
         }
       ]
     },
@@ -373,12 +392,12 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"What's a good plot near Pune under 50 lakhs?\"\n}"
+              "raw": "{\n  \"content\": \"What's a good plot near Pune under 50 lakhs?\",\n  \"organizationId\": \"{{organizationId}}\"\n}"
             },
             "url": "{{baseUrl}}/ai/conversations/{{conversationId}}/messages"
           },
           "response": [],
-          "description": "Server-Sent Events response (Postman shows raw event lines, not a JSON body — expected). On exceeding the caller's plan's `aiMonthlyQuota` this emits:\n\n  event: error\n  data: {\"error\":{\"code\":\"AI_MONTHLY_QUOTA_EXCEEDED\",\"message\":\"You have used all N AI Property Assistant questions included in your plan this month.\"}}\n\nThe frontend's SSE `error` handler must special-case this code with a clear \"upgrade your plan\" message (ideally linking to the pricing page) rather than a generic error toast — same channel already used for AI_CONTEXT_UNAVAILABLE etc.\n\nQuota resets on the calendar month and only counts questions that were actually answered — a rejected attempt never counts against it, so retrying right after upgrading works immediately."
+          "description": "Server-Sent Events response (Postman shows raw event lines, not a JSON body — expected). On exceeding the caller's plan's `aiMonthlyQuota` this emits:\n\n  event: error\n  data: {\"error\":{\"code\":\"AI_MONTHLY_QUOTA_EXCEEDED\",\"message\":\"You have used all N AI Property Assistant questions included in your plan this month.\"}}\n\nThe frontend's SSE `error` handler must special-case this code with a clear \"upgrade your plan\" message (ideally linking to the pricing page) rather than a generic error toast — same channel already used for AI_CONTEXT_UNAVAILABLE etc.\n\nQuota resets on the calendar month and only counts questions that were actually answered — a rejected attempt never counts against it, so retrying right after upgrading works immediately. A mid-month plan upgrade does NOT reset this count back to 0 — quota already used this month still counts against the new, larger limit (this is intentional, to prevent gaming quota via buy-then-cancel-then-rebuy).\n\n`organizationId` is optional. Leave `{{organizationId}}` empty for the sender's own personal plan/free tier — this is never auto-selected from the sender's org memberships, even if they belong to an org with a bigger quota (a personal question must never silently draw down a shared org quota just because it happens to be the most generous one available). Set it explicitly, and be an ACTIVE member of that org, to pool this message against the org's shared quota instead — 403 ORGANIZATION_ACCESS_DENIED otherwise."
         },
         {
           "name": "List conversations",

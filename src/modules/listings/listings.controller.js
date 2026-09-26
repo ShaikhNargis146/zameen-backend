@@ -55,6 +55,8 @@ export const withdraw = async (req, res) =>
       reason: validation.optionalReason(req.body || {})
     })
   );
+export const feature = async (req, res) =>
+  ok(res, await service.feature(req.listing));
 export const markSold = async (req, res) =>
   ok(
     res,
@@ -117,6 +119,16 @@ export const reinstate = async (req, res) =>
     res,
     await service.reinstate({
       id: req.params.listingId,
+      reason: validation.optionalReason(req.body || {}),
+      actorId: req.actor.id
+    })
+  );
+export const removeMedia = async (req, res) =>
+  ok(
+    res,
+    await service.removeMedia({
+      listingId: req.params.listingId,
+      mediaId: req.params.mediaId,
       reason: validation.optionalReason(req.body || {}),
       actorId: req.actor.id
     })

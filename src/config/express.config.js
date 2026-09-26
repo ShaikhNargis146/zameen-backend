@@ -22,7 +22,10 @@ app.use(morgan("combined", logs));
 
 // CORS configuration
 app.use(cors());
-app.use(apiRateLimit);
+// Razorpay's webhook deliveries get their own budget (see
+// paymentWebhookRateLimit on the route itself) instead of sharing this
+// general per-IP pool with ordinary user API traffic.
+app.use((req, res, next) => (req.path === "/api/v1/payments/webhook" ? next() : apiRateLimit(req, res, next)));
 
 // Files are direct-to-storage uploads; API requests should carry metadata only.
 // `verify` retains the raw bytes so payment webhook signatures can be checked

@@ -38,7 +38,13 @@ const maxFileSizeBytes = 50 * 1024 * 1024;
 // `providers` set above — that one governs what a *new* payment can be
 // created with (Razorpay only, Phase 1); this covers whatever the schema
 // itself allows a payment row to already carry, for admin filtering.
-const paymentStatuses = new Set(["CREATED", "AUTHORIZED", "CAPTURED", "FAILED", "REFUNDED"]);
+const paymentStatuses = new Set([
+  "CREATED",
+  "AUTHORIZED",
+  "CAPTURED",
+  "FAILED",
+  "REFUNDED"
+]);
 const paymentProviders = new Set(["RAZORPAY", "STRIPE", "OTHER"]);
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -46,20 +52,26 @@ export const uuid = (value, field) => {
   const text = String(value ?? "").trim();
   if (!uuidPattern.test(text)) {
     const message = `${field} must be a valid UUID.`;
-    throw new HttpError(400, "INVALID_ID", message, [{ field: toField(field), message }]);
+    throw new HttpError(400, "INVALID_ID", message, [
+      { field: toField(field), message }
+    ]);
   }
   return text;
 };
 
 const optionalUuid = (value, field) =>
-  value === undefined || value === null || value === "" ? null : uuid(value, field);
+  value === undefined || value === null || value === ""
+    ? null
+    : uuid(value, field);
 
 const optionalString = (value, max, field, detailsField = toField(field)) => {
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim();
   if (text.length > max) {
     const message = `${field} must be at most ${max} characters.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: detailsField, message }
+    ]);
   }
   return text;
 };
@@ -68,26 +80,36 @@ const requiredString = (value, min, max, field) => {
   const text = String(value ?? "").trim();
   if (text.length < min || text.length > max) {
     const message = `${field} must be between ${min} and ${max} characters.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: toField(field), message }
+    ]);
   }
   return text;
 };
 
 const optionalEnum = (value, set, code, label) => {
   if (value === undefined || value === null || value === "") return null;
-  const text = String(value).trim().toUpperCase();
+  const text = String(value)
+    .trim()
+    .toUpperCase();
   if (!set.has(text)) {
     const message = `${code} must be ${label}.`;
-    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+    throw new HttpError(400, `INVALID_${code}`, message, [
+      { field: toField(code), message }
+    ]);
   }
   return text;
 };
 
 const requiredEnum = (value, set, code, label) => {
-  const text = String(value ?? "").trim().toUpperCase();
+  const text = String(value ?? "")
+    .trim()
+    .toUpperCase();
   if (!set.has(text)) {
     const message = `${code} must be ${label}.`;
-    throw new HttpError(400, `INVALID_${code}`, message, [{ field: toField(code), message }]);
+    throw new HttpError(400, `INVALID_${code}`, message, [
+      { field: toField(code), message }
+    ]);
   }
   return text;
 };
@@ -96,27 +118,55 @@ const requiredNonNegativeInteger = (value, field) => {
   const num = Number(value);
   if (!Number.isInteger(num) || num < 0) {
     const message = `${field} must be a whole number >= 0.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: toField(field), message }
+    ]);
   }
   return num;
 };
 
-const optionalPositiveInteger = (value, field, detailsField = toField(field)) => {
+const optionalPositiveInteger = (
+  value,
+  field,
+  detailsField = toField(field)
+) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
   if (!Number.isInteger(num) || num <= 0) {
     const message = `${field} must be a positive whole number.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: detailsField, message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: detailsField, message }
+    ]);
   }
   return num;
 };
 
-const optionalNonNegativeInteger = (value, field) => {
+const optionalNonNegativeInteger = (
+  value,
+  field,
+  detailsField = toField(field)
+) => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
   if (!Number.isInteger(num) || num < 0) {
     const message = `${field} must be a whole number >= 0.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: detailsField, message }
+    ]);
+  }
+  return num;
+};
+
+// Basis points (1800 = 18%) — bounded to a real GST percentage (0-100%),
+// unlike the general-purpose optionalNonNegativeInteger above.
+const optionalGstRateBps = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0 || num > 10000) {
+    const message = `${field} must be a whole number between 0 and 10000 (basis points).`;
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: toField(field), message }
+    ]);
   }
   return num;
 };
@@ -125,9 +175,38 @@ const optionalObject = (value, field) => {
   if (value === undefined || value === null) return null;
   if (typeof value !== "object" || Array.isArray(value)) {
     const message = `${field} must be an object.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: toField(field), message }
+    ]);
   }
   return value;
+};
+
+// `contactUnlocks` is one entitlement whose usage period is selected by the
+// plan type. Keep the retired keys out of new admin payloads so an outdated
+// client cannot restore the duplicate configuration after migration 020.
+const planFeatures = value => {
+  const features = optionalObject(value, "FEATURES");
+  if (!features) return null;
+  const legacyKey = [
+    "contactUnlocksLifetime",
+    "contactUnlocksPerMonth"
+  ].find(key => Object.hasOwn(features, key));
+  if (legacyKey) {
+    const message = `${legacyKey} is retired; use contactUnlocks instead.`;
+    throw new HttpError(400, "INVALID_FEATURES", message, [
+      { field: `features.${legacyKey}`, message }
+    ]);
+  }
+  if (!Object.hasOwn(features, "contactUnlocks")) return features;
+  return {
+    ...features,
+    contactUnlocks: optionalNonNegativeInteger(
+      features.contactUnlocks,
+      "CONTACT_UNLOCKS",
+      "features.contactUnlocks"
+    )
+  };
 };
 
 const optionalBoolean = (value, fallback) =>
@@ -138,18 +217,31 @@ const optionalDate = (value, field) => {
   const text = String(value).trim();
   if (!datePattern.test(text)) {
     const message = `${field} must be a date in YYYY-MM-DD format.`;
-    throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+    throw new HttpError(400, `INVALID_${field}`, message, [
+      { field: toField(field), message }
+    ]);
   }
   return text;
 };
 
 export const planAudience = query =>
-  optionalEnum(query.audience, planTypes, "AUDIENCE", "FREE, PREMIUM, or BROKER");
+  optionalEnum(
+    query.audience,
+    planTypes,
+    "AUDIENCE",
+    "FREE, PREMIUM, or BROKER"
+  );
 
 export const createOrder = body => {
-  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > maxOrderItems) {
+  if (
+    !Array.isArray(body.items) ||
+    body.items.length < 1 ||
+    body.items.length > maxOrderItems
+  ) {
     const message = `items must contain between 1 and ${maxOrderItems} entries.`;
-    throw new HttpError(400, "INVALID_ITEMS", message, [{ field: "items", message }]);
+    throw new HttpError(400, "INVALID_ITEMS", message, [
+      { field: "items", message }
+    ]);
   }
   const items = body.items.map((item, index) => {
     const targetType = optionalEnum(
@@ -186,9 +278,12 @@ export const createOrder = body => {
 
   const couponCode = optionalString(body.couponCode, 50, "COUPON_CODE");
   if (couponCode)
-    throw new HttpError(400, "COUPON_NOT_SUPPORTED", "Coupon codes are not supported yet.", [
-      { field: "couponCode", message: "Coupon codes are not supported yet." }
-    ]);
+    throw new HttpError(
+      400,
+      "COUPON_NOT_SUPPORTED",
+      "Coupon codes are not supported yet.",
+      [{ field: "couponCode", message: "Coupon codes are not supported yet." }]
+    );
 
   return {
     items,
@@ -198,7 +293,12 @@ export const createOrder = body => {
 };
 
 export const orderListQuery = query => ({
-  status: optionalEnum(query.status, orderStatuses, "STATUS", "a valid OrderStatus")
+  status: optionalEnum(
+    query.status,
+    orderStatuses,
+    "STATUS",
+    "a valid OrderStatus"
+  )
 });
 
 export const createPayment = body => ({
@@ -229,15 +329,24 @@ export const paymentCallbackQuery = query => ({
 
 const optionalStrictBoolean = (value, field) => {
   if (value === undefined || value === null || value === "") return null;
-  const text = String(value).trim().toLowerCase();
+  const text = String(value)
+    .trim()
+    .toLowerCase();
   if (["true", "1"].includes(text)) return true;
   if (["false", "0"].includes(text)) return false;
   const message = `${field} must be true or false.`;
-  throw new HttpError(400, `INVALID_${field}`, message, [{ field: toField(field), message }]);
+  throw new HttpError(400, `INVALID_${field}`, message, [
+    { field: toField(field), message }
+  ]);
 };
 
 export const adminPlanListQuery = query => ({
-  planType: optionalEnum(query.planType, planTypes, "PLAN_TYPE", "FREE, PREMIUM, or BROKER"),
+  planType: optionalEnum(
+    query.planType,
+    planTypes,
+    "PLAN_TYPE",
+    "FREE, PREMIUM, or BROKER"
+  ),
   isActive: optionalStrictBoolean(query.isActive, "IS_ACTIVE"),
   search: optionalString(query.search, 200, "SEARCH")
 });
@@ -245,44 +354,88 @@ export const adminPlanListQuery = query => ({
 export const createPlan = body => ({
   code: requiredString(body.code, 2, 100, "CODE"),
   name: requiredString(body.name, 2, 255, "NAME"),
-  planType: requiredEnum(body.planType, planTypes, "PLAN_TYPE", "FREE, PREMIUM, or BROKER"),
+  planType: requiredEnum(
+    body.planType,
+    planTypes,
+    "PLAN_TYPE",
+    "FREE, PREMIUM, or BROKER"
+  ),
   description: optionalString(body.description, 2000, "DESCRIPTION"),
   amountMinor: requiredNonNegativeInteger(body.amountMinor, "AMOUNT_MINOR"),
-  currency: body.currency ? requiredEnum(body.currency, currencies, "CURRENCY", "INR") : "INR",
+  currency: body.currency
+    ? requiredEnum(body.currency, currencies, "CURRENCY", "INR")
+    : "INR",
   durationDays: optionalPositiveInteger(body.durationDays, "DURATION_DAYS"),
   listingLimit: optionalNonNegativeInteger(body.listingLimit, "LISTING_LIMIT"),
   featuredDays: optionalNonNegativeInteger(body.featuredDays, "FEATURED_DAYS"),
   verificationIncluded: optionalBoolean(body.verificationIncluded, false),
-  features: optionalObject(body.features, "FEATURES") || {},
+  features: planFeatures(body.features) || {},
   isActive: optionalBoolean(body.isActive, true),
-  aiMonthlyQuota: optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA")
+  aiMonthlyQuota: optionalNonNegativeInteger(
+    body.aiMonthlyQuota,
+    "AI_MONTHLY_QUOTA"
+  ),
+  gstRateBps: optionalGstRateBps(body.gstRateBps, "GST_RATE_BPS") ?? 1800,
+  hsnSacCode: optionalString(body.hsnSacCode, 20, "HSN_SAC_CODE")
 });
 
 export const updatePlan = body => {
   const changes = {};
-  if (Object.hasOwn(body, "code")) changes.code = requiredString(body.code, 2, 100, "CODE");
-  if (Object.hasOwn(body, "name")) changes.name = requiredString(body.name, 2, 255, "NAME");
+  if (Object.hasOwn(body, "code"))
+    changes.code = requiredString(body.code, 2, 100, "CODE");
+  if (Object.hasOwn(body, "name"))
+    changes.name = requiredString(body.name, 2, 255, "NAME");
   if (Object.hasOwn(body, "planType"))
-    changes.planType = requiredEnum(body.planType, planTypes, "PLAN_TYPE", "FREE, PREMIUM, or BROKER");
+    changes.planType = requiredEnum(
+      body.planType,
+      planTypes,
+      "PLAN_TYPE",
+      "FREE, PREMIUM, or BROKER"
+    );
   if (Object.hasOwn(body, "description"))
     changes.description = optionalString(body.description, 2000, "DESCRIPTION");
   if (Object.hasOwn(body, "amountMinor"))
-    changes.amountMinor = requiredNonNegativeInteger(body.amountMinor, "AMOUNT_MINOR");
+    changes.amountMinor = requiredNonNegativeInteger(
+      body.amountMinor,
+      "AMOUNT_MINOR"
+    );
   if (Object.hasOwn(body, "currency"))
-    changes.currency = requiredEnum(body.currency, currencies, "CURRENCY", "INR");
+    changes.currency = requiredEnum(
+      body.currency,
+      currencies,
+      "CURRENCY",
+      "INR"
+    );
   if (Object.hasOwn(body, "durationDays"))
-    changes.durationDays = optionalPositiveInteger(body.durationDays, "DURATION_DAYS");
+    changes.durationDays = optionalPositiveInteger(
+      body.durationDays,
+      "DURATION_DAYS"
+    );
   if (Object.hasOwn(body, "listingLimit"))
-    changes.listingLimit = optionalNonNegativeInteger(body.listingLimit, "LISTING_LIMIT");
+    changes.listingLimit = optionalNonNegativeInteger(
+      body.listingLimit,
+      "LISTING_LIMIT"
+    );
   if (Object.hasOwn(body, "featuredDays"))
-    changes.featuredDays = optionalNonNegativeInteger(body.featuredDays, "FEATURED_DAYS");
+    changes.featuredDays = optionalNonNegativeInteger(
+      body.featuredDays,
+      "FEATURED_DAYS"
+    );
   if (Object.hasOwn(body, "verificationIncluded"))
     changes.verificationIncluded = Boolean(body.verificationIncluded);
   if (Object.hasOwn(body, "features"))
-    changes.features = optionalObject(body.features, "FEATURES") || {};
-  if (Object.hasOwn(body, "isActive")) changes.isActive = Boolean(body.isActive);
+    changes.features = planFeatures(body.features) || {};
+  if (Object.hasOwn(body, "isActive"))
+    changes.isActive = Boolean(body.isActive);
   if (Object.hasOwn(body, "aiMonthlyQuota"))
-    changes.aiMonthlyQuota = optionalNonNegativeInteger(body.aiMonthlyQuota, "AI_MONTHLY_QUOTA");
+    changes.aiMonthlyQuota = optionalNonNegativeInteger(
+      body.aiMonthlyQuota,
+      "AI_MONTHLY_QUOTA"
+    );
+  if (Object.hasOwn(body, "gstRateBps"))
+    changes.gstRateBps = optionalGstRateBps(body.gstRateBps, "GST_RATE_BPS");
+  if (Object.hasOwn(body, "hsnSacCode"))
+    changes.hsnSacCode = optionalString(body.hsnSacCode, 20, "HSN_SAC_CODE");
   if (!Object.keys(changes).length)
     throw new HttpError(400, "NO_CHANGES", "No editable fields were supplied.");
   return changes;
@@ -293,28 +446,45 @@ const optionalPhone = value => {
   const phone = String(value).trim();
   if (!e164Pattern.test(phone)) {
     const message = "contactPhone must be a valid E.164 number.";
-    throw new HttpError(400, "INVALID_CONTACT_PHONE", message, [{ field: "contactPhone", message }]);
+    throw new HttpError(400, "INVALID_CONTACT_PHONE", message, [
+      { field: "contactPhone", message }
+    ]);
   }
   return phone;
 };
 
 const optionalEmail = value => {
   if (value === undefined || value === null || value === "") return null;
-  const email = String(value).trim().toLowerCase();
+  const email = String(value)
+    .trim()
+    .toLowerCase();
   if (!emailPattern.test(email)) {
     const message = "contactEmail must be a valid email address.";
-    throw new HttpError(400, "INVALID_CONTACT_EMAIL", message, [{ field: "contactEmail", message }]);
+    throw new HttpError(400, "INVALID_CONTACT_EMAIL", message, [
+      { field: "contactEmail", message }
+    ]);
   }
   return email;
 };
 
 const fileInput = body => {
   const fileName = requiredString(body.fileName, 1, 255, "FILE_NAME");
-  const mimeType = requiredString(body.mimeType, 1, 255, "MIME_TYPE").toLowerCase();
+  const mimeType = requiredString(
+    body.mimeType,
+    1,
+    255,
+    "MIME_TYPE"
+  ).toLowerCase();
   const fileSizeBytes = Number(body.fileSizeBytes);
-  if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0 || fileSizeBytes > maxFileSizeBytes) {
+  if (
+    !Number.isInteger(fileSizeBytes) ||
+    fileSizeBytes <= 0 ||
+    fileSizeBytes > maxFileSizeBytes
+  ) {
     const message = `fileSizeBytes must be a positive whole number up to ${maxFileSizeBytes} bytes.`;
-    throw new HttpError(400, "INVALID_FILE_SIZE_BYTES", message, [{ field: "fileSizeBytes", message }]);
+    throw new HttpError(400, "INVALID_FILE_SIZE_BYTES", message, [
+      { field: "fileSizeBytes", message }
+    ]);
   }
   return { fileName, mimeType, fileSizeBytes };
 };
@@ -338,7 +508,12 @@ export const createServiceRequest = body => ({
 });
 
 export const serviceRequestListQuery = query => ({
-  status: optionalEnum(query.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus")
+  status: optionalEnum(
+    query.status,
+    serviceRequestStatuses,
+    "STATUS",
+    "a valid ServiceRequestStatus"
+  )
 });
 
 export const adminPaymentListQuery = query => {
@@ -346,11 +521,23 @@ export const adminPaymentListQuery = query => {
   const toDate = optionalDate(query.toDate, "TO_DATE");
   if (fromDate && toDate && fromDate > toDate) {
     const message = "fromDate must be on or before toDate.";
-    throw new HttpError(400, "INVALID_DATE_RANGE", message, [{ field: "fromDate", message }]);
+    throw new HttpError(400, "INVALID_DATE_RANGE", message, [
+      { field: "fromDate", message }
+    ]);
   }
   return {
-    status: optionalEnum(query.status, paymentStatuses, "STATUS", "a valid PaymentStatus"),
-    provider: optionalEnum(query.provider, paymentProviders, "PROVIDER", "RAZORPAY, STRIPE, or OTHER"),
+    status: optionalEnum(
+      query.status,
+      paymentStatuses,
+      "STATUS",
+      "a valid PaymentStatus"
+    ),
+    provider: optionalEnum(
+      query.provider,
+      paymentProviders,
+      "PROVIDER",
+      "RAZORPAY, STRIPE, or OTHER"
+    ),
     orderId: optionalUuid(query.orderId, "orderId"),
     userId: optionalUuid(query.userId, "userId"),
     search: optionalString(query.search, 200, "SEARCH"),
@@ -360,7 +547,12 @@ export const adminPaymentListQuery = query => {
 };
 
 export const adminServiceRequestListQuery = query => ({
-  status: optionalEnum(query.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus"),
+  status: optionalEnum(
+    query.status,
+    serviceRequestStatuses,
+    "STATUS",
+    "a valid ServiceRequestStatus"
+  ),
   serviceType: optionalEnum(
     query.serviceType,
     serviceTypes,
@@ -379,10 +571,19 @@ export const serviceFileComplete = body => ({
 
 export const updateServiceRequestStatus = body => {
   const result = {
-    status: requiredEnum(body.status, serviceRequestStatuses, "STATUS", "a valid ServiceRequestStatus")
+    status: requiredEnum(
+      body.status,
+      serviceRequestStatuses,
+      "STATUS",
+      "a valid ServiceRequestStatus"
+    )
   };
   if (Object.hasOwn(body, "internalNote"))
-    result.internalNote = optionalString(body.internalNote, 2000, "INTERNAL_NOTE");
+    result.internalNote = optionalString(
+      body.internalNote,
+      2000,
+      "INTERNAL_NOTE"
+    );
   return result;
 };
 

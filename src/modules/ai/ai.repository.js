@@ -1,4 +1,11 @@
 import { pg, run } from "../../shared/db.js";
+import { resolveUsageCycle } from "../../shared/usageCycle.js";
+
+const runTx = async fn => {
+  const result = await pg.tx(fn);
+  if (!result.ok) throw result.error;
+  return result.data;
+};
 
 const conversationColumns = `id, user_id AS "userId", context_type AS "contextType", listing_id AS "listingId", title, created_at AS "createdAt", updated_at AS "updatedAt"`;
 const listedConversationColumns = `conversation.id, conversation.user_id AS "userId", conversation.context_type AS "contextType", conversation.listing_id AS "listingId", conversation.title, conversation.created_at AS "createdAt", conversation.updated_at AS "updatedAt"`;
@@ -35,6 +42,14 @@ export const addMessage = ({
      SELECT id, role, content, metadata, created_at AS "createdAt" FROM inserted`,
     [conversationId, role, content, metadata ? JSON.stringify(metadata) : null]
   );
+// Only ever called on a failed/aborted chat attempt (see ai.service.js
+// streamMessage's finally block) — the USER row this attempt saved must not
+// linger as an unanswered turn that a later request's `messages.slice(-20)`
+// would replay into the model's context, or that GET
+// /ai/conversations/:id would show with no reply. role = 'USER' is a
+// defensive scope, never intended to delete an ASSISTANT/SYSTEM row.
+export const deleteMessage = id =>
+  run("none", `DELETE FROM ai.messages WHERE id = $1 AND role = 'USER'`, [id]);
 export const messages = conversationId =>
   run(
     "any",
@@ -42,36 +57,67 @@ export const messages = conversationId =>
     [conversationId]
   );
 
-// The user's currently active plan (personal scope only — org-level plans do
-// not grant AI quota). null means the user has no active plan at all, i.e.
-// the ambient "Free" tier that has no row of its own anywhere.
-export const activePlanForUser = userId =>
-  run(
-    "oneOrNone",
-    `SELECT pl.ai_monthly_quota AS "aiMonthlyQuota"
-     FROM commerce.plan_subscriptions ps
-     JOIN commerce.plans pl ON pl.id = ps.plan_id
-     WHERE ps.user_id = $1 AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
-     ORDER BY ps.ends_at DESC NULLS LAST
-     LIMIT 1`,
-    [userId]
-  );
-
-// Counts answered questions, not user messages sent — an unanswered/failed
-// attempt (e.g. AI_CONTEXT_UNAVAILABLE) never reaches this table's ASSISTANT
-// row, so it doesn't consume quota.
-export const assistantMessageCountThisMonth = async userId => {
-  const row = await run(
+// Read-only current-period usage count for display (GET /me/subscription) —
+// never used for enforcement, which always goes through reserveAiQuotaUsage's
+// locked read-then-write below. anchorStartsAt/now mirror reserveAiQuotaUsage's
+// own params -- see src/shared/usageCycle.js for why the period is anchored
+// to the owner's plan starts_at rather than the wall-clock calendar month.
+export const countMonthlyUsageForUser = (userId, { anchorStartsAt, now } = {}) => {
+  const { periodStart } = resolveUsageCycle({ anchorStartsAt, now });
+  return run(
     "one",
-    `SELECT count(*)::int AS count
-     FROM ai.messages m
-     JOIN ai.conversations c ON c.id = m.conversation_id
-     WHERE c.user_id = $1 AND m.role = 'ASSISTANT'
-       AND m.created_at >= date_trunc('month', now())`,
-    [userId]
-  );
-  return row.count;
+    `SELECT count(*)::int AS count FROM ai.usage_events
+     WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= $2
+       AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
+    [userId, periodStart]
+  ).then(row => row.count);
 };
+
+// Atomically reserves one unit of monthly AI quota, from one of two mutually
+// exclusive pools: the calling user's own personal quota (organizationId
+// null) or their organization's shared quota (organizationId set, consumed
+// together by every member the organization's plan applies to) — chat
+// answers, /ai/search and /ai/listing/generate all draw from the same pool
+// per scope (see migrations/008_ai_usage_events.sql,
+// migrations/015_ai_org_quota.sql). The advisory lock is keyed on whichever
+// scope is being charged (the org, or the user), so concurrent callers
+// against the same pool serialize instead of racing past a low quota
+// together — two requests started at once against a quota of 1 can't both
+// pass the count check before either's reservation lands. Returns the
+// reservation id, or null if quota is already used up.
+export const reserveAiQuotaUsage = ({ userId, organizationId, quota, kind, anchorStartsAt, now }) =>
+  runTx(async t => {
+    const lockKey = organizationId || userId;
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+    const { periodStart } = resolveUsageCycle({ anchorStartsAt, now });
+    const usage = await t.one(
+      organizationId
+        ? `SELECT count(*)::int AS used FROM ai.usage_events
+           WHERE organization_id = $1 AND reserved_at >= $2
+             AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`
+        : `SELECT count(*)::int AS used FROM ai.usage_events
+           WHERE user_id = $1 AND organization_id IS NULL AND reserved_at >= $2
+             AND (confirmed_at IS NOT NULL OR reserved_at > now() - interval '5 minutes')`,
+      [lockKey, periodStart]
+    );
+    if (usage.used >= quota) return null;
+    const row = await t.one(
+      `INSERT INTO ai.usage_events (user_id, organization_id, kind) VALUES ($1, $2, $3) RETURNING id`,
+      [userId, organizationId, kind]
+    );
+    return row.id;
+  });
+
+// Converts a reservation into permanent usage for the rest of the month —
+// called once the reserved attempt actually produced a billable result.
+export const confirmAiQuotaUsage = id =>
+  run("none", `UPDATE ai.usage_events SET confirmed_at = now() WHERE id = $1`, [id]);
+
+// Releases a reservation that didn't pan out (failed/aborted attempt) so it
+// never counts against quota, matching the pre-existing "answered questions
+// only" invariant.
+export const releaseAiQuotaUsage = id =>
+  run("none", `DELETE FROM ai.usage_events WHERE id = $1`, [id]);
 export const conversationsForUser = (userId, { limit, offset }) =>
   run(
     "any",
@@ -214,10 +260,15 @@ export const publishedInvestmentContext = ({ locationId, propertyId, query }) =>
      LIMIT 3`,
     [locationId, propertyId, query || null]
   );
+// owner_organization_id is included so ai.service.js#generateListing can
+// draw AI quota from the property's own owning org when it's org-owned,
+// without the caller having to separately name that org explicitly — this
+// is resource-ownership-based org resolution, distinct from (and safer
+// than) auto-detecting across every org the caller happens to belong to.
 export const ownedPropertyContext = (propertyId, userId) =>
   run(
     "oneOrNone",
-    `SELECT p.id AS "propertyId", pt.name AS "propertyType", d.area_value AS "areaValue", au.name AS "areaUnit", loc.name AS "locationName"
+    `SELECT p.id AS "propertyId", p.owner_organization_id AS "ownerOrganizationId", pt.name AS "propertyType", d.area_value AS "areaValue", au.name AS "areaUnit", loc.name AS "locationName"
      FROM land.properties p JOIN land.property_types pt ON pt.id = p.property_type_id
      LEFT JOIN land.property_land_details d ON d.property_id = p.id
      LEFT JOIN land.area_units au ON au.id = d.area_unit_id

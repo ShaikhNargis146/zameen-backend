@@ -71,7 +71,17 @@ export const listingFilterQuery = query => ({
  * p = land.properties, ploc = land.property_locations. Placeholders
  * start at $2 so callers can put their own owner id filter at $1.
  */
+// Both current callers (favorites, recently-viewed) always render their
+// results through listingCardsByIds' default requirePublished: true, which
+// silently drops anything not PUBLISHED/APPROVED/unexpired — so this count
+// must apply the identical condition, or `meta.total` (computed here)
+// disagrees with `data.length` (computed there) whenever a favorited/viewed
+// listing has since been withdrawn, sold, expired, or is still pending
+// review. The optional `status` filter below can still narrow further
+// within that same published set.
 export const listingFilterWhere = `
+  AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED'
+  AND (l.expires_at IS NULL OR l.expires_at > now())
   AND ($2::varchar IS NULL OR l.title ILIKE $2)
   AND ($3::varchar IS NULL OR l.transaction_type = $3)
   AND ($4::varchar IS NULL OR l.status = $4)

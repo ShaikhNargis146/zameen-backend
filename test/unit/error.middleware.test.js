@@ -109,6 +109,38 @@ test("safe storage availability errors remain actionable in production", () => {
   });
 });
 
+test("a plain-object details payload (entitlement errors) is surfaced, not silently dropped", () => {
+  const res = response();
+  error.handler(
+    {
+      status: 403,
+      code: "PLAN_LIMIT_REACHED",
+      message: "This plan allows up to 2 active listings.",
+      details: { feature: "ACTIVE_LISTINGS", used: 2, limit: 2, upgradeRequired: true }
+    },
+    {},
+    res
+  );
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    success: false,
+    error: {
+      code: "PLAN_LIMIT_REACHED",
+      message: "This plan allows up to 2 active listings.",
+      details: { feature: "ACTIVE_LISTINGS", used: 2, limit: 2, upgradeRequired: true }
+    }
+  });
+});
+
+test("an empty details object is not surfaced", () => {
+  const res = response();
+  error.handler({ status: 400, code: "VALIDATION_ERROR", message: "Invalid input.", details: {} }, {}, res);
+  assert.deepEqual(res.body, {
+    success: false,
+    error: { code: "VALIDATION_ERROR", message: "Invalid input." }
+  });
+});
+
 test("converter retains reviewed service-error messages", () => {
   const original = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
@@ -129,6 +161,29 @@ test("converter retains reviewed service-error messages", () => {
     error: {
       code: "STORAGE_UNAVAILABLE",
       message: "File storage is temporarily unavailable."
+    }
+  });
+});
+
+test("converter carries an HttpError's object details through end to end (asyncRoute's actual path)", () => {
+  const res = response();
+  error.converter(
+    new HttpError(403, "PLAN_LIMIT_REACHED", "This plan allows up to 2 active listings.", {
+      feature: "ACTIVE_LISTINGS",
+      used: 2,
+      limit: 2,
+      upgradeRequired: true
+    }),
+    {},
+    res
+  );
+  assert.equal(res.statusCode, 403);
+  assert.deepEqual(res.body, {
+    success: false,
+    error: {
+      code: "PLAN_LIMIT_REACHED",
+      message: "This plan allows up to 2 active listings.",
+      details: { feature: "ACTIVE_LISTINGS", used: 2, limit: 2, upgradeRequired: true }
     }
   });
 });

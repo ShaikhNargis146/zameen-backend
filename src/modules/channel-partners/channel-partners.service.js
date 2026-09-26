@@ -144,7 +144,21 @@ export const transition = async ({ partnerId, action, actorId, note }) => {
       "INVALID_TRANSITION",
       `Channel partner cannot be ${rule.label} from its current state.`
     );
-  if (action === "approve") await repository.grantChannelPartnerRole(partnerId);
+  if (action === "approve") {
+    await repository.grantChannelPartnerRole(partnerId);
+    // organization_id is nullable on this profile (a channel partner need
+    // not be attached to an org) — only ensure membership when there's an
+    // org to attach them to.
+    if (before.organizationId) await repository.ensureOrganizationMembership(before.organizationId, partnerId);
+  }
+  // Deliberately NOT mirrored on suspend: unlike the CHANNEL_PARTNER role
+  // (which this module owns end to end), organization_members has its own
+  // independent lifecycle an org admin controls directly (see
+  // organizations.service.js#removeMember) — this profile can't tell
+  // whether that membership row is "theirs" (granted by this approval) or
+  // predates/exists independently of their channel-partner status (e.g.
+  // they're also that org's real OWNER), so suspending the channel-partner
+  // profile must not risk silently revoking unrelated org access.
   if (action === "suspend") await repository.revokeChannelPartnerRole(partnerId);
   const after = await repository.findByUserId(partnerId);
   await repository.audit({

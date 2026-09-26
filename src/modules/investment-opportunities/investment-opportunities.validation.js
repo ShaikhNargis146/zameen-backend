@@ -3,6 +3,7 @@ import { toField } from "../../shared/validation.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const opportunityStatuses = new Set(["DRAFT", "PUBLISHED", "CLOSED"]);
+const interestStatuses = new Set(["NEW", "CONTACTED", "CLOSED"]);
 const e164Pattern = /^\+[1-9]\d{7,14}$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -105,6 +106,19 @@ export const opportunityListQuery = (query, { isAdmin }) => ({
   locationId: optionalUuid(query.locationId, "locationId"),
   investmentType: optionalString(query.investmentType, 50, "INVESTMENT_TYPE"),
   statuses: isAdmin ? (query.status ? [statusEnum(query.status)] : null) : ["PUBLISHED"]
+});
+
+const interestStatusEnum = value => {
+  const text = String(value ?? "").trim().toUpperCase();
+  if (!interestStatuses.has(text)) {
+    const message = "status must be NEW, CONTACTED, or CLOSED.";
+    throw new HttpError(400, "INVALID_STATUS", message, [{ field: "status", message }]);
+  }
+  return text;
+};
+
+export const interestListQuery = query => ({
+  statuses: query.status ? [interestStatusEnum(query.status)] : null
 });
 
 export const interestInput = body => ({

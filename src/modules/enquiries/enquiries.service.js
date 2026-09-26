@@ -8,6 +8,7 @@ import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
 import * as notifications from "../notifications/notifications.service.js";
+import * as entitlements from "../commerce/entitlements.service.js";
 import * as repository from "./enquiries.repository.js";
 import { uuid } from "./enquiries.validation.js";
 
@@ -96,21 +97,31 @@ export const ownedBySeller = async (enquiryId, actorId) => {
 
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
+  if (await repository.listingOwnedBySeller(listingId, actorId))
+    throw new HttpError(
+      400,
+      "CANNOT_ENQUIRE_OWN_LISTING",
+      "You cannot enquire on your own listing."
+    );
 
-  const result = await repository.insertAndLinkUnlinkedVisits({
-    listingId,
-    buyerUserId: actorId,
-    enquiryType: input.enquiryType,
-    message: input.message
-  });
-  if (!result.ok) throw mapDbError(result.error);
+  let enquiry;
+  try {
+    enquiry = await repository.insertAndLinkUnlinkedVisits({
+      listingId,
+      buyerUserId: actorId,
+      enquiryType: input.enquiryType,
+      message: input.message
+    });
+  } catch (error) {
+    throw mapDbError(error);
+  }
   await notifications.notifySeller(listingId, {
     type: "ENQUIRY_NEW",
     title: "New enquiry received",
     body: "A buyer submitted a new enquiry for your listing.",
-    data: { enquiryId: result.data.id, listingId }
+    data: { enquiryId: enquiry.id, listingId }
   });
-  return toEnquiry(result.data);
+  return toEnquiry(enquiry);
 };
 
 export const listForBuyer = async ({ actorId, filters, query }) => {
@@ -155,9 +166,37 @@ const buildDetail = async (row, { includeNotes }) => {
 export const detailForBuyer = row => buildDetail(row, { includeNotes: false });
 export const detailForSeller = row => buildDetail(row, { includeNotes: true });
 
+// SITE_VISIT is never a manual target through this endpoint — it's only
+// ever set by the enquiry/site-visit linking logic (repository
+// insertAndLinkUnlinkedVisits / findOrCreateEnquiryForContactReveal /
+// site-visits.repository.insert) when an actual site visit exists, so a
+// seller can't fake "a visit happened" by PATCHing status directly. CLOSED
+// and LOST are terminal — once a lead is closed or lost there's no way back
+// through this endpoint.
+const validEnquiryTransitions = {
+  NEW: new Set(["CONTACTED", "INTERESTED", "CLOSED", "LOST"]),
+  CONTACTED: new Set(["INTERESTED", "CLOSED", "LOST"]),
+  INTERESTED: new Set(["CLOSED", "LOST"]),
+  SITE_VISIT: new Set(["CLOSED", "LOST"]),
+  CLOSED: new Set(),
+  LOST: new Set()
+};
+
 export const updateStatus = async ({ enquiry, status }) => {
-  const result = await repository.updateStatus(enquiry.id, status);
+  if (!validEnquiryTransitions[enquiry.status]?.has(status))
+    throw new HttpError(
+      409,
+      "INVALID_TRANSITION",
+      `Enquiry cannot move from ${enquiry.status} to ${status}.`
+    );
+  const result = await repository.updateStatus(enquiry.id, enquiry.status, status);
   if (!result.ok) throw result.error;
+  if (!result.data)
+    throw new HttpError(
+      409,
+      "INVALID_TRANSITION",
+      "Enquiry status changed concurrently — reload and try again."
+    );
   await notifications.notifyUser(enquiry.buyerUserId, {
     type: "ENQUIRY_STATUS_UPDATED",
     title: "Your enquiry was updated",
@@ -182,29 +221,40 @@ export const contactReveal = async ({
   preferredChannel
 }) => {
   await assertListingAvailable(listingId);
+  if (await repository.listingOwnedBySeller(listingId, actorId))
+    throw new HttpError(
+      400,
+      "CANNOT_ENQUIRE_OWN_LISTING",
+      "You cannot reveal contact details for your own listing."
+    );
   const sellerInfo = await repository.sellerContactInfo(listingId);
   if (!sellerInfo)
     throw new HttpError(404, "LISTING_NOT_FOUND", "Listing was not found.");
 
-  const existing = await repository.findOpenEnquiryForBuyer(listingId, actorId);
-  let leadCreated = false;
-  if (!existing) {
-    const result = await repository.insertAndLinkUnlinkedVisits({
+  const { alreadyUnlocked } = await entitlements.consumeContactUnlock(actorId, listingId);
+
+  // Atomic: two concurrent "reveal contact" calls (e.g. a double-clicked
+  // CTA) must not both see no open enquiry and both create one.
+  let enquiry;
+  let leadCreated;
+  try {
+    ({ enquiry, created: leadCreated } = await repository.findOrCreateEnquiryForContactReveal({
       listingId,
       buyerUserId: actorId,
       enquiryType: "CONTACT",
       message: null
-    });
-    if (!result.ok) throw mapDbError(result.error);
-    leadCreated = true;
+    }));
+  } catch (error) {
+    throw mapDbError(error);
+  }
+  if (leadCreated)
     await notifications.notifySeller(listingId, {
       type: "ENQUIRY_NEW",
       title: "New enquiry received",
       body:
         "A buyer revealed your contact details and a new enquiry was created.",
-      data: { enquiryId: result.data.id, listingId }
+      data: { enquiryId: enquiry.id, listingId }
     });
-  }
 
   await repository.recordContactRevealEvent({
     listingId,
@@ -219,6 +269,7 @@ export const contactReveal = async ({
     email: sellerInfo.email,
     whatsappE164: sellerInfo.phoneE164,
     organizationName: sellerInfo.organizationName,
-    leadCreated
+    leadCreated,
+    alreadyUnlocked
   };
 };

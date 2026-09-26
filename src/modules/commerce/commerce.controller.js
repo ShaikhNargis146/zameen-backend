@@ -7,6 +7,8 @@ export const plans = async (req, res) =>
 
 export const myPlan = async (req, res) => ok(res, await service.myPlanSubscription(req.actor.id));
 
+export const mySubscription = async (req, res) => ok(res, await service.mySubscription(req.actor.id));
+
 export const createOrder = async (req, res) =>
   created(
     res,
@@ -24,6 +26,16 @@ export const getOrder = async (req, res) =>
       actor: req.actor
     })
   );
+
+export const downloadInvoice = async (req, res) => {
+  const { buffer, fileName } = await service.generateOrderInvoice({
+    orderId: validation.uuid(req.params.orderId, "orderId"),
+    actor: req.actor
+  });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  return res.send(buffer);
+};
 
 export const myOrders = async (req, res) => {
   const { data, meta } = await service.listMyOrders({

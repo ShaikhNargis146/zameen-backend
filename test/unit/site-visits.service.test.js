@@ -17,6 +17,10 @@ const withOneOrNoneStub = async (stub, callback) => {
 test("requesting a duplicate site visit returns 409 with the existing visit's id", async () => {
   await withOneOrNoneStub(
     async query => {
+      // listingOwnedBySeller queries marketplace.listings too — check it
+      // first and answer "not the seller" so this test still exercises the
+      // duplicate-check path it's named for.
+      if (/seller_user_id/.test(query)) return { ok: true, data: null };
       if (/FROM marketplace\.listings/.test(query))
         return { ok: true, data: { id: "listing-1" } };
       if (/FROM marketplace\.site_visits/.test(query))
@@ -43,6 +47,37 @@ test("requesting a duplicate site visit returns 409 with the existing visit's id
           assert.equal(error.status, 409);
           assert.equal(error.code, "SITE_VISIT_DUPLICATE");
           assert.deepEqual(error.details, [{ visitId: "visit-existing" }]);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+test("a seller cannot request a site visit for their own listing", async () => {
+  await withOneOrNoneStub(
+    async query => {
+      if (/seller_user_id/.test(query)) return { ok: true, data: { "?column?": 1 } };
+      if (/FROM marketplace\.listings/.test(query))
+        return { ok: true, data: { id: "listing-1" } };
+      throw new Error(`unexpected query: ${query}`);
+    },
+    async () => {
+      await assert.rejects(
+        () =>
+          siteVisitsService.create({
+            actorId: "seller-1",
+            listingId: "listing-1",
+            input: {
+              preferredDate: "2026-09-10",
+              preferredTimeSlot: "MORNING",
+              visitorCount: 1,
+              note: null
+            }
+          }),
+        error => {
+          assert.equal(error.status, 400);
+          assert.equal(error.code, "CANNOT_BOOK_OWN_LISTING");
           return true;
         }
       );

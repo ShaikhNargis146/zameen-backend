@@ -1,5 +1,6 @@
 import { HttpError } from "../../shared/http.js";
 import { verificationSummaryForChecks } from "../../shared/verification.js";
+import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./verification.repository.js";
 
 const summary = async propertyId => {
@@ -93,5 +94,11 @@ export const update = async ({ verificationId, actorId, changes, request }) => {
       "VERIFICATION_UPDATE_CONFLICT",
       "The verification changed before this update could be applied."
     );
+  await notifications.notifyUser(before.propertyOwnerId, {
+    type: "VERIFICATION_UPDATED",
+    title: "Verification status updated",
+    body: `Your ${changes.checkType} verification is now ${changes.status}.`,
+    data: { verificationId, checkType: changes.checkType, status: changes.status }
+  });
   return get(verificationId);
 };

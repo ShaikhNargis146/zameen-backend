@@ -1,5 +1,11 @@
 import { pg, run } from "../../shared/db.js";
 
+const runTx = async fn => {
+  const result = await pg.tx(fn);
+  if (!result.ok) throw result.error;
+  return result.data;
+};
+
 export const findOwned = (listingId, userId) =>
   run(
     "oneOrNone",
@@ -36,6 +42,22 @@ export const create = input =>
       input.isNegotiable
     ]
   );
+// Counts against whichever owner form applies — org-wide if org-owned, so
+// all of an org's members share the same pool of active listings, matching
+// how teamMembers implies a shared-org-quota model rather than a per-member
+// one. Read-only — used for display (commerce.service.js#mySubscription).
+// Enforcement uses the same count inline inside submitWithinLimit's locked
+// transaction below, not this function, since enforcement needs the count
+// and the write to happen atomically.
+export const countLiveForOwner = ({ userId, organizationId }) =>
+  run(
+    "one",
+    organizationId
+      ? `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_organization_id = $1 AND status = 'PUBLISHED'`
+      : `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_user_id = $1 AND seller_organization_id IS NULL AND status = 'PUBLISHED'`,
+    [organizationId || userId]
+  ).then(row => row.count);
+
 export const liveListingForProperty = propertyId =>
   run(
     "oneOrNone",
@@ -66,13 +88,42 @@ export const archive = id =>
      WHERE id = $1 AND deleted_at IS NULL AND status <> 'PUBLISHED' RETURNING id`,
     [id]
   );
-export const submit = id =>
-  run(
-    "oneOrNone",
-    `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
-     WHERE id = $1 AND deleted_at IS NULL AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
-    [id]
-  );
+// status = 'INACTIVE' (not just the review_status check) is required here —
+// a SUSPENDED listing can also have review_status DRAFT or REJECTED
+// (whatever it was when an admin suspended it), and without this a seller
+// could resubmit straight past that suspension with no admin involved,
+// since DRAFT/REJECTED alone doesn't distinguish "never submitted" from
+// "suspended while in that review state".
+//
+// limit (resolved by the caller via
+// entitlements.service.js#resolveListingLimit, null = unlimited) is
+// enforced here, inside a per-owner advisory-locked transaction, not as a
+// pre-check in the service layer — otherwise two concurrent submissions
+// from the same owner (different listings) could both read the same
+// pre-write "used" count and both pass, pushing the owner over their plan's
+// active-listing limit. Mirrors organizations.repository.js#addMember's
+// lock-then-check-then-write shape for the same class of race.
+export const submitWithinLimit = ({ id, userId, organizationId, limit }) =>
+  runTx(async t => {
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+      `ACTIVE_LISTINGS:${organizationId || userId}`
+    ]);
+    if (limit !== null) {
+      const { count } = await t.one(
+        organizationId
+          ? `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_organization_id = $1 AND status = 'PUBLISHED'`
+          : `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_user_id = $1 AND seller_organization_id IS NULL AND status = 'PUBLISHED'`,
+        [organizationId || userId]
+      );
+      if (count >= limit) return { submitted: null, reason: "LIMIT_REACHED", used: count };
+    }
+    const submitted = await t.oneOrNone(
+      `UPDATE marketplace.listings SET review_status = 'PENDING', status = 'INACTIVE', submitted_at = now(), rejection_reason = NULL
+       WHERE id = $1 AND deleted_at IS NULL AND status = 'INACTIVE' AND review_status IN ('DRAFT', 'REJECTED') RETURNING id`,
+      [id]
+    );
+    return { submitted, reason: submitted ? null : "CONFLICT" };
+  });
 export const transition = ({
   id,
   status,
@@ -138,6 +189,21 @@ export const publishedDetail = id =>
     `SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.title, l.description, l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status AS "listingStatus", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", p.id AS "propertyId", p.public_code AS "propertyCode", p.source AS "propertySource", p.status AS "propertyStatus", pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyType", lut.id AS "landUseTypeId", lut.code AS "landUseTypeCode", lut.name AS "landUseType", ot.id AS "ownershipTypeId", ot.code AS "ownershipTypeCode", ot.name AS "ownershipType", d.area_value AS "areaValue", au.id AS "areaUnitId", au.code AS "areaUnitCode", d.area_sqft AS "areaSqft", d.length_value AS "lengthValue", d.width_value AS "widthValue", d.dimension_unit AS "dimensionUnit", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", d.road_type AS "roadType", d.facing, d.open_sides AS "openSides", d.is_corner_plot AS "isCornerPlot", d.has_boundary_wall AS "hasBoundaryWall", d.terrain, d.road_access_type AS "roadAccessType", loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType", loc.parent_id AS "locationParentId", loc.state_code AS "locationStateCode", pc.code AS pincode, pl.address_line AS "addressLine", pl.landmark, NULLIF(concat_ws(', ', pl.address_line, pl.landmark, loc.name, pc.code), '') AS "formattedAddress", pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation", CASE WHEN pl.show_exact_location THEN ST_Y(pl.coordinates::geometry) END AS latitude, CASE WHEN pl.show_exact_location THEN ST_X(pl.coordinates::geometry) END AS longitude, seller.id AS "sellerId", seller.display_name AS "sellerDisplayName", organization.id AS "organizationId", organization.name AS "organizationName", organization.type AS "organizationType" FROM marketplace.listings l JOIN land.properties p ON p.id = l.property_id AND p.deleted_at IS NULL JOIN land.property_types pt ON pt.id = p.property_type_id LEFT JOIN land.land_use_types lut ON lut.id = p.land_use_type_id LEFT JOIN land.ownership_types ot ON ot.id = p.ownership_type_id LEFT JOIN land.property_land_details d ON d.property_id = p.id LEFT JOIN land.area_units au ON au.id = d.area_unit_id LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations loc ON loc.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL WHERE l.id = $1 AND l.status = 'PUBLISHED' AND l.review_status = 'APPROVED' AND l.deleted_at IS NULL AND (l.expires_at IS NULL OR l.expires_at > now())`,
     [id]
   );
+// Same shape as publishedDetail (the buyer-facing read), plus moderation-only
+// columns (rejectionReason/submittedAt/approvedAt/soldAt/createdAt/updatedAt,
+// seller phone/email) that must never reach the public endpoint. No status,
+// review_status, or expiry restriction, since admins need to inspect a
+// listing in any state (DRAFT, PENDING, REJECTED, SUSPENDED, ...), not just
+// live ones. Also skips publishedDetail's show_exact_location gate on
+// latitude/longitude — an admin reviewing the listing needs the real
+// coordinates regardless of the seller's public-display preference.
+export const adminDetail = id =>
+  run(
+    "oneOrNone",
+    `SELECT l.id AS "listingId", l.listing_code AS "listingCode", l.title, l.description, l.transaction_type AS "transactionType", l.price_amount_minor AS "priceAmountMinor", l.currency, l.is_negotiable AS "isNegotiable", l.review_status AS "reviewStatus", l.status AS "listingStatus", l.rejection_reason AS "rejectionReason", l.submitted_at AS "submittedAt", l.approved_at AS "approvedAt", l.published_at AS "publishedAt", l.expires_at AS "expiresAt", l.sold_at AS "soldAt", l.created_at AS "createdAt", l.updated_at AS "updatedAt", p.id AS "propertyId", p.public_code AS "propertyCode", p.source AS "propertySource", p.status AS "propertyStatus", pt.id AS "propertyTypeId", pt.code AS "propertyTypeCode", pt.name AS "propertyType", lut.id AS "landUseTypeId", lut.code AS "landUseTypeCode", lut.name AS "landUseType", ot.id AS "ownershipTypeId", ot.code AS "ownershipTypeCode", ot.name AS "ownershipType", d.area_value AS "areaValue", au.id AS "areaUnitId", au.code AS "areaUnitCode", d.area_sqft AS "areaSqft", d.length_value AS "lengthValue", d.width_value AS "widthValue", d.dimension_unit AS "dimensionUnit", d.frontage_m AS "frontageM", d.road_width_m AS "roadWidthM", d.road_type AS "roadType", d.facing, d.open_sides AS "openSides", d.is_corner_plot AS "isCornerPlot", d.has_boundary_wall AS "hasBoundaryWall", d.terrain, d.road_access_type AS "roadAccessType", loc.id AS "locationId", loc.name AS "locationName", loc.type AS "locationType", loc.parent_id AS "locationParentId", loc.state_code AS "locationStateCode", pc.code AS pincode, pl.address_line AS "addressLine", pl.landmark, NULLIF(concat_ws(', ', pl.address_line, pl.landmark, loc.name, pc.code), '') AS "formattedAddress", pl.location_precision AS "locationPrecision", pl.show_exact_location AS "showExactLocation", ST_Y(pl.coordinates::geometry) AS latitude, ST_X(pl.coordinates::geometry) AS longitude, seller.id AS "sellerId", seller.display_name AS "sellerDisplayName", seller.phone_e164 AS "sellerPhoneE164", seller.email AS "sellerEmail", organization.id AS "organizationId", organization.name AS "organizationName", organization.type AS "organizationType" FROM marketplace.listings l JOIN land.properties p ON p.id = l.property_id AND p.deleted_at IS NULL JOIN land.property_types pt ON pt.id = p.property_type_id LEFT JOIN land.land_use_types lut ON lut.id = p.land_use_type_id LEFT JOIN land.ownership_types ot ON ot.id = p.ownership_type_id LEFT JOIN land.property_land_details d ON d.property_id = p.id LEFT JOIN land.area_units au ON au.id = d.area_unit_id LEFT JOIN land.property_locations pl ON pl.property_id = p.id LEFT JOIN geo.locations loc ON loc.id = pl.location_id LEFT JOIN geo.postal_codes pc ON pc.id = pl.postal_code_id LEFT JOIN auth.users seller ON seller.id = l.seller_user_id LEFT JOIN account.organizations organization ON organization.id = l.seller_organization_id AND organization.deleted_at IS NULL WHERE l.id = $1 AND l.deleted_at IS NULL`,
+    [id]
+  );
+
 export const media = propertyId =>
   run(
     "any",
@@ -218,13 +284,49 @@ export const adminListings = ({
       offset
     ]
   );
-export const adminListing = id => summary(id);
-export const approve = ({ id, expiresAt }) =>
+// The listing's raw owner columns, independent of summary()'s joined
+// "organization" object -- that join filters on organization.deleted_at IS
+// NULL, so it would silently read as personally-owned (null org) for a
+// listing whose owning org happens to be soft-deleted, which is exactly the
+// wrong answer for entitlement resolution. Used by listings.service.js#approve.
+export const ownerFields = id =>
   run(
     "oneOrNone",
-    `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'PUBLISHED', approved_at = now(), published_at = COALESCE(published_at, now()), expires_at = COALESCE($2, expires_at), rejection_reason = NULL WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
-    [id, expiresAt]
+    `SELECT seller_user_id AS "sellerUserId", seller_organization_id AS "sellerOrganizationId"
+     FROM marketplace.listings WHERE id = $1 AND deleted_at IS NULL`,
+    [id]
   );
+
+// limit (resolved by the caller via entitlements.service.js#resolveListingLimit,
+// null = unlimited) is enforced here, inside a per-owner advisory-locked
+// transaction -- the same lock key submitWithinLimit uses, so a submission
+// and an approval for the same owner can never race each other either. This
+// closes the gap submit-time enforcement alone leaves open: a seller can
+// submit several listings back-to-back while under the limit, and an admin
+// approving them later (each individually, or several admins at once) could
+// otherwise push the owner over it, since submission and approval happen at
+// different times with nothing previously spanning both.
+export const approveWithinLimit = ({ id, userId, organizationId, limit, expiresAt }) =>
+  runTx(async t => {
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+      `ACTIVE_LISTINGS:${organizationId || userId}`
+    ]);
+    if (limit !== null) {
+      const { count } = await t.one(
+        organizationId
+          ? `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_organization_id = $1 AND status = 'PUBLISHED'`
+          : `SELECT count(*)::int AS count FROM marketplace.listings WHERE seller_user_id = $1 AND seller_organization_id IS NULL AND status = 'PUBLISHED'`,
+        [organizationId || userId]
+      );
+      if (count >= limit) return { approved: null, reason: "LIMIT_REACHED", used: count };
+    }
+    const approved = await t.oneOrNone(
+      `UPDATE marketplace.listings SET review_status = 'APPROVED', status = 'PUBLISHED', approved_at = now(), published_at = COALESCE(published_at, now()), expires_at = COALESCE($2, expires_at), rejection_reason = NULL
+       WHERE id = $1 AND review_status = 'PENDING' AND deleted_at IS NULL RETURNING id`,
+      [id, expiresAt]
+    );
+    return { approved, reason: approved ? null : "CONFLICT" };
+  });
 export const reject = (id, reason) =>
   run(
     "oneOrNone",

@@ -53,6 +53,31 @@ test("createPayment no longer accepts a returnUrl (redirect target is fixed by t
   });
 });
 
+test("createPlan accepts the single contactUnlocks plan feature", () => {
+  const result = validation.createPlan({
+    code: "PLAN_TEST",
+    name: "Test",
+    planType: "FREE",
+    amountMinor: 0,
+    features: { contactUnlocks: 5 }
+  });
+  assert.deepEqual(result.features, { contactUnlocks: 5 });
+});
+
+test("createPlan rejects retired duplicate contact-unlock feature keys", () => {
+  assert.throws(
+    () =>
+      validation.createPlan({
+        code: "PLAN_TEST",
+        name: "Test",
+        planType: "FREE",
+        amountMinor: 0,
+        features: { contactUnlocksLifetime: 5 }
+      }),
+    error => error.code === "INVALID_FEATURES"
+  );
+});
+
 test("paymentCallbackQuery reads Razorpay's redirect query params by name", () => {
   const result = validation.paymentCallbackQuery({
     razorpay_payment_id: "pay_1",
