@@ -265,9 +265,11 @@ The shared-database migration preserves any old anonymous records for retention,
 but removes their guest credentials so they are no longer accessible.
 
 AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
-API process so it receives the changed environment. `OPENAI_MODEL`
-defaults to `gpt-5-mini` and may be changed per environment. Model responses use
-`store: false`; requests are rate-limited and provider failures return
+API process so it receives the changed environment. `OPENAI_MODEL` defaults to
+`gpt-6-luna` with `reasoning.effort: "none"`; its retry-only fallback is
+`OPENAI_FALLBACK_MODEL`, defaulting to `gpt-5-mini`. A fallback is used only for
+rate-limit, transient provider, or connection failures before a response stream
+starts. Model responses use `store: false`; requests are rate-limited and provider failures return
 `AI_PROVIDER_UNCONFIGURED` or `AI_PROVIDER_UNAVAILABLE` without exposing model
 or provider details. The assistant can answer property, land/area, market-trend
 and published investment-opportunity questions from published listing, master,

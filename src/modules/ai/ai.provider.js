@@ -2,7 +2,11 @@ import OpenAI from "openai";
 import { HttpError } from "../../shared/http.js";
 import logger from "../../utils/logger.js";
 
-const defaultModel = "gpt-5-mini";
+// Keep the chat, search-filter extraction and listing-draft workloads on the
+// lowest-cost supported tier. A different model is deliberately retained as a
+// fallback so a model-specific outage does not take the AI surface offline.
+export const DEFAULT_AI_MODEL = "gpt-6-luna";
+export const DEFAULT_AI_FALLBACK_MODEL = "gpt-5-mini";
 const snippet = value =>
   String(value || "")
     .replace(/\s+/g, " ")
@@ -14,9 +18,20 @@ const configuredTimeout = Number(
 const timeout = Number.isFinite(configuredTimeout)
   ? Math.min(Math.max(configuredTimeout, 1000), 60000)
   : defaultTimeout;
-const model = () => process.env.OPENAI_MODEL || defaultModel;
-const responseReasoning = () =>
-  /^gpt-5(?:[.-]|$)/.test(model()) ? { reasoning: { effort: "minimal" } } : {};
+const model = () => process.env.OPENAI_MODEL || DEFAULT_AI_MODEL;
+const fallbackModel = () =>
+  process.env.OPENAI_FALLBACK_MODEL || DEFAULT_AI_FALLBACK_MODEL;
+
+export const responseReasoningFor = selectedModel => {
+  // Luna defaults to medium reasoning. The AI workflows are grounded and
+  // deliberately concise, so avoid reasoning-token spend entirely.
+  if (/^gpt-6-luna(?:[.-]|$)/.test(selectedModel))
+    return { reasoning: { effort: "none" } };
+  // Preserve the existing lowest GPT-5 reasoning setting for the fallback.
+  if (/^gpt-5(?:[.-]|$)/.test(selectedModel))
+    return { reasoning: { effort: "minimal" } };
+  return {};
+};
 
 const safeDiagnosticValue = value => {
   if (value === undefined || value === null || value === "") return "none";
@@ -61,11 +76,60 @@ const providerUnavailable = error => {
   );
 };
 
+export const isRetryableProviderFailure = error => {
+  if (error instanceof HttpError || error?.name === "AbortError") return false;
+  const status = Number(error?.status);
+  if (Number.isInteger(status))
+    return status === 408 || status === 429 || status >= 500;
+  return ["APIConnectionError", "APIConnectionTimeoutError"].includes(
+    error?.name
+  );
+};
+
+export const withModelFallback = async ({
+  primaryModel,
+  fallbackModel: fallback,
+  execute
+}) => {
+  try {
+    return await execute(primaryModel);
+  } catch (error) {
+    if (
+      !fallback ||
+      fallback === primaryModel ||
+      !isRetryableProviderFailure(error)
+    )
+      throw error;
+    const diagnostic = providerErrorMetadata(error);
+    logger.warn(
+      "OpenAI primary model failed; retrying fallback " +
+        `[primary=${primaryModel}, fallback=${fallback}, status=${diagnostic.status}, ` +
+        `code=${diagnostic.code}, type=${diagnostic.type}]`
+    );
+    return execute(fallback);
+  }
+};
+
+const createResponse = async (request, options = undefined) => {
+  const primaryModel = model();
+  return withModelFallback({
+    primaryModel,
+    fallbackModel: fallbackModel(),
+    execute: selectedModel =>
+      client().responses.create(
+        {
+          ...request,
+          model: selectedModel,
+          ...responseReasoningFor(selectedModel)
+        },
+        options
+      )
+  });
+};
+
 const request = async ({ instructions, input, text, maxOutputTokens }) => {
   try {
-    const response = await client().responses.create({
-      model: model(),
-      ...responseReasoning(),
+    const response = await createResponse({
       store: false,
       instructions,
       input,
@@ -224,12 +288,9 @@ const conversationRequest = ({
   investments,
   messages
 }) => ({
-  model: model(),
-  ...responseReasoning(),
   store: false,
-  // This limit includes GPT-5 reasoning tokens as well as visible text.
-  // Grounding is assembled server-side, so use the lowest supported GPT-5
-  // reasoning level and reserve most of the response budget for the answer.
+  // Grounding is assembled server-side. Luna uses no reasoning effort, leaving
+  // the response budget for the user-visible answer only.
   max_output_tokens: 500,
   text: { verbosity: "low" },
   instructions: conversationInstructions,
@@ -263,7 +324,9 @@ export const streamedTextDone = event =>
 export const streamConversationReply = async function*({ signal, ...params }) {
   let stream;
   try {
-    stream = await client().responses.create(
+    // A fallback is safe only before OpenAI has created the stream. Once text
+    // has been emitted, starting another model would duplicate the answer.
+    stream = await createResponse(
       { ...conversationRequest(params), stream: true },
       signal ? { signal } : undefined
     );

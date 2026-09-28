@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_AI_FALLBACK_MODEL,
+  DEFAULT_AI_MODEL,
+  isRetryableProviderFailure,
   normalizeListingDraft,
   providerErrorMetadata,
+  responseReasoningFor,
   streamedTextDelta,
-  streamedTextDone
+  streamedTextDone,
+  withModelFallback
 } from "../../src/modules/ai/ai.provider.js";
 import {
   storageErrorMetadata,
@@ -93,4 +98,37 @@ test("completed OpenAI text is available only as a stream fallback", () => {
     streamedTextDone({ type: "response.completed", text: "ignored" }),
     null
   );
+});
+
+test("AI defaults use Luna without reasoning and retain the requested fallback", () => {
+  assert.equal(DEFAULT_AI_MODEL, "gpt-6-luna");
+  assert.equal(DEFAULT_AI_FALLBACK_MODEL, "gpt-5-mini");
+  assert.deepEqual(responseReasoningFor(DEFAULT_AI_MODEL), {
+    reasoning: { effort: "none" }
+  });
+  assert.deepEqual(responseReasoningFor(DEFAULT_AI_FALLBACK_MODEL), {
+    reasoning: { effort: "minimal" }
+  });
+});
+
+test("model fallback retries only a retryable primary-model failure", async () => {
+  const attemptedModels = [];
+  const result = await withModelFallback({
+    primaryModel: "gpt-6-luna",
+    fallbackModel: "gpt-5-mini",
+    execute: async selectedModel => {
+      attemptedModels.push(selectedModel);
+      if (selectedModel === "gpt-6-luna") {
+        const error = new Error("rate limited");
+        error.status = 429;
+        throw error;
+      }
+      return "fallback response";
+    }
+  });
+  assert.equal(result, "fallback response");
+  assert.deepEqual(attemptedModels, ["gpt-6-luna", "gpt-5-mini"]);
+  assert.equal(isRetryableProviderFailure({ status: 429 }), true);
+  assert.equal(isRetryableProviderFailure({ status: 400 }), false);
+  assert.equal(isRetryableProviderFailure({ name: "AbortError" }), false);
 });
