@@ -1,5 +1,17 @@
 import { pg, run } from "../../shared/db.js";
 
+const runTx = async fn => {
+  const result = await pg.tx(fn);
+  if (!result.ok) throw result.error;
+  return result.data;
+};
+
+// Must match enquiries.repository.js's own linkingLockKey exactly — the two
+// modules serialize against each other on this key so enquiry creation and
+// site-visit creation for the same buyer+listing can't interleave and leave
+// both rows unlinked (see insert() below).
+const linkingLockKey = (listingId, buyerUserId) => `${listingId}:${buyerUserId}:enquiry-visit-link`;
+
 const selectColumns = `
   sv.id, sv.listing_id AS "listingId", sv.buyer_user_id AS "buyerUserId", sv.enquiry_id AS "enquiryId",
   to_char(sv.preferred_date, 'YYYY-MM-DD') AS "preferredDate", sv.preferred_time_slot AS "preferredTimeSlot",
@@ -18,38 +30,49 @@ const sellerOwnsListing = paramIndex => `EXISTS (
     ))
 )`;
 
+// Finds the buyer's own open enquiry for this listing and inserts the site
+// visit linked to it, atomically under the same advisory lock enquiries.
+// repository.js uses for its own insert — otherwise this SELECT and the
+// enquiry's own linking CTE can interleave: this reads "no open enquiry yet"
+// a moment before a concurrent enquiry creation would have linked to this
+// very visit, leaving both rows permanently unlinked.
 export const insert = ({
   listingId,
   buyerUserId,
-  enquiryId,
   preferredDate,
   preferredTimeSlot,
   visitorCount,
   buyerNote
 }) =>
-  pg.one(
-    `WITH created_visit AS (
-       INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, enquiry_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING *
-     ), updated_enquiry AS (
-       UPDATE marketplace.enquiries enquiry
-       SET status = 'SITE_VISIT'
-       FROM created_visit visit
-       WHERE visit.enquiry_id IS NOT NULL AND enquiry.id = visit.enquiry_id
-       RETURNING enquiry.id
-     )
-     SELECT ${insertColumns} FROM created_visit`,
-    [
-      listingId,
-      buyerUserId,
-      enquiryId,
-      preferredDate,
-      preferredTimeSlot,
-      visitorCount,
-      buyerNote
-    ]
-  );
+  runTx(async t => {
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      linkingLockKey(listingId, buyerUserId)
+    ]);
+    const existingEnquiry = await t.oneOrNone(
+      `SELECT id FROM marketplace.enquiries
+       WHERE listing_id = $1 AND buyer_user_id = $2 AND status NOT IN ('CLOSED','LOST')
+       ORDER BY created_at DESC LIMIT 1`,
+      [listingId, buyerUserId]
+    );
+    const visit = await t.one(
+      `INSERT INTO marketplace.site_visits (listing_id, buyer_user_id, enquiry_id, preferred_date, preferred_time_slot, visitor_count, buyer_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING ${insertColumns}`,
+      [
+        listingId,
+        buyerUserId,
+        existingEnquiry?.id || null,
+        preferredDate,
+        preferredTimeSlot,
+        visitorCount,
+        buyerNote
+      ]
+    );
+    if (existingEnquiry)
+      await t.none(`UPDATE marketplace.enquiries SET status = 'SITE_VISIT' WHERE id = $1`, [
+        existingEnquiry.id
+      ]);
+    return visit;
+  });
 
 export const findActiveDuplicate = ({
   listingId,
@@ -65,6 +88,20 @@ export const findActiveDuplicate = ({
        AND sv.status <> 'CANCELLED'`,
     [listingId, buyerUserId, preferredDate, preferredTimeSlot]
   );
+
+// Used to block a seller from requesting a site visit for their own
+// listing — see site-visits.service.js create.
+export const listingOwnedBySeller = (listingId, sellerId) =>
+  run(
+    "oneOrNone",
+    `SELECT 1 FROM marketplace.listings l
+     WHERE l.id = $1 AND l.deleted_at IS NULL
+       AND (l.seller_user_id = $2 OR EXISTS (
+         SELECT 1 FROM account.organization_members om
+         WHERE om.organization_id = l.seller_organization_id AND om.user_id = $2 AND om.status = 'ACTIVE'
+       ))`,
+    [listingId, sellerId]
+  ).then(Boolean);
 
 export const findOwnedByBuyer = (id, buyerId) =>
   run(

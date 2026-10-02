@@ -13,7 +13,11 @@ export const list = ({ locationId, status, fromDate, toDate, limit, offset }) =>
      WHERE ($1::uuid IS NULL OR a.location_id = $1)
        AND ($2::varchar IS NULL OR a.status = $2)
        AND ($3::timestamptz IS NULL OR a.auction_at >= $3)
-       AND ($4::timestamptz IS NULL OR a.auction_at <= $4)
+       -- toDate is a date-only filter ("through end of that day"), but
+       -- optionalDate parses it at literal UTC midnight — comparing against
+       -- the START of the next day (rather than <= that midnight instant)
+       -- keeps auctions scheduled later on toDate itself in the results.
+       AND ($4::timestamptz IS NULL OR a.auction_at < ($4::timestamptz)::date + INTERVAL '1 day')
      ORDER BY a.auction_at ASC
      LIMIT $5 OFFSET $6`,
     [locationId, status, fromDate, toDate, limit, offset]

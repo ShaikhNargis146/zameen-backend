@@ -6,6 +6,7 @@ import {
   randomToken,
   safeEqualHex
 } from "../../utils/crypto.js";
+import { grantFreePlan } from "../commerce/entitlements.service.js";
 import * as repository from "./auth.repository.js";
 import { deliverOtp, otpDeliveryConfigured } from "./otp.provider.js";
 
@@ -17,6 +18,14 @@ const otpResendAfterSeconds = Number(
   process.env.OTP_RESEND_AFTER_SECONDS || 30
 );
 const otpRateLimitPerIp = Number(process.env.OTP_RATE_LIMIT_PER_IP_10MIN || 20);
+// How long a same-token refresh retry (e.g. the first response was lost to
+// a network timeout) can still be recovered by rotating the still-unused
+// successor, instead of the whole session family being revoked as if it
+// were token theft. Short on purpose — this only needs to cover an
+// immediate client retry, not a delayed one.
+const refreshRetryGraceSeconds = Number(
+  process.env.REFRESH_RETRY_GRACE_SECONDS || 15
+);
 const otpPurposes = new Set([
   "LOGIN",
   "REGISTER",
@@ -215,6 +224,9 @@ class AuthService {
       // A verified individual can browse and create their own listing from the
       // first session. Business-specific roles are added explicitly later.
       await repository.addDefaultRoles(userId);
+      // No-op if the FREE product/plan isn't seeded yet — tolerated rather
+      // than failing registration, see entitlements.service.js#grantFreePlan.
+      await grantFreePlan({ userId });
     }
     return this.createSession({
       userId,
@@ -231,7 +243,8 @@ class AuthService {
     ip = null,
     userAgent = null,
     deviceId = null,
-    deviceName = null
+    deviceName = null,
+    supersedes = null
   }) {
     const user = await repository.findActiveUser(userId);
     if (!user || user.status !== "ACTIVE")
@@ -251,6 +264,10 @@ class AuthService {
       deviceName,
       expiresAt: new Date(Date.now() + refreshTtlDays * 86400000)
     });
+    // Records the rotation chain so a same-token retry can later be
+    // recovered instead of treated as theft — see refresh() and
+    // repository.recoverableSuccessor.
+    if (supersedes) await repository.linkRotation(supersedes, session.id);
     const roles = await rolesFor(userId);
     await repository.updateLastLogin(userId);
     return {
@@ -276,8 +293,29 @@ class AuthService {
     const session = await repository.findRefreshSession(tokenHash);
     if (!session) {
       const reused = await repository.refreshSessionByHash(tokenHash);
-      if (reused?.revoked_at)
+      if (reused?.revoked_at) {
+        // A same-token retry (the first response never reached the client)
+        // looks identical to theft at this point — recover it if the
+        // rotation this token produced is still unused and within the
+        // grace window, rather than revoking the whole family. Any other
+        // reuse (older token, past the window, or a successor someone
+        // already continued the session with) still means theft.
+        const successor = await repository.recoverableSuccessor(
+          reused.id,
+          refreshRetryGraceSeconds
+        );
+        if (successor)
+          return this.createSession({
+            userId: successor.userId,
+            familyId: successor.familyId,
+            ip,
+            userAgent,
+            deviceId,
+            deviceName,
+            supersedes: successor.id
+          });
         await repository.revokeSessionFamily(reused.family_id);
+      }
       return responseError(
         401,
         "INVALID_REFRESH_TOKEN",
@@ -298,7 +336,8 @@ class AuthService {
       ip,
       userAgent,
       deviceId,
-      deviceName
+      deviceName,
+      supersedes: session.id
     });
   }
 

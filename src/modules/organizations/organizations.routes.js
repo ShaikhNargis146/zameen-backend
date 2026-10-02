@@ -30,6 +30,11 @@ router.post(
   requireAuth,
   asyncRoute(controller.addMember)
 );
+router.post(
+  "/organizations/:organizationId/members/me/accept",
+  requireAuth,
+  asyncRoute(controller.acceptMembership)
+);
 router.delete(
   "/organizations/:organizationId/members/:userId",
   requireAuth,

@@ -16,6 +16,23 @@ export const updateMe = async (req, res) =>
       validation.profileChanges(req.body || {})
     )
   );
+export const requestEmailChange = async (req, res) =>
+  ok(
+    res,
+    await service.requestEmailChange({
+      actorId: req.actor.id,
+      ...validation.emailChangeRequest(req.body || {}),
+      ip: req.ip
+    })
+  );
+export const confirmEmailChange = async (req, res) =>
+  ok(
+    res,
+    await service.confirmEmailChange({
+      actorId: req.actor.id,
+      ...validation.emailChangeConfirm(req.body || {})
+    })
+  );
 export const myRoles = async (req, res) =>
   ok(res, await service.roleDetails(req.actor.id));
 export const addMyRole = async (req, res) =>

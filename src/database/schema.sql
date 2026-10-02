@@ -102,6 +102,10 @@ CREATE TABLE auth.refresh_sessions (
   revoked_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   last_used_at timestamptz,
+  -- The session this one was rotated into, set at rotation time — lets a
+  -- same-token retry within a short grace window be recovered instead of
+  -- treated as theft. See migrations/011_refresh_session_rotation_chain.sql.
+  replaced_by_session_id uuid REFERENCES auth.refresh_sessions(id) ON DELETE SET NULL,
   CONSTRAINT chk_refresh_expiry CHECK (expires_at > created_at)
 );
 CREATE INDEX idx_auth_refresh_sessions_active ON auth.refresh_sessions(user_id, expires_at) WHERE revoked_at IS NULL;
@@ -196,7 +200,8 @@ CREATE TABLE account.organization_members (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   role varchar(30) NOT NULL CHECK (role IN ('OWNER','ADMIN','MEMBER')),
   status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INVITED','REMOVED')),
-  joined_at timestamptz NOT NULL DEFAULT now(),
+  -- Null while INVITED (not yet accepted) — see migrations/009_organization_member_invite.sql.
+  joined_at timestamptz,
   PRIMARY KEY (organization_id, user_id)
 );
 CREATE INDEX idx_account_organization_members_user ON account.organization_members(user_id, organization_id);
@@ -500,6 +505,18 @@ CREATE INDEX idx_marketplace_listing_events_listing ON marketplace.listing_event
 CREATE INDEX idx_marketplace_listing_events_user ON marketplace.listing_events(user_id, created_at DESC) WHERE user_id IS NOT NULL;
 CREATE INDEX idx_marketplace_listing_events_type ON marketplace.listing_events(event_type, created_at DESC);
 
+-- Source of truth for "has this buyer already unlocked this listing's
+-- contact" (see migrations/019_contact_unlock_entitlements.sql) -- distinct
+-- from listing_events' unconstrained CONTACT_REVEAL analytics rows above, so
+-- a repeat view of an already-unlocked listing doesn't consume another unit
+-- of the buyer's plan-based contact-unlock allowance.
+CREATE TABLE marketplace.contact_unlocks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), listing_id uuid NOT NULL REFERENCES marketplace.listings(id) ON DELETE RESTRICT,
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (listing_id, user_id)
+);
+CREATE INDEX idx_marketplace_contact_unlocks_user ON marketplace.contact_unlocks(user_id);
+
 CREATE TABLE marketplace.buyer_requirements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
   name varchar(255), location_id uuid REFERENCES geo.locations(id) ON DELETE RESTRICT,
@@ -560,6 +577,11 @@ CREATE TABLE commerce.products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code varchar(100) NOT NULL UNIQUE,
   type varchar(30) NOT NULL CHECK (type IN ('PLAN','PROMOTION','SERVICE')),
   name varchar(255) NOT NULL, description text, amount_minor bigint NOT NULL CHECK (amount_minor >= 0), currency char(3) NOT NULL DEFAULT 'INR',
+  -- amount_minor is GST-inclusive. gst_rate_bps/hsn_sac_code (basis points,
+  -- 1800 = 18%) exist purely to render the tax breakdown on an order's
+  -- invoice (see migrations/014_invoice_gst_fields.sql) -- they never change
+  -- what a customer is charged.
+  gst_rate_bps integer NOT NULL DEFAULT 1800 CHECK (gst_rate_bps BETWEEN 0 AND 10000), hsn_sac_code varchar(20),
   is_active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE commerce.plans (
@@ -567,9 +589,13 @@ CREATE TABLE commerce.plans (
   plan_type varchar(30) NOT NULL CHECK (plan_type IN ('FREE','PREMIUM','BROKER')), duration_days integer CHECK (duration_days IS NULL OR duration_days > 0),
   listing_limit integer CHECK (listing_limit IS NULL OR listing_limit >= 0), featured_days integer CHECK (featured_days IS NULL OR featured_days >= 0),
   verification_included boolean NOT NULL DEFAULT false, features jsonb,
-  -- NULL means unlimited. A user with no active plan_subscription at all
-  -- (never purchased anything) is not represented by any row here — that
-  -- ambient "Free" state's quota is a constant in ai.service.js, not a row.
+  -- NULL means unlimited. As of migrations/016_subscription_entitlements.sql,
+  -- a FREE plan (plan_type = 'FREE') is seeded here and granted as a real
+  -- plan_subscriptions row on registration/org-creation (see
+  -- entitlements.service.js#grantFreePlan) — its ai_monthly_quota is
+  -- admin-editable via PATCH /admin/plans/:planId like any other plan. The
+  -- ambient constant in ai.service.js (DEFAULT_FREE_AI_MONTHLY_QUOTA) only
+  -- covers the defensive case where that seed row is somehow missing.
   ai_monthly_quota integer CHECK (ai_monthly_quota IS NULL OR ai_monthly_quota >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -578,13 +604,29 @@ CREATE TABLE commerce.orders (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT, organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
   status varchar(30) NOT NULL DEFAULT 'CREATED' CHECK (status IN ('CREATED','PAYMENT_PENDING','PAID','FAILED','CANCELLED','REFUNDED')),
   subtotal_minor bigint NOT NULL CHECK (subtotal_minor >= 0), tax_minor bigint NOT NULL DEFAULT 0 CHECK (tax_minor >= 0), total_minor bigint NOT NULL CHECK (total_minor >= 0), currency char(3) NOT NULL DEFAULT 'INR',
+  -- Assigned once, at payment-capture time (commerce.repository.js
+  -- capturePaymentAndApplyEntitlements), from commerce.invoice_number_seq --
+  -- null until then. There is no buyer billing address anywhere in this
+  -- schema, so place_of_supply_state_code defaults to the seller's own state
+  -- (intra-state, CGST+SGST) unless organization_id is set and that
+  -- organization has a gst_number, in which case the buyer's state is read
+  -- from the GSTIN's state-code prefix (IGST if it differs from the
+  -- seller's). See migrations/014_invoice_gst_fields.sql.
+  invoice_number varchar(50), buyer_gstin varchar(30), place_of_supply_state_code varchar(2),
+  cgst_minor bigint NOT NULL DEFAULT 0 CHECK (cgst_minor >= 0), sgst_minor bigint NOT NULL DEFAULT 0 CHECK (sgst_minor >= 0), igst_minor bigint NOT NULL DEFAULT 0 CHECK (igst_minor >= 0),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_commerce_orders_user ON commerce.orders(user_id, created_at DESC);
+CREATE UNIQUE INDEX uq_commerce_orders_invoice_number ON commerce.orders(invoice_number) WHERE invoice_number IS NOT NULL;
+CREATE SEQUENCE commerce.invoice_number_seq;
 CREATE TABLE commerce.order_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES commerce.orders(id) ON DELETE RESTRICT,
   product_id uuid NOT NULL REFERENCES commerce.products(id) ON DELETE RESTRICT, quantity integer NOT NULL CHECK (quantity > 0),
   unit_amount_minor bigint NOT NULL CHECK (unit_amount_minor >= 0), total_amount_minor bigint NOT NULL CHECK (total_amount_minor >= 0), metadata jsonb,
+  -- Snapshotted from commerce.products at order-creation time, same as the
+  -- amount columns above, so a product's rate changing later never changes
+  -- an already-issued invoice.
+  gst_rate_bps integer NOT NULL DEFAULT 0 CHECK (gst_rate_bps BETWEEN 0 AND 10000), hsn_sac_code varchar(20),
   created_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT chk_order_item_total CHECK (total_amount_minor = quantity * unit_amount_minor)
 );
 CREATE INDEX idx_commerce_order_items_order ON commerce.order_items(order_id);
@@ -600,7 +642,12 @@ CREATE TABLE commerce.plan_subscriptions (
   user_id uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
   organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
   plan_id uuid NOT NULL REFERENCES commerce.plans(id) ON DELETE RESTRICT,
-  order_item_id uuid NOT NULL UNIQUE REFERENCES commerce.order_items(id) ON DELETE RESTRICT,
+  -- Nullable (migrations/016_subscription_entitlements.sql): a free grant
+  -- with no purchase behind it (see entitlements.service.js#grantFreePlan)
+  -- has no order_item to reference. Still UNIQUE -- Postgres treats multiple
+  -- NULLs as distinct, so any number of free-grant rows can coexist while a
+  -- real purchase's order_item_id stays enforced unique.
+  order_item_id uuid UNIQUE REFERENCES commerce.order_items(id) ON DELETE RESTRICT,
   starts_at timestamptz NOT NULL DEFAULT now(),
   ends_at timestamptz,
   status varchar(30) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CANCELLED','EXPIRED')),
@@ -609,6 +656,29 @@ CREATE TABLE commerce.plan_subscriptions (
 );
 CREATE INDEX idx_commerce_plan_subscriptions_user_active ON commerce.plan_subscriptions(user_id, ends_at) WHERE status = 'ACTIVE';
 CREATE INDEX idx_commerce_plan_subscriptions_org_active ON commerce.plan_subscriptions(organization_id, ends_at) WHERE status = 'ACTIVE';
+
+-- Generic usage ledger for plan allowances resolved from commerce.plans.features
+-- (today featuredListingsPerMonth and contactUnlocks). See commerce.repository.js
+-- #consumeSubscriptionUsage for the advisory-lock reserve/consume logic.
+CREATE TABLE commerce.subscription_usage (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
+  organization_id uuid REFERENCES account.organizations(id) ON DELETE RESTRICT,
+  feature varchar(50) NOT NULL,
+  used_count integer NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+  period_start timestamptz NOT NULL,
+  period_end timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_subscription_usage_owner CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+);
+-- Partial (not plain multi-column) unique indexes: a plain
+-- UNIQUE(user_id, feature, period_start) would never actually collide across
+-- org-owned rows, since every org row has user_id NULL and Postgres treats
+-- NULLs as distinct for uniqueness -- these instead uniquely dedupe within
+-- whichever owner form a row actually uses.
+CREATE UNIQUE INDEX uq_commerce_subscription_usage_user ON commerce.subscription_usage(user_id, feature, period_start) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_commerce_subscription_usage_org ON commerce.subscription_usage(organization_id, feature, period_start) WHERE organization_id IS NOT NULL;
 
 CREATE TABLE commerce.payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), order_id uuid NOT NULL REFERENCES commerce.orders(id) ON DELETE RESTRICT,
@@ -746,15 +816,31 @@ CREATE TABLE content.investment_interests (
   status varchar(20) NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','CONTACTED','CLOSED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- At most one open (not yet CLOSED) lead per investor per opportunity —
+-- see migrations/010_investment_interest_dedup.sql.
+CREATE UNIQUE INDEX uq_content_investment_interests_open
+  ON content.investment_interests(opportunity_id, user_id) WHERE status IN ('NEW','CONTACTED');
 CREATE TABLE content.ads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(255) NOT NULL,
-  placement varchar(50) NOT NULL CHECK (placement IN ('HOME_TOP','SEARCH_TOP','PROPERTY_SIDEBAR','CONTENT')),
-  image_storage_key text NOT NULL, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
-  status varchar(20) NOT NULL DEFAULT 'INACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','SCHEDULED','EXPIRED')),
+  placement varchar(50) NOT NULL,
+  image_storage_key text, target_url text, starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','INACTIVE','EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_content_ads_dates CHECK (ends_at > starts_at)
 );
+COMMENT ON COLUMN content.ads.image_storage_key IS
+  'Deprecated: no longer written by the API. Legacy pre-013 value only; content.ad_media is the source of truth.';
 CREATE INDEX idx_content_ads_active ON content.ads(placement, starts_at, ends_at) WHERE status = 'ACTIVE';
+CREATE TABLE content.ad_media (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ad_id uuid NOT NULL REFERENCES content.ads(id) ON DELETE CASCADE,
+  storage_key text NOT NULL, mime_type varchar(100),
+  sort_order smallint NOT NULL DEFAULT 0 CHECK (sort_order >= 0), is_cover boolean NOT NULL DEFAULT false,
+  uploaded_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), deleted_at timestamptz
+);
+CREATE INDEX idx_content_ad_media_ad ON content.ad_media(ad_id, sort_order) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_content_ad_media_cover ON content.ad_media(ad_id) WHERE is_cover AND deleted_at IS NULL;
 
 CREATE TABLE ops.notifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
@@ -813,6 +899,23 @@ CREATE TABLE ai.messages (
   latency_ms integer CHECK (latency_ms IS NULL OR latency_ms >= 0), metadata jsonb, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_ai_messages_conversation ON ai.messages(conversation_id, created_at);
+
+-- Unified monthly AI-quota ledger shared by chat answers, /ai/search and
+-- /ai/listing/generate. See migrations/008_ai_usage_events.sql.
+-- organization_id is set only when the caller explicitly requested that
+-- organization's shared plan pool and is an active member of it, rather than
+-- the calling user's own personal plan/free tier -- see
+-- migrations/015_ai_org_quota.sql, migrations/016_subscription_entitlements.sql
+-- and ai.service.js reserveAiQuota / resolveOrganizationContext.
+-- The two scopes are mutually exclusive per request, never combined.
+CREATE TABLE ai.usage_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  organization_id uuid REFERENCES account.organizations(id) ON DELETE CASCADE,
+  kind varchar(30) NOT NULL CHECK (kind IN ('CHAT','SEARCH','LISTING_GENERATE')),
+  reserved_at timestamptz NOT NULL DEFAULT now(), confirmed_at timestamptz
+);
+CREATE INDEX idx_ai_usage_events_user_month ON ai.usage_events(user_id, reserved_at) WHERE organization_id IS NULL;
+CREATE INDEX idx_ai_usage_events_org_month ON ai.usage_events(organization_id, reserved_at) WHERE organization_id IS NOT NULL;
 
 -- Land Passport and Scanner Lite are deterministic read models, not AI or
 -- legal opinions. They are recalculated from the canonical property records.
@@ -893,7 +996,7 @@ BEGIN
     'geo.locations','account.organizations','account.channel_partner_profiles',
     'land.property_types','land.land_use_types','land.ownership_types','land.area_units','land.amenities','land.document_types','land.parcel_identifier_types','land.parcel_configurations','land.properties','land.property_land_details','land.property_parcel_identifiers','land.property_locations','land.property_verification_checks',
     'marketplace.listings','marketplace.buyer_requirements','marketplace.enquiries','marketplace.site_visits',
-    'commerce.products','commerce.plans','commerce.orders','commerce.payments','commerce.payment_webhook_events','commerce.service_catalog','commerce.service_requests',
+    'commerce.products','commerce.plans','commerce.orders','commerce.payments','commerce.payment_webhook_events','commerce.service_catalog','commerce.service_requests','commerce.subscription_usage',
     'content.content_items','content.content_translations','content.market_trend_series','content.auctions','content.investment_opportunities','content.investment_interests','content.ads',
     'ops.notification_deliveries','ai.conversations'
   ] LOOP

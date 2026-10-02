@@ -82,6 +82,20 @@ export const createPaymentLink = ({
     raw: payload
   }));
 
+// Invalidates a Payment Link on Razorpay's side so a retried payment attempt
+// (see commerce.service.js createPaymentIntent) cannot still be completed by
+// the customer after we've moved on to a fresh one. Best-effort by design —
+// Razorpay rejects cancelling a link that's already paid or already
+// cancelled, and the caller must treat that as informational, not fatal.
+export const cancelPaymentLink = ({ keyId, keySecret, timeoutMs, providerOrderId }) =>
+  request({
+    method: "POST",
+    path: `/payment_links/${providerOrderId}/cancel`,
+    keyId,
+    keySecret,
+    timeoutMs
+  }).then(payload => ({ id: payload.id, status: payload.status, raw: payload }));
+
 // Confirm this field order/format against the current Razorpay Payment Links
 // API reference before relying on it in production — see
 // docs/razorpay-integration-plan.md section 19.

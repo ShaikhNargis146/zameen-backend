@@ -791,6 +791,24 @@ Dev 1 owns database design/migrations, auth/users, locations, property/land/list
 | POST | /admin/listings/{listingId}/approve | ADMIN | AdminApproveListing | Listing |
 | POST | /admin/listings/{listingId}/reject | ADMIN | ActionReason | Listing |
 | POST | /admin/listings/{listingId}/suspend | ADMIN | ActionReason | Listing |
+| GET | /admin/listings/bulk-upload/template | ADMIN | none | .csv file download |
+| POST | /admin/listings/bulk-upload | ADMIN | multipart/form-data, field `file` (.csv) | BulkUploadResult |
+
+**Bulk upload (CSV)** — admin-only back-office data entry, not a seller self-service tool.
+
+`GET /admin/listings/bulk-upload/template` downloads a sample `.csv` (UTF-8 with BOM, header row + two example rows) covering every column below. `POST /admin/listings/bulk-upload` accepts that file (field name `file`, max 10MB, at most 500 data rows) and creates one property + draft listing per row — equivalent to CreateProperty + LandDetailsInput + PropertyLocationInput + CreateListing combined, using human-entered codes (e.g. `propertyTypeCode`, `areaUnitCode`) instead of master UUIDs, plus a required `locationId` (looked up via `/locations/search` beforehand). `organizationId`, if given, just needs to exist — the admin is not required to be a member of it. Rows are each created independently: one invalid or failing row never blocks the others. Every property created this way is recorded with `source=ADMIN`. Created listings land in the same `DRAFT`/`INACTIVE` state as a normal creation — media, documents, and parcel identifiers still need to be added afterward, and the listing still needs `/listings/{listingId}/submit` before moderation.
+
+Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 chars), `transactionType` (SALE/LEASE), `priceAmountINR` (rupees, converted internally to paise), `isNegotiable` (optional, TRUE/FALSE), `canonicalLanguage` (optional, en/hi/mr/gu/pa/te/ta), `propertyTypeCode`, `landUseTypeCode` (optional), `ownershipTypeCode` (optional), `organizationId` (optional uuid), `areaValue`, `areaUnitCode`, `lengthValue`/`widthValue` (optional), `dimensionUnit` (optional, FT/M), `frontageM`/`roadWidthM` (optional), `roadType` (optional, PUCCA/KUTCHA/HIGHWAY/OTHER), `facing` (optional, N/NE/E/SE/S/SW/W/NW), `openSides` (optional, 0-4), `isCornerPlot` (optional, TRUE/FALSE), `hasBoundaryWall` (optional, TRUE/FALSE), `terrain` (optional, FLAT/SLOPED/UNEVEN/OTHER), `roadAccessType` (optional, DIRECT/SHARED/NO_DIRECT/OTHER), `locationId` (uuid), `pincode`/`addressLine`/`landmark` (optional), `latitude`/`longitude` (optional, both or neither), `locationPrecision` (optional, EXACT/APPROXIMATE), `showExactLocation` (optional, TRUE/FALSE), `amenityCodes` (optional, semicolon-separated, e.g. `WATER;ELECTRICITY:Available 24x7`).
+
+**BulkUploadResult**
+
+| Field | Type | Required | Validation / enum | Description |
+|---|---|---|---|---|
+| totalRows | integer | Yes | Read-only | Non-blank data rows processed. |
+| successCount | integer | Yes | Read-only | Rows that created a property + listing. |
+| errorCount | integer | Yes | Read-only | Rows that failed validation or saving. |
+| created | object[] | Yes | Read-only | Each: rowNumber, propertyId, listingId, listingCode. |
+| errors | object[] | Yes | Read-only | Each: rowNumber, errors[] (field, message). |
 
 **ActionReason**
 

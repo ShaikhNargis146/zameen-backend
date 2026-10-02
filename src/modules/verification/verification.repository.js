@@ -84,13 +84,19 @@ export const updateWithAudit = ({
   requestId
 }) =>
   pg.tx(async transaction => {
+    // check_type is immutable for a given id and was already verified equal
+    // to `before` by the service, so it can never actually detect a
+    // concurrent change — status = $7 is the real optimistic-lock guard:
+    // it's the field this update itself changes, so a second admin's write
+    // landing between this admin's read (`before`) and this write makes the
+    // WHERE clause match zero rows instead of silently overwriting it.
     const updated = await transaction.oneOrNone(
       `UPDATE land.property_verification_checks
        SET status = $3, notes = $4, internal_notes = $5,
            reviewed_by_user_id = $6, reviewed_at = now()
-       WHERE id = $1 AND check_type = $2
+       WHERE id = $1 AND check_type = $2 AND status = $7
        RETURNING id`,
-      [verificationId, checkType, status, publicNote, internalNote, actorId]
+      [verificationId, checkType, status, publicNote, internalNote, actorId, before.status]
     );
     if (!updated) return null;
     await transaction.none(

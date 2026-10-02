@@ -6,6 +6,16 @@ import * as controller from "./users.controller.js";
 const router = Router();
 router.get("/me", requireAuth, asyncRoute(controller.me));
 router.patch("/me", requireAuth, asyncRoute(controller.updateMe));
+router.post(
+  "/me/email/change",
+  requireAuth,
+  asyncRoute(controller.requestEmailChange)
+);
+router.post(
+  "/me/email/confirm",
+  requireAuth,
+  asyncRoute(controller.confirmEmailChange)
+);
 router.get("/me/roles", requireAuth, asyncRoute(controller.myRoles));
 router.post("/me/roles", requireAuth, asyncRoute(controller.addMyRole));
 export default router;

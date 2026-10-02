@@ -9,5 +9,15 @@ router.post("/investment-opportunities", requireAdmin, asyncRoute(controller.cre
 router.patch("/investment-opportunities/:id", requireAdmin, asyncRoute(controller.update));
 router.post("/investment-opportunities/:id/publish", requireAdmin, asyncRoute(controller.publish));
 router.post("/investment-opportunities/:id/close", requireAdmin, asyncRoute(controller.close));
+router.get(
+  "/investment-opportunities/:opportunityId/interests",
+  requireAdmin,
+  asyncRoute(controller.listInterests)
+);
+router.get(
+  "/investment-opportunities/:opportunityId/interests/:interestId",
+  requireAdmin,
+  asyncRoute(controller.interestDetail)
+);
 
 export default router;

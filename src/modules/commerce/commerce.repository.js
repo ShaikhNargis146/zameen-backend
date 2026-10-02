@@ -1,4 +1,6 @@
 import { pg, run } from "../../shared/db.js";
+import { resolveUsageCycle } from "../../shared/usageCycle.js";
+import { splitGstMinor, stateCodeFromGstin } from "./tax.js";
 
 const runTx = async fn => {
   const result = await pg.tx(fn);
@@ -11,7 +13,7 @@ const planColumns = `
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
   pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
-  pl.ai_monthly_quota AS "aiMonthlyQuota",
+  pl.ai_monthly_quota AS "aiMonthlyQuota", pr.gst_rate_bps AS "gstRateBps", pr.hsn_sac_code AS "hsnSacCode",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
 
@@ -67,9 +69,10 @@ export const planHasOrders = planId =>
   ).then(Boolean);
 
 // The buyer's own currently-active personal plan (organization-scoped plans
-// are out of scope here, same restriction as ai.repository's activePlanForUser).
-// No background sweep flips a lapsed row's status to EXPIRED, so this filters
-// on ends_at lazily, at read time, rather than trusting status = 'ACTIVE' alone.
+// are out of scope here -- see findActiveSubscriptionForOwner below for that
+// path). No background sweep flips a lapsed row's status to EXPIRED, so this
+// filters on ends_at lazily, at read time, rather than trusting status =
+// 'ACTIVE' alone.
 export const findActiveSubscriptionForUser = userId =>
   run(
     "oneOrNone",
@@ -85,6 +88,353 @@ export const findActiveSubscriptionForUser = userId =>
     [userId]
   );
 
+// Same active-subscription lookup as findActiveSubscriptionForUser, but for
+// whichever owner a resource actually belongs to: an org's plan when
+// organizationId is set, otherwise the individual's own plan.
+//
+// This answers "does this owner currently hold a REAL plan_subscriptions
+// row" — returns null if not, which matters where that distinction itself
+// is the point (entitlements.service.js#grantFreePlan's own idempotency
+// guard must see null for a brand-new owner, or it would never grant
+// anything; capturePaymentAndApplyEntitlements's own inline expire-before-insert
+// lookup has the same requirement). Entitlement CHECKS should call
+// resolveEffectivePlanForOwner/ForUser below instead, not this directly.
+export const findActiveSubscriptionForOwner = ({ userId, organizationId }) =>
+  organizationId
+    ? run(
+        "oneOrNone",
+        `SELECT ps.status AS "subscriptionStatus", ps.starts_at AS "startsAt", ps.ends_at AS "endsAt",
+                ${planColumns}
+         FROM commerce.plan_subscriptions ps
+         JOIN commerce.plans pl ON pl.id = ps.plan_id
+         JOIN commerce.products pr ON pr.id = pl.product_id
+         WHERE ps.organization_id = $1
+           AND ps.status = 'ACTIVE' AND (ps.ends_at IS NULL OR ps.ends_at > now())
+         ORDER BY ps.ends_at DESC NULLS LAST
+         LIMIT 1`,
+        [organizationId]
+      )
+    : findActiveSubscriptionForUser(userId);
+
+// The live, admin-editable PLAN_FREE catalog row, shaped like a real
+// findActiveSubscriptionForOwner/ForUser result, for an owner with no
+// currently-active plan_subscriptions row at all — whether they've never
+// purchased anything, or purchased once and it has since lapsed with
+// nothing newer. Returns null only if PLAN_FREE itself isn't seeded yet
+// (the caller's own DEFAULT_FREE_* constant remains the last-resort safety
+// net for that case).
+const liveFreeTierPlan = async () => {
+  const freePlan = await run(
+    "oneOrNone",
+    `SELECT ${planColumns} FROM commerce.plans pl
+     JOIN commerce.products pr ON pr.id = pl.product_id
+     WHERE pr.code = 'PLAN_FREE'`
+  );
+  return (
+    freePlan && {
+      subscriptionStatus: "ACTIVE",
+      startsAt: null,
+      endsAt: null,
+      ...freePlan
+    }
+  );
+};
+
+// The plan that actually applies to this owner right now, for entitlement
+// checks (limits, quota, features, GET /me/subscription) — as opposed to
+// findActiveSubscriptionForOwner/ForUser above, which answer a narrower
+// "does a real row exist" question. Falls back to the live PLAN_FREE
+// catalog row instead of a hardcoded JS constant, identically for
+// individual and organization owners, so an owner who purchased a paid plan
+// once and let it lapse gets the SAME admin-editable Free tier as someone
+// who never purchased anything — not a value frozen at deploy time. See
+// docs/subscription-entitlements-audit-checklist.md §D1 for the bug this
+// closes: before this, a lapsed paid plan silently fell back to
+// DEFAULT_FREE_LISTING_LIMIT/etc. because the owner's original FREE grant
+// had itself been marked EXPIRED the moment they bought something else.
+export const resolveEffectivePlanForUser = async userId =>
+  (await findActiveSubscriptionForUser(userId)) || liveFreeTierPlan();
+
+export const resolveEffectivePlanForOwner = async ({
+  userId,
+  organizationId
+}) =>
+  (await findActiveSubscriptionForOwner({ userId, organizationId })) ||
+  liveFreeTierPlan();
+
+// Grants a plan with no purchase behind it (e.g. the ambient FREE plan on
+// registration, see entitlements.service.js#grantFreePlan) — order_item_id
+// is nullable for exactly this case (see migrations/016_subscription_entitlements.sql).
+export const grantPlanDirectly = ({
+  userId,
+  organizationId,
+  planId,
+  startsAt,
+  endsAt
+}) =>
+  run(
+    "one",
+    `INSERT INTO commerce.plan_subscriptions (user_id, organization_id, plan_id, starts_at, ends_at, status)
+     VALUES ($1,$2,$3,$4,$5,'ACTIVE') RETURNING id`,
+    [userId, organizationId || null, planId, startsAt, endsAt]
+  );
+
+// Shared by consumeSubscriptionUsage and grantFeaturedListingFromAllowance
+// below: checks the current period's usage against `limit` and
+// increments/inserts it, inside an already-open transaction `t`. Factored
+// out (rather than each caller opening its own runTx) so a caller that needs
+// a second, related write in the same transaction — e.g. granting the
+// promotion this usage unit unlocks — can do so atomically instead of as a
+// separately-committed follow-up call, where a failure in that second write
+// would otherwise leave the allowance permanently consumed with nothing
+// actually granted. Mirrors ai.repository.reserveAiQuotaUsage's
+// advisory-lock shape (lock the owner, count, then write). The lock key is
+// namespaced by feature so this ledger and a future second feature never
+// contend on the same advisory lock. Returns true if the unit was consumed,
+// false if the period was already at limit.
+// LIFETIME_PERIOD gives a feature that never resets (e.g. the FREE plan's
+// contact-unlock cap -- see consumeContactUnlock below) a fixed period_start
+// so it reuses this same ledger/lock/count machinery instead of a parallel
+// code path, rather than a real calendar boundary.
+const LIFETIME_PERIOD = {
+  periodStart: new Date(0),
+  periodEnd: new Date("9999-12-31T23:59:59.000Z")
+};
+
+// anchorStartsAt is the owner's CURRENT plan_subscriptions.starts_at (passed
+// down from entitlements.service.js, which already resolved the active plan
+// to read its limit) -- resolveUsageCycle anchors the MONTHLY period to it
+// instead of the wall-clock calendar month, so a purchase/upgrade/renewal at
+// any time immediately opens a fresh period with nothing carried over (see
+// src/shared/usageCycle.js's header for why). `now` is accepted explicitly,
+// mirroring computePlanEndsAt's own `now` parameter, purely for
+// deterministic testing -- real callers never need to pass it.
+const consumeUsageWithinTx = async (
+  t,
+  {
+    userId,
+    organizationId,
+    feature,
+    limit,
+    periodMode = "MONTHLY",
+    anchorStartsAt = null,
+    now = new Date()
+  }
+) => {
+  const lockKey = `${feature}:${organizationId || userId}`;
+  await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+  const period =
+    periodMode === "LIFETIME"
+      ? LIFETIME_PERIOD
+      : resolveUsageCycle({ anchorStartsAt, now });
+  const existing = await t.oneOrNone(
+    organizationId
+      ? `SELECT id, used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE organization_id = $1 AND feature = $2 AND period_start = $3`
+      : `SELECT id, used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE user_id = $1 AND feature = $2 AND period_start = $3`,
+    [organizationId || userId, feature, period.periodStart]
+  );
+  if (existing && existing.usedCount >= limit) return false;
+  if (existing)
+    await t.none(
+      `UPDATE commerce.subscription_usage SET used_count = used_count + 1, updated_at = now() WHERE id = $1`,
+      [existing.id]
+    );
+  else
+    await t.none(
+      `INSERT INTO commerce.subscription_usage (user_id, organization_id, feature, used_count, period_start, period_end)
+       VALUES ($1,$2,$3,1,$4,$5)`,
+      [
+        organizationId ? null : userId,
+        organizationId || null,
+        feature,
+        period.periodStart,
+        period.periodEnd
+      ]
+    );
+  return true;
+};
+
+// Generic monthly usage ledger backing any "N included per month" allowance
+// resolved from commerce.plans.features. Standalone entry point for a
+// feature whose entitlement *is* the counter itself, with no second write
+// needed (unlike featured listings below).
+export const consumeSubscriptionUsage = ({
+  userId,
+  organizationId,
+  feature,
+  limit,
+  anchorStartsAt,
+  now
+}) =>
+  runTx(t =>
+    consumeUsageWithinTx(t, {
+      userId,
+      organizationId,
+      feature,
+      limit,
+      anchorStartsAt,
+      now
+    })
+  );
+
+// Read-only, non-transactional twin of the already-featured check inside
+// grantFeaturedListingFromAllowance's transaction below — used by
+// entitlements.service.js#grantFeaturedListing when the owner's plan has no
+// featuredListingsPerMonth allowance at all, so a request for an
+// already-featured listing still gets an accurate alreadyFeatured: true
+// instead of a misleading "no allowance left" (there's nothing to open a
+// transaction for in that case, since there's no usage to consume).
+export const isListingFeatured = listingId =>
+  run(
+    "oneOrNone",
+    `SELECT id FROM marketplace.listing_promotions
+     WHERE listing_id = $1 AND promotion_type = 'FEATURED' AND status = 'ACTIVE'
+       AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())`,
+    [listingId]
+  ).then(Boolean);
+
+// Atomically consumes one unit of the owner's monthly featured-listing
+// allowance and grants the FEATURED promotion in the same transaction as the
+// usage write — see entitlements.service.js#grantFeaturedListing. Mirrors
+// capturePaymentAndApplyEntitlements's existing precedent of writing
+// marketplace.listing_promotions from this module.
+//
+// The already-featured check below guards against a double-tap/client retry
+// of POST /listings/:id/feature: the advisory lock inside
+// consumeUsageWithinTx is scoped to the owner's monthly total, not to this
+// specific listing, so two back-to-back calls for the SAME listing would
+// otherwise each independently pass the usage check and each grant their own
+// promotion — consuming two allowance units for one listing. Checked first,
+// before touching the usage ledger, so a double-tap costs nothing.
+//
+// Returns { promotion, alreadyFeatured: true } if the listing already has an
+// active FEATURED promotion (no usage consumed); { promotion: null,
+// alreadyFeatured: false } if the period's usage is already at the plan's
+// limit; otherwise { promotion: { id, endsAt }, alreadyFeatured: false }.
+export const grantFeaturedListingFromAllowance = ({
+  userId,
+  organizationId,
+  limit,
+  listingId,
+  featuredDays,
+  anchorStartsAt,
+  now
+}) =>
+  runTx(async t => {
+    const alreadyFeatured = await t.oneOrNone(
+      `SELECT id FROM marketplace.listing_promotions
+       WHERE listing_id = $1 AND promotion_type = 'FEATURED' AND status = 'ACTIVE'
+         AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())`,
+      [listingId]
+    );
+    if (alreadyFeatured) return { promotion: null, alreadyFeatured: true };
+    const consumed = await consumeUsageWithinTx(t, {
+      userId,
+      organizationId,
+      feature: "FEATURED_LISTINGS",
+      limit,
+      anchorStartsAt,
+      now
+    });
+    if (!consumed) return { promotion: null, alreadyFeatured: false };
+    const promotion = await t.one(
+      `INSERT INTO marketplace.listing_promotions (listing_id, promotion_type, starts_at, ends_at, status)
+       VALUES ($1,'FEATURED', now(), now() + ($2 || ' days')::interval, 'ACTIVE')
+       RETURNING id, ends_at AS "endsAt"`,
+      [listingId, featuredDays]
+    );
+    return { promotion, alreadyFeatured: false };
+  });
+
+// Atomically resolves "has this buyer already unlocked this listing's
+// contact" and, if not, consumes one unit of their plan's contact-unlock
+// allowance and records the unlock -- see
+// entitlements.service.js#consumeContactUnlock. Combined into one
+// transaction (already-unlocked check, usage consume, and the unlock record
+// insert) for the same reason grantFeaturedListingFromAllowance above does:
+// two independently-committed writes could let a double-tap consume two
+// allowance units for one listing, or let two concurrent first-time reveals
+// of the same listing both pass the already-unlocked check before either
+// commits.
+//
+// periodMode is "LIFETIME" for the FREE plan's 5-lifetime cap and "MONTHLY"
+// for paid plans' renewal-period allowance (see consumeUsageWithinTx's
+// LIFETIME_PERIOD above) -- resolved by the caller from the plan type.
+//
+// Returns { unlocked: true, alreadyUnlocked: true } (no usage consumed) if
+// this buyer already unlocked this exact listing before; { unlocked: true,
+// alreadyUnlocked: false } if this is a genuinely new unlock and the plan
+// has room for it (or has no limit configured at all -- limit null/undefined
+// means unlimited, same convention as every other resolveXLimit in this
+// codebase); { unlocked: false, alreadyUnlocked: false } once the period's
+// allowance is exhausted.
+export const consumeContactUnlock = ({
+  userId,
+  listingId,
+  limit,
+  periodMode,
+  anchorStartsAt,
+  now
+}) =>
+  runTx(async t => {
+    const lockKey = `CONTACT_UNLOCKS:${userId}`;
+    await t.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [lockKey]);
+    const already = await t.oneOrNone(
+      `SELECT id FROM marketplace.contact_unlocks WHERE listing_id = $1 AND user_id = $2`,
+      [listingId, userId]
+    );
+    if (already) return { unlocked: true, alreadyUnlocked: true };
+    if (limit !== null && limit !== undefined) {
+      const consumed = await consumeUsageWithinTx(t, {
+        userId,
+        organizationId: null,
+        feature: "CONTACT_UNLOCKS",
+        limit,
+        periodMode,
+        anchorStartsAt,
+        now
+      });
+      if (!consumed) return { unlocked: false, alreadyUnlocked: false };
+    }
+    await t.none(
+      `INSERT INTO marketplace.contact_unlocks (listing_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [listingId, userId]
+    );
+    return { unlocked: true, alreadyUnlocked: false };
+  });
+
+// Read-only current-period usage count for display (e.g. GET /me/subscription)
+// — never used for enforcement, which always goes through
+// consumeUsageWithinTx's locked read-then-write above. periodMode mirrors
+// consumeContactUnlock's -- "LIFETIME" reads the same fixed period_start
+// LIFETIME_PERIOD.periodStart writes to, "MONTHLY" (default) reads whichever
+// renewal-anchored cycle resolveUsageCycle resolves `anchorStartsAt`/`now`
+// to, same as every other metered feature (see consumeUsageWithinTx above).
+export const countSubscriptionUsageThisPeriod = ({
+  userId,
+  organizationId,
+  feature,
+  periodMode = "MONTHLY",
+  anchorStartsAt,
+  now
+}) => {
+  const periodStart =
+    periodMode === "LIFETIME"
+      ? LIFETIME_PERIOD.periodStart
+      : resolveUsageCycle({ anchorStartsAt, now }).periodStart;
+  return run(
+    "oneOrNone",
+    organizationId
+      ? `SELECT used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE organization_id = $1 AND feature = $2 AND period_start = $3`
+      : `SELECT used_count AS "usedCount" FROM commerce.subscription_usage
+         WHERE user_id = $1 AND feature = $2 AND period_start = $3`,
+    [organizationId || userId, feature, periodStart]
+  ).then(row => row?.usedCount || 0);
+};
+
 export const createPlan = ({
   code,
   name,
@@ -98,13 +448,24 @@ export const createPlan = ({
   featuredDays,
   verificationIncluded,
   features,
-  aiMonthlyQuota
+  aiMonthlyQuota,
+  gstRateBps,
+  hsnSacCode
 }) =>
   runTx(async t => {
     const product = await t.one(
-      `INSERT INTO commerce.products (code, type, name, description, amount_minor, currency, is_active)
-       VALUES ($1,'PLAN',$2,$3,$4,$5,$6) RETURNING id`,
-      [code, name, description, amountMinor, currency, isActive]
+      `INSERT INTO commerce.products (code, type, name, description, amount_minor, currency, is_active, gst_rate_bps, hsn_sac_code)
+       VALUES ($1,'PLAN',$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [
+        code,
+        name,
+        description,
+        amountMinor,
+        currency,
+        isActive,
+        gstRateBps ?? 1800,
+        hsnSacCode ?? null
+      ]
     );
     const plan = await t.one(
       `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
@@ -129,7 +490,9 @@ const productColumnMap = {
   description: "description",
   amountMinor: "amount_minor",
   currency: "currency",
-  isActive: "is_active"
+  isActive: "is_active",
+  gstRateBps: "gst_rate_bps",
+  hsnSacCode: "hsn_sac_code"
 };
 const planColumnMap = {
   planType: "plan_type",
@@ -146,7 +509,8 @@ export const updatePlan = ({ productId, planId, changes }) =>
     const productChanges = {};
     const planChanges = {};
     for (const [field, column] of Object.entries(productColumnMap))
-      if (Object.hasOwn(changes, field)) productChanges[column] = changes[field];
+      if (Object.hasOwn(changes, field))
+        productChanges[column] = changes[field];
     for (const [field, column] of Object.entries(planColumnMap))
       if (Object.hasOwn(changes, field)) planChanges[column] = changes[field];
 
@@ -161,11 +525,19 @@ export const updatePlan = ({ productId, planId, changes }) =>
     if (Object.keys(planChanges).length) {
       const columns = Object.keys(planChanges);
       const setSql = columns
-        .map((col, i) => (col === "features" ? `${col} = $${i + 2}::jsonb` : `${col} = $${i + 2}`))
+        .map((col, i) =>
+          col === "features"
+            ? `${col} = $${i + 2}::jsonb`
+            : `${col} = $${i + 2}`
+        )
         .join(", ");
       await t.none(`UPDATE commerce.plans SET ${setSql} WHERE id = $1`, [
         planId,
-        ...columns.map(col => (col === "features" ? JSON.stringify(planChanges[col]) : planChanges[col]))
+        ...columns.map(col =>
+          col === "features"
+            ? JSON.stringify(planChanges[col])
+            : planChanges[col]
+        )
       ]);
     }
     return true;
@@ -185,6 +557,7 @@ export const findProductsByIds = ids =>
   run(
     "any",
     `SELECT p.id, p.code, p.name, p.type, p.amount_minor AS "amountMinor", p.currency, p.is_active AS "isActive",
+            p.gst_rate_bps AS "gstRateBps", p.hsn_sac_code AS "hsnSacCode",
             pl.id AS "planId",
             promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
      FROM commerce.products p
@@ -197,7 +570,10 @@ export const findProductsByIds = ids =>
 // Ownership check for a PROMOTION order item's targetId (Section 7 of
 // docs/razorpay-integration-plan.md) — the listing must belong to the buyer
 // or their purchasing organization.
-export const findOwnedListingForPromotion = (listingId, { actorId, organizationId }) =>
+export const findOwnedListingForPromotion = (
+  listingId,
+  { actorId, organizationId }
+) =>
   run(
     "oneOrNone",
     `SELECT id FROM marketplace.listings
@@ -231,24 +607,47 @@ const orderColumns = `
    ORDER BY p.created_at DESC LIMIT 1) AS "latestPaymentStatus"
 `;
 
-export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor, taxMinor, totalMinor, currency, items }) =>
+export const createOrder = ({
+  orderNumber,
+  userId,
+  organizationId,
+  subtotalMinor,
+  taxMinor,
+  totalMinor,
+  currency,
+  items
+}) =>
   runTx(async t => {
     const order = await t.one(
       `INSERT INTO commerce.orders (order_number, user_id, organization_id, status, subtotal_minor, tax_minor, total_minor, currency)
        VALUES ($1,$2,$3,'CREATED',$4,$5,$6,$7) RETURNING id`,
-      [orderNumber, userId, organizationId, subtotalMinor, taxMinor, totalMinor, currency]
+      [
+        orderNumber,
+        userId,
+        organizationId,
+        subtotalMinor,
+        taxMinor,
+        totalMinor,
+        currency
+      ]
     );
     for (const item of items) {
       await t.none(
-        `INSERT INTO commerce.order_items (order_id, product_id, quantity, unit_amount_minor, total_amount_minor, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+        `INSERT INTO commerce.order_items
+           (order_id, product_id, quantity, unit_amount_minor, total_amount_minor, gst_rate_bps, hsn_sac_code, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
         [
           order.id,
           item.productId,
           item.quantity,
           item.unitAmountMinor,
           item.totalAmountMinor,
-          JSON.stringify({ targetType: item.targetType || null, targetId: item.targetId || null })
+          item.gstRateBps || 0,
+          item.hsnSacCode || null,
+          JSON.stringify({
+            targetType: item.targetType || null,
+            targetId: item.targetId || null
+          })
         ]
       );
       // Re-claim the service request inside the transaction, not just at the
@@ -273,12 +672,40 @@ export const createOrder = ({ orderNumber, userId, organizationId, subtotalMinor
   });
 
 export const findById = id =>
-  run("oneOrNone", `SELECT ${orderColumns} FROM commerce.orders o WHERE o.id = $1`, [id]);
+  run(
+    "oneOrNone",
+    `SELECT ${orderColumns} FROM commerce.orders o WHERE o.id = $1`,
+    [id]
+  );
 
 export const findOwnedByUser = (id, userId) =>
   run(
     "oneOrNone",
     `SELECT ${orderColumns} FROM commerce.orders o WHERE o.id = $1 AND o.user_id = $2`,
+    [id, userId]
+  );
+
+// userId null (admin) sees any order; otherwise scoped to the owning buyer —
+// same nullable-param ownership pattern used throughout this file (e.g.
+// listPaymentsAdmin). Joined with the buyer and, when applicable, the
+// purchasing organization, since an invoice needs a "bill to" name/GSTIN
+// that the plain orderColumns view above doesn't carry.
+export const findOrderInvoiceRow = (id, userId) =>
+  run(
+    "oneOrNone",
+    `SELECT o.id, o.order_number AS "orderNumber", o.user_id AS "userId", o.organization_id AS "organizationId",
+            o.status, o.subtotal_minor AS "subtotalMinor", o.total_minor AS "totalMinor", o.currency,
+            o.invoice_number AS "invoiceNumber", o.buyer_gstin AS "buyerGstin",
+            o.place_of_supply_state_code AS "placeOfSupplyStateCode",
+            o.cgst_minor AS "cgstMinor", o.sgst_minor AS "sgstMinor", o.igst_minor AS "igstMinor",
+            (SELECT p.paid_at FROM commerce.payments p WHERE p.order_id = o.id AND p.status = 'CAPTURED'
+             ORDER BY p.paid_at DESC LIMIT 1) AS "paidAt",
+            u.display_name AS "buyerName", u.phone_e164 AS "buyerPhone", u.email::text AS "buyerEmail",
+            org.name AS "organizationName"
+     FROM commerce.orders o
+     JOIN auth.users u ON u.id = o.user_id
+     LEFT JOIN account.organizations org ON org.id = o.organization_id
+     WHERE o.id = $1 AND ($2::uuid IS NULL OR o.user_id = $2)`,
     [id, userId]
   );
 
@@ -296,7 +723,8 @@ export const itemsForOrders = orderIds =>
   run(
     "any",
     `SELECT oi.order_id AS "orderId", oi.product_id AS "productId", pr.code, pr.name, oi.quantity,
-            oi.unit_amount_minor AS "unitAmountMinor", oi.total_amount_minor AS "totalAmountMinor", oi.metadata
+            oi.unit_amount_minor AS "unitAmountMinor", oi.total_amount_minor AS "totalAmountMinor",
+            oi.gst_rate_bps AS "gstRateBps", oi.hsn_sac_code AS "hsnSacCode", oi.metadata
      FROM commerce.order_items oi
      JOIN commerce.products pr ON pr.id = oi.product_id
      WHERE oi.order_id = ANY($1::uuid[])
@@ -305,7 +733,10 @@ export const itemsForOrders = orderIds =>
   );
 
 export const setOrderStatus = (id, status) =>
-  run("none", `UPDATE commerce.orders SET status = $2 WHERE id = $1`, [id, status]);
+  run("none", `UPDATE commerce.orders SET status = $2 WHERE id = $1`, [
+    id,
+    status
+  ]);
 
 const paymentSelectColumns = `
   pay.id, pay.order_id AS "orderId", pay.provider, pay.provider_order_id AS "providerOrderId",
@@ -317,7 +748,14 @@ const paymentInsertColumns = paymentSelectColumns.replace(/pay\./g, "");
 // `id` is generated by the caller (not left to the column default) so it can
 // be embedded in the Razorpay Payment Link's notes before this row exists —
 // see commerce.service.js createPaymentIntent.
-export const createPayment = ({ id, orderId, provider, providerOrderId, amountMinor, currency }) =>
+export const createPayment = ({
+  id,
+  orderId,
+  provider,
+  providerOrderId,
+  amountMinor,
+  currency
+}) =>
   run(
     "one",
     `INSERT INTO commerce.payments (id, order_id, provider, provider_order_id, status, amount_minor, currency)
@@ -327,7 +765,11 @@ export const createPayment = ({ id, orderId, provider, providerOrderId, amountMi
   );
 
 export const findPaymentById = id =>
-  run("oneOrNone", `SELECT ${paymentSelectColumns} FROM commerce.payments pay WHERE pay.id = $1`, [id]);
+  run(
+    "oneOrNone",
+    `SELECT ${paymentSelectColumns} FROM commerce.payments pay WHERE pay.id = $1`,
+    [id]
+  );
 
 export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
   run(
@@ -342,7 +784,7 @@ export const findPaymentByProviderOrderId = (provider, providerOrderId) =>
 const paymentAdminJoinColumns = `
   o.order_number AS "orderNumber", o.status AS "orderStatus", o.user_id AS "userId",
   o.organization_id AS "organizationId", o.subtotal_minor AS "orderSubtotalMinor",
-  o.tax_minor AS "orderTaxMinor", o.total_minor AS "orderTotalMinor",
+  o.tax_minor AS "orderTaxMinor", o.total_minor AS "orderTotalMinor", o.invoice_number AS "invoiceNumber",
   u.display_name AS "buyerName", u.phone_e164 AS "buyerPhone", u.email::text AS "buyerEmail"
 `;
 
@@ -393,12 +835,16 @@ export const findPaymentByIdAdmin = id =>
 
 // Explicitly fails any non-terminal payment attempt still open for this order
 // before a fresh Payment Link is created for a retried /payments/:orderId/create
-// call, per Section 8 of docs/razorpay-integration-plan.md.
+// call, per Section 8 of docs/razorpay-integration-plan.md. Returns the
+// provider order ids that were just failed so the caller can also cancel
+// them on Razorpay's side — this row flip alone does not stop the old
+// Payment Link from still being payable there.
 export const failActivePaymentsForOrder = orderId =>
   run(
-    "none",
+    "any",
     `UPDATE commerce.payments SET status = 'FAILED'
-     WHERE order_id = $1 AND status IN ('CREATED','AUTHORIZED')`,
+     WHERE order_id = $1 AND status IN ('CREATED','AUTHORIZED')
+     RETURNING id, provider_order_id AS "providerOrderId"`,
     [orderId]
   );
 
@@ -429,7 +875,13 @@ export const computePlanEndsAt = ({ existingEndsAt, durationDays, now }) => {
 // (Sections 10-11 of docs/razorpay-integration-plan.md) so the two paths
 // cannot disagree; each entitlement write is independently idempotent so
 // calling this twice for the same payment is harmless.
-export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymentId, providerPayload }) =>
+export const capturePaymentAndApplyEntitlements = ({
+  id,
+  orderId,
+  providerPaymentId,
+  providerPayload,
+  sellerGstin
+}) =>
   runTx(async t => {
     const payment = await t.one(
       `UPDATE commerce.payments
@@ -444,7 +896,8 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
       [orderId]
     );
     const items = await t.any(
-      `SELECT oi.id AS "orderItemId", oi.metadata, p.type,
+      `SELECT oi.id AS "orderItemId", oi.metadata, oi.total_amount_minor AS "totalAmountMinor",
+              oi.gst_rate_bps AS "gstRateBps", p.type,
               pl.id AS "planId", pl.duration_days AS "durationDays",
               promo.promotion_type AS "promotionType", promo.duration_days AS "promotionDurationDays"
        FROM commerce.order_items oi
@@ -477,9 +930,10 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
           [order.userId, order.organizationId]
         );
         if (existing)
-          await t.none(`UPDATE commerce.plan_subscriptions SET status = 'EXPIRED' WHERE id = $1`, [
-            existing.id
-          ]);
+          await t.none(
+            `UPDATE commerce.plan_subscriptions SET status = 'EXPIRED' WHERE id = $1`,
+            [existing.id]
+          );
         const endsAt = computePlanEndsAt({
           existingEndsAt: existing?.endsAt,
           durationDays: item.durationDays,
@@ -490,16 +944,31 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
              (user_id, organization_id, plan_id, order_item_id, starts_at, ends_at, status)
            VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')
            ON CONFLICT (order_item_id) DO NOTHING`,
-          [order.userId, order.organizationId, item.planId, item.orderItemId, now, endsAt]
+          [
+            order.userId,
+            order.organizationId,
+            item.planId,
+            item.orderItemId,
+            now,
+            endsAt
+          ]
         );
       } else if (item.type === "PROMOTION") {
-        const endsAt = new Date(now.getTime() + item.promotionDurationDays * 24 * 60 * 60 * 1000);
+        const endsAt = new Date(
+          now.getTime() + item.promotionDurationDays * 24 * 60 * 60 * 1000
+        );
         await t.none(
           `INSERT INTO marketplace.listing_promotions
              (listing_id, promotion_type, order_item_id, starts_at, ends_at, status)
            VALUES ($1,$2,$3,$4,$5,'ACTIVE')
            ON CONFLICT (order_item_id) WHERE order_item_id IS NOT NULL DO NOTHING`,
-          [item.metadata?.targetId, item.promotionType, item.orderItemId, now, endsAt]
+          [
+            item.metadata?.targetId,
+            item.promotionType,
+            item.orderItemId,
+            now,
+            endsAt
+          ]
         );
       } else if (item.type === "SERVICE") {
         await t.none(
@@ -510,7 +979,69 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
       }
     }
 
-    return payment;
+    // Invoice number + GST split are assigned once, here, at the moment the
+    // order actually becomes PAID — never recomputed later, so redownloading
+    // an invoice always shows the same number/split even if a product's
+    // gst_rate_bps changes afterwards (order_items already snapshots the
+    // rate used below). Place of supply defaults to the seller's own state
+    // (intra-state) since no buyer billing address exists anywhere in this
+    // schema; an org-billed order can override that via its own gst_number.
+    const org = order.organizationId
+      ? await t.oneOrNone(
+          `SELECT gst_number AS "gstNumber" FROM account.organizations WHERE id = $1`,
+          [order.organizationId]
+        )
+      : null;
+    const buyerGstin = org?.gstNumber || null;
+    const sellerStateCode = stateCodeFromGstin(sellerGstin);
+    const placeOfSupplyStateCode =
+      stateCodeFromGstin(buyerGstin) || sellerStateCode;
+    const isIntraState = placeOfSupplyStateCode === sellerStateCode;
+
+    const totals = items.reduce(
+      (acc, item) => {
+        const split = splitGstMinor({
+          totalAmountMinor: item.totalAmountMinor,
+          gstRateBps: item.gstRateBps,
+          isIntraState
+        });
+        acc.cgstMinor += split.cgstMinor;
+        acc.sgstMinor += split.sgstMinor;
+        acc.igstMinor += split.igstMinor;
+        return acc;
+      },
+      { cgstMinor: 0, sgstMinor: 0, igstMinor: 0 }
+    );
+
+    const { n: invoiceSeq } = await t.one(
+      `SELECT nextval('commerce.invoice_number_seq') AS n`
+    );
+    const invoiceNumber = `INV-${String(invoiceSeq).padStart(6, "0")}`;
+    await t.none(
+      `UPDATE commerce.orders
+       SET invoice_number = $2, buyer_gstin = $3, place_of_supply_state_code = $4,
+           cgst_minor = $5, sgst_minor = $6, igst_minor = $7
+       WHERE id = $1`,
+      [
+        orderId,
+        invoiceNumber,
+        buyerGstin,
+        placeOfSupplyStateCode,
+        totals.cgstMinor,
+        totals.sgstMinor,
+        totals.igstMinor
+      ]
+    );
+
+    // userId/organizationId are returned alongside the payment so the
+    // caller can notify the buyer without a second round trip — payments
+    // rows carry no user reference of their own, only orders do.
+    return {
+      ...payment,
+      userId: order.userId,
+      organizationId: order.organizationId,
+      invoiceNumber
+    };
   });
 
 // The ON CONFLICT DO UPDATE only fires (and thus RETURNING only yields a row)
@@ -523,7 +1054,13 @@ export const capturePaymentAndApplyEntitlements = ({ id, orderId, providerPaymen
 // and fails the WHERE clause instead of racing it to run capture/fail side
 // effects twice. Postgres holds the row lock for the conflicting key while
 // evaluating this, so concurrent deliveries for the same event serialize on it.
-export const insertWebhookEvent = ({ provider, eventId, eventType, payload, paymentId }) =>
+export const insertWebhookEvent = ({
+  provider,
+  eventId,
+  eventType,
+  payload,
+  paymentId
+}) =>
   run(
     "oneOrNone",
     `INSERT INTO commerce.payment_webhook_events (provider, event_id, event_type, payload, payment_id)
@@ -535,7 +1072,13 @@ export const insertWebhookEvent = ({ provider, eventId, eventType, payload, paym
            processing_error = NULL
        WHERE commerce.payment_webhook_events.processing_error IS NOT NULL
      RETURNING id, processed_at AS "processedAt", processing_error AS "processingError"`,
-    [provider, eventId, eventType, JSON.stringify(payload || {}), paymentId || null]
+    [
+      provider,
+      eventId,
+      eventType,
+      JSON.stringify(payload || {}),
+      paymentId || null
+    ]
   );
 
 export const markWebhookProcessed = (id, error = null) =>
@@ -619,7 +1162,15 @@ export const createServiceRequest = ({
     `INSERT INTO commerce.service_requests (service_id, user_id, property_id, listing_id, customer_notes, contact_phone, contact_email)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING ${serviceRequestInsertColumns}`,
-    [serviceId, userId, propertyId, listingId, customerNotes, contactPhone, contactEmail]
+    [
+      serviceId,
+      userId,
+      propertyId,
+      listingId,
+      customerNotes,
+      contactPhone,
+      contactEmail
+    ]
   );
 
 export const findServiceRequestById = id =>
@@ -636,7 +1187,11 @@ export const findServiceRequestOwnedByUser = (id, userId) =>
     [id, userId]
   );
 
-export const listServiceRequestsForUser = (userId, { status }, { limit, offset }) =>
+export const listServiceRequestsForUser = (
+  userId,
+  { status },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${serviceRequestColumns}, count(*) OVER()::int AS total
@@ -646,7 +1201,10 @@ export const listServiceRequestsForUser = (userId, { status }, { limit, offset }
     [userId, status, limit, offset]
   );
 
-export const listServiceRequestsAdmin = ({ status, serviceType, search }, { limit, offset }) =>
+export const listServiceRequestsAdmin = (
+  { status, serviceType, search },
+  { limit, offset }
+) =>
   run(
     "any",
     `SELECT ${serviceRequestColumns}, count(*) OVER()::int AS total
@@ -707,7 +1265,14 @@ export const insertServiceRequestFile = ({
     `INSERT INTO commerce.service_request_files (service_request_id, storage_key, file_name, mime_type, file_size_bytes, uploaded_by_user_id)
      VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING ${serviceRequestFileColumns.replace(/f\./g, "")}`,
-    [serviceRequestId, storageKey, fileName, mimeType, fileSizeBytes, uploadedByUserId]
+    [
+      serviceRequestId,
+      storageKey,
+      fileName,
+      mimeType,
+      fileSizeBytes,
+      uploadedByUserId
+    ]
   );
 
 export const filesForServiceRequests = serviceRequestIds =>

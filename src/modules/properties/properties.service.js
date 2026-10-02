@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
+import { resolveMediaLimits } from "../commerce/entitlements.service.js";
 import { scannerPresentation } from "../../shared/scanner.js";
 import {
   belongsToProperty,
@@ -9,6 +10,7 @@ import {
   signedWriteUrl
 } from "../../utils/storage.js";
 import { verificationSummaryForChecks } from "../../shared/verification.js";
+import { liveListingForProperty } from "../listings/listings.repository.js";
 import * as repository from "./properties.repository.js";
 
 const propertyCode = () =>
@@ -76,7 +78,22 @@ export const create = async ({ actorId, input }) => {
   }
 };
 export const get = propertyId => repository.summary(propertyId);
-export const remove = propertyId => repository.archive(propertyId);
+// A property with a still-live listing (pending review or published) must
+// not be archived out from under it — repository.archive has no interlock
+// of its own, and listings.repository.publishedDetail/listingCard both
+// filter on the property's deleted_at, so an unguarded delete here leaves a
+// permanently-404 "ghost" listing that still occupies favorites/search
+// results instead of being withdrawn first (mirrors
+// listings.service.js remove(), which blocks the reverse direction).
+export const remove = async propertyId => {
+  if (await liveListingForProperty(propertyId))
+    throw new HttpError(
+      409,
+      "LIVE_LISTING_EXISTS",
+      "This property has a live listing. Withdraw the listing before deleting the property."
+    );
+  await repository.archive(propertyId);
+};
 export const listMine = async ({ actorId, input }) => {
   const offset = (input.page - 1) * input.limit;
   const [ids, count] = await Promise.all([
@@ -131,7 +148,17 @@ export const saveLocation = async ({ propertyId, input }) => {
 };
 export const getAmenities = repository.amenities;
 export const saveAmenities = async ({ propertyId, amenities }) => {
-  await repository.replaceAmenities(propertyId, amenities);
+  try {
+    await repository.replaceAmenities(propertyId, amenities);
+  } catch (error) {
+    if (error?.code === "23503")
+      throw new HttpError(
+        400,
+        "INVALID_AMENITY",
+        "One or more amenityId values do not exist."
+      );
+    throw error;
+  }
   return repository.amenities(propertyId);
 };
 export const getIdentifiers = repository.identifiers;
@@ -246,7 +273,8 @@ export const createMediaUpload = ({ propertyId, input }) => {
     });
   return Array.isArray(input) ? Promise.all(input.map(ticket)) : ticket(input);
 };
-export const completeMedia = async ({ propertyId, actorId, input }) => {
+export const completeMedia = async ({ property, actorId, input }) => {
+  const propertyId = property.id;
   const items = Array.isArray(input) ? input : [input];
   items.forEach(item => {
     if (
@@ -262,13 +290,40 @@ export const completeMedia = async ({ propertyId, actorId, input }) => {
         "storageKey does not belong to this property upload."
       );
   });
-  const ids = await repository.createMediaBatch(
+  // Resolved from the property's own raw owner columns, not from
+  // `property` itself — req.property's shape differs between the
+  // owner-scoped and admin loaders (see properties.repository.js#ownerFields),
+  // so trusting `property.created_by_user_id`/`owner_organization_id`
+  // directly here silently skipped enforcement on the admin path. Also
+  // covers the property being deleted concurrently between requireOwnedProperty's
+  // load and this point — ownerFields filters deleted_at IS NULL too.
+  const ownerFields = await repository.ownerFields(propertyId);
+  if (!ownerFields)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  const limits = await resolveMediaLimits({
+    userId: ownerFields.createdByUserId,
+    organizationId: ownerFields.ownerOrganizationId
+  });
+  const result = await repository.createMediaBatch(
     propertyId,
-    items.map(item => ({ ...item, userId: actorId }))
+    items.map(item => ({ ...item, userId: actorId })),
+    limits
   );
+  if (result.reason === "LIMIT_REACHED")
+    throw new HttpError(
+      403,
+      "PLAN_LIMIT_REACHED",
+      `This plan allows up to ${result.limit} ${result.category === "IMAGE" ? "images" : "videos"} per property.`,
+      {
+        feature: result.category === "IMAGE" ? "IMAGES_PER_PROPERTY" : "VIDEOS_PER_PROPERTY",
+        used: result.used,
+        limit: result.limit,
+        upgradeRequired: true
+      }
+    );
   const media = await repository.media(propertyId);
   const responses = await Promise.all(
-    ids.map(id => mediaResponse(media.find(item => item.id === id)))
+    result.ids.map(id => mediaResponse(media.find(item => item.id === id)))
   );
   return Array.isArray(input) ? responses : responses[0];
 };

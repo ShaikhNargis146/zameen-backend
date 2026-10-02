@@ -208,6 +208,8 @@ const seriesOrThrow = async seriesId => {
   return row;
 };
 
+export const getSeriesAdmin = async seriesId => toSeries(await seriesOrThrow(seriesId));
+
 const mapSeriesReferenceError = error => {
   if (error?.code === "23505")
     throw new HttpError(

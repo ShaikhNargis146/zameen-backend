@@ -15,6 +15,8 @@ router.delete("/content/:contentId", requireAdmin, asyncRoute(controller.deleteC
 router.post("/content/:contentId/publish", requireAdmin, asyncRoute(controller.publishContent));
 router.post("/content/:contentId/archive", requireAdmin, asyncRoute(controller.archiveContent));
 
+router.get("/market-trends", requireAdmin, asyncRoute(controller.marketTrends));
+router.get("/market-trends/:seriesId", requireAdmin, asyncRoute(controller.adminGetSeries));
 router.post("/market-trends", requireAdmin, asyncRoute(controller.createSeries));
 router.patch("/market-trends/:seriesId", requireAdmin, asyncRoute(controller.updateSeries));
 router.delete("/market-trends/:seriesId", requireAdmin, asyncRoute(controller.deleteSeries));

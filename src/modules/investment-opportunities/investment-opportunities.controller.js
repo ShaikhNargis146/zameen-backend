@@ -31,6 +31,25 @@ export const createInterest = async (req, res) =>
     })
   );
 
+export const listInterests = async (req, res) => {
+  const opportunityId = validation.uuid(req.params.opportunityId, "opportunityId");
+  const { data, meta } = await service.listInterests({
+    opportunityId,
+    filters: validation.interestListQuery(req.query || {}),
+    query: req.query
+  });
+  ok(res, data, meta);
+};
+
+export const interestDetail = async (req, res) =>
+  ok(
+    res,
+    await service.interestDetail({
+      opportunityId: validation.uuid(req.params.opportunityId, "opportunityId"),
+      interestId: validation.uuid(req.params.interestId, "interestId")
+    })
+  );
+
 export const create = async (req, res) =>
   created(
     res,

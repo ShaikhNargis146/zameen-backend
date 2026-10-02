@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireOwnedResource } from "../../shared/authorization.js";
 import { asyncRoute } from "../../shared/http.js";
+import { requireUuidParam } from "../../shared/request-validation.js";
 import {
   requireAdmin,
   requireAnyRole,
@@ -11,6 +12,7 @@ import * as controller from "./listings.controller.js";
 import { listingForAdmin, ownedListing } from "./listings.service.js";
 
 const router = Router();
+router.param("mediaId", requireUuidParam);
 const requirePropertyContributor = requireAnyRole(
   "SELLER",
   "BROKER",
@@ -88,6 +90,12 @@ router.post(
   requireOwnedListing,
   asyncRoute(controller.markSold)
 );
+router.post(
+  "/listings/:listingId/feature",
+  requireAuth,
+  requireOwnedListing,
+  asyncRoute(controller.feature)
+);
 router.get(
   "/admin/listings",
   requireAdmin,
@@ -117,5 +125,10 @@ router.post(
   "/admin/listings/:listingId/reinstate",
   requireAdmin,
   asyncRoute(controller.reinstate)
+);
+router.delete(
+  "/admin/listings/:listingId/media/:mediaId",
+  requireAdmin,
+  asyncRoute(controller.removeMedia)
 );
 export default router;

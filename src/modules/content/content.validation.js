@@ -250,7 +250,7 @@ export const marketTrendQuery = query => {
       { field: "toYear", message: "toYear must be greater than or equal to fromYear." }
     ]);
   return {
-    locationId: uuid(query.locationId, "locationId"),
+    locationId: optionalUuid(query.locationId, "locationId"),
     propertyTypeId: optionalUuid(query.propertyTypeId, "propertyTypeId"),
     metric: optionalEnum(query.metric, metrics, "METRIC", "a valid market trend metric"),
     fromYear,

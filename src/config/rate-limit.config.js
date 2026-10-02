@@ -5,6 +5,12 @@ const message = (code, text) => ({
   error: { code, message: text }
 });
 
+// Razorpay's webhook deliveries are excluded from this pool (see
+// express.config.js) and given their own budget below — Razorpay retries
+// undelivered events from its own infrastructure, not end-user traffic, and
+// a burst of retries sharing the general per-IP cap could get throttled
+// alongside unrelated API callers on that IP or starve real users out of
+// their own budget.
 export const apiRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 300,
@@ -39,13 +45,35 @@ export const searchRateLimit = rateLimit({
   )
 });
 
+export const AI_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+export const AI_RATE_LIMIT_MAX = 60;
+
 export const aiRateLimit = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 20,
+  windowMs: AI_RATE_LIMIT_WINDOW_MS,
+  // AI conversations can legitimately make several requests in quick
+  // succession (load, send, refresh). Keep a meaningful per-IP cost guard
+  // while allowing normal portal use and shared office networks.
+  limit: AI_RATE_LIMIT_MAX,
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: message(
     "AI_RATE_LIMITED",
     "Too many AI requests. Please try again shortly."
+  )
+});
+
+// Dedicated budget for POST /payments/webhook, exempted from apiRateLimit
+// above — a retry storm from Razorpay's own infrastructure must not compete
+// with, or be capped by, ordinary user API traffic. Signature verification
+// (see commerce.service.js handleWebhook) is still the real gate on this
+// route; this limit is only a backstop against runaway volume.
+export const paymentWebhookRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 300,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: message(
+    "WEBHOOK_RATE_LIMITED",
+    "Too many webhook requests. Please try again shortly."
   )
 });

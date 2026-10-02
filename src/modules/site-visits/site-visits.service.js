@@ -7,7 +7,6 @@ import {
 import { listingCardsByIds } from "../../shared/listingCard.js";
 import { userSummariesByIds } from "../../shared/userSummary.js";
 import { assertListingAvailable } from "../../shared/listingAvailability.js";
-import * as enquiriesRepository from "../enquiries/enquiries.repository.js";
 import * as notifications from "../notifications/notifications.service.js";
 import * as repository from "./site-visits.repository.js";
 import { uuid } from "./site-visits.validation.js";
@@ -109,6 +108,12 @@ export const ownedByParticipant = async (visitId, actorId) => {
 
 export const create = async ({ actorId, listingId, input }) => {
   await assertListingAvailable(listingId);
+  if (await repository.listingOwnedBySeller(listingId, actorId))
+    throw new HttpError(
+      400,
+      "CANNOT_BOOK_OWN_LISTING",
+      "You cannot request a site visit for your own listing."
+    );
 
   const duplicate = await repository.findActiveDuplicate({
     listingId,
@@ -124,28 +129,26 @@ export const create = async ({ actorId, listingId, input }) => {
       [{ visitId: duplicate.id }]
     );
 
-  const existingEnquiry = await enquiriesRepository.findOpenEnquiryForBuyer(
-    listingId,
-    actorId
-  );
-
-  const result = await repository.insert({
-    listingId,
-    buyerUserId: actorId,
-    enquiryId: existingEnquiry?.id || null,
-    preferredDate: input.preferredDate,
-    preferredTimeSlot: input.preferredTimeSlot,
-    visitorCount: input.visitorCount,
-    buyerNote: input.note
-  });
-  if (!result.ok) throw mapDbError(result.error);
+  let visit;
+  try {
+    visit = await repository.insert({
+      listingId,
+      buyerUserId: actorId,
+      preferredDate: input.preferredDate,
+      preferredTimeSlot: input.preferredTimeSlot,
+      visitorCount: input.visitorCount,
+      buyerNote: input.note
+    });
+  } catch (error) {
+    throw mapDbError(error);
+  }
   await notifications.notifySeller(listingId, {
     type: "SITE_VISIT_REQUESTED",
     title: "New site visit requested",
     body: "A buyer requested a site visit for your listing.",
-    data: { visitId: result.data.id, listingId }
+    data: { visitId: visit.id, listingId }
   });
-  return toSiteVisit(result.data);
+  return toSiteVisit(visit);
 };
 
 export const listForBuyer = async ({ actorId, filters, query }) => {

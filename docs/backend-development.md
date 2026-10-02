@@ -112,13 +112,17 @@ python3 -m pip install -r scripts/requirements-location-import.txt
 npm run locations:seed
 ```
 
-`locations:seed` runs `locations:prepare`, `locations:check`,
-`locations:import`, and `masters:seed` in that order. It includes PIN import
-automatically whenever `locations_data/pincode.csv` is present. It refuses to
-run unless `geo.locations` is empty, preventing an accidental second bootstrap.
-Do not run it as part of `npm start`, container startup, or each
-application-server deployment; run it only in the controlled job that provisions
-the shared database.
+Use just one normal operational command to import or reconcile the catalogue:
+
+```bash
+npm run locations:sync
+```
+
+It prepares and validates the LGD/PIN source, imports it idempotently, and
+reconciles the state-level master data (including Maharashtra parcel fields).
+It is safe to repeat: LGD-code slugs are the import identity, so it updates the
+same hierarchy rather than creating another one. Do not run it as part of
+`npm start`, container startup, or every application-server deployment.
 
 For an interrupted import, suspected duplicate, or approved data refresh, first
 run the read-only report:
@@ -132,24 +136,21 @@ npm run locations:status -- --pincode=410206
 It reports rows written by the location bootstrap and possible duplicate
 location identities. Do not manually delete `geo.locations` rows blindly:
 properties, organizations, channel partners, content, opportunities, auctions,
-and postal-code links can reference them. An intentional LGD refresh uses
-`npm run locations:prepare`, `npm run locations:check`, and
-`npm run locations:import` (without the empty-database guard), after operations
-reviews the source-data change.
+and postal-code links can reference them. Use `npm run locations:sync` for an
+intentional LGD refresh after operations reviews the source-data change.
 
-If an initial bootstrap was interrupted after it wrote any hierarchy batch,
-do **not** rerun `locations:seed` and do not clean up its already imported
-rows. Resume the same prepared source data instead:
+For an explicitly approved, destructive replacement of the entire location
+catalogue and every location mapping, run:
 
 ```bash
-npm run locations:resume
+npm run locations:rebuild
 ```
 
-This safely replays the idempotent hierarchy/PIN import and then seeds the
-state masters. Wait for the command to print its final JSON result and return
-to the shell prompt before testing the location APIs. A full India village
-import is intentionally a long-running database job; run it from a persistent
-deployment session when the connection could otherwise be interrupted.
+The rebuild validates the source first, then clears the hierarchy, PINs, parcel
+configuration, and location links before importing a clean catalogue. It does
+not delete properties, listings, users, or organizations, but affected records
+must be assigned a location again afterwards. A full India village import is a
+long-running database job; run it from a persistent deployment session.
 
 `locations:prepare` uses Python 3 with `openpyxl` to stream the LGD `.xlsx`
 workbooks into ignored CSV files. `locations:check` validates every hierarchy
@@ -176,11 +177,8 @@ the official `SUBDISTRICT` children; city-to-locality likewise prefers
 `LOCALITY`, otherwise returns `VILLAGE`. The API always returns the real
 `LocationSummary.type`; clients must never relabel the fallback records.
 
-When supplied, the same preparation command also normalizes
-`locations_data/pincode.csv`.
-When only the PIN data changes, run `npm run pincodes:prepare`, then
-`npm run pincodes:check` and `npm run pincodes:import`; this mode requires only
-`locations_data/pincode.csv`, not the four LGD workbooks. Each PIN is stored once and linked only to an exact,
+When supplied, the sync command also normalizes `locations_data/pincode.csv`.
+Each PIN is stored once and linked only to an exact,
 normalized state-and-district match in the LGD hierarchy. A PIN that appears
 under more than one valid state is retained with a null `stateCode`; unmatched
 or incomplete source labels are retained as PINs but are not linked to a
@@ -267,9 +265,11 @@ The shared-database migration preserves any old anonymous records for retention,
 but removes their guest credentials so they are no longer accessible.
 
 AI setup is explicit: set `OPENAI_API_KEY` as a server-side secret, then restart the
-API process so it receives the changed environment. `OPENAI_MODEL`
-defaults to `gpt-5-mini` and may be changed per environment. Model responses use
-`store: false`; requests are rate-limited and provider failures return
+API process so it receives the changed environment. `OPENAI_MODEL` defaults to
+`gpt-6-luna` with `reasoning.effort: "none"`; its retry-only fallback is
+`OPENAI_FALLBACK_MODEL`, defaulting to `gpt-5-mini`. A fallback is used only for
+rate-limit, transient provider, or connection failures before a response stream
+starts. Model responses use `store: false`; requests are rate-limited and provider failures return
 `AI_PROVIDER_UNCONFIGURED` or `AI_PROVIDER_UNAVAILABLE` without exposing model
 or provider details. The assistant can answer property, land/area, market-trend
 and published investment-opportunity questions from published listing, master,

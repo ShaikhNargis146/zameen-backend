@@ -127,8 +127,35 @@ export const findRefreshSession = hash =>
 export const refreshSessionByHash = hash =>
   run(
     "oneOrNone",
-    `SELECT id, user_id, family_id, revoked_at, expires_at FROM auth.refresh_sessions WHERE token_hash = $1`,
+    `SELECT id, user_id, family_id, revoked_at, expires_at, last_used_at, replaced_by_session_id
+     FROM auth.refresh_sessions WHERE token_hash = $1`,
     [hash]
+  );
+
+// Called after issuing the session that rotated `oldSessionId` out — links
+// the chain so a same-token retry within the grace window can be told
+// apart from genuine reuse (see recoverableSuccessor).
+export const linkRotation = (oldSessionId, newSessionId) =>
+  run(
+    "none",
+    `UPDATE auth.refresh_sessions SET replaced_by_session_id = $2 WHERE id = $1`,
+    [oldSessionId, newSessionId]
+  );
+
+// A consumed session's reuse is recoverable (not theft) only if it was
+// consumed within the last `graceSeconds` AND its successor has not itself
+// been used yet — i.e. nothing has advanced the chain past this retry.
+export const recoverableSuccessor = (oldSessionId, graceSeconds) =>
+  run(
+    "oneOrNone",
+    `SELECT successor.id, successor.user_id AS "userId", successor.family_id AS "familyId"
+     FROM auth.refresh_sessions reused
+     JOIN auth.refresh_sessions successor ON successor.id = reused.replaced_by_session_id
+     WHERE reused.id = $1
+       AND reused.last_used_at > now() - ($2 || ' seconds')::interval
+       AND successor.revoked_at IS NULL
+       AND successor.expires_at > now()`,
+    [oldSessionId, graceSeconds]
   );
 export const consumeRefreshSession = id =>
   run(

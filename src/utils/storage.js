@@ -63,10 +63,10 @@ export const createContentStorageKey = ({ fileName }) =>
   `content/covers/${randomUUID()}-${safeName(fileName)}`;
 export const belongsToContent = ({ storageKey }) =>
   String(storageKey || "").startsWith("content/covers/");
-export const createAdStorageKey = ({ fileName }) =>
-  `ads/creatives/${randomUUID()}-${safeName(fileName)}`;
-export const belongsToAd = ({ storageKey }) =>
-  String(storageKey || "").startsWith("ads/creatives/");
+export const createAdStorageKey = ({ adId, fileName }) =>
+  `ads/${adId}/media/${randomUUID()}-${safeName(fileName)}`;
+export const belongsToAd = ({ adId, storageKey }) =>
+  String(storageKey || "").startsWith(`ads/${adId}/media/`);
 export const signedWriteUrl = async ({ storageKey, mimeType }) => {
   try {
     const [uploadUrl] = await ensureStorage()

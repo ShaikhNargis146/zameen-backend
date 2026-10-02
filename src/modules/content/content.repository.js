@@ -158,10 +158,10 @@ export const listSeries = ({ locationId, propertyTypeId, metric, fromYear, toYea
      FROM content.market_trend_series mts
      JOIN geo.locations loc ON loc.id = mts.location_id
      LEFT JOIN land.property_types pt ON pt.id = mts.property_type_id
-     WHERE mts.location_id = $1
+     WHERE ($1::uuid IS NULL OR mts.location_id = $1)
        AND ($2::uuid IS NULL OR mts.property_type_id = $2)
        AND ($3::varchar IS NULL OR mts.metric = $3)
-     ORDER BY mts.metric, mts.unit`,
+     ORDER BY mts.created_at DESC`,
     [locationId, propertyTypeId, metric, fromYear, toYear]
   );
 
