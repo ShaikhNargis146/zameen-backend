@@ -201,16 +201,32 @@ export const requestVerification = async ({
   const result = await pg.tx(async transaction => {
     for (const checkType of checkTypes)
       await transaction.none(
-        `INSERT INTO land.property_verification_checks (property_id, check_type, status, requested_by_user_id, requested_at, notes) VALUES ($1,$2,'PENDING',$3,now(),$4) ON CONFLICT (property_id, check_type) DO UPDATE SET status = CASE WHEN property_verification_checks.status = 'VERIFIED' THEN 'VERIFIED' ELSE 'PENDING' END, requested_by_user_id = EXCLUDED.requested_by_user_id, requested_at = EXCLUDED.requested_at, notes = COALESCE(EXCLUDED.notes, property_verification_checks.notes)`,
+        `INSERT INTO land.property_verification_checks (property_id, check_type, status, requested_by_user_id, requested_at, notes) VALUES ($1,$2,'PENDING',$3,now(),$4) ON CONFLICT (property_id, check_type) DO UPDATE SET status = 'PENDING', requested_by_user_id = EXCLUDED.requested_by_user_id, requested_at = EXCLUDED.requested_at, notes = EXCLUDED.notes, internal_notes = NULL, reviewed_by_user_id = NULL, reviewed_at = NULL`,
         [propertyId, checkType, userId, note]
       );
   });
   if (!result.ok) throw result.error;
 };
+// A submitted review is a decision about the exact property data the owner
+// requested. Any later edit invalidates that request, including PENDING,
+// so an admin can never decide stale evidence.
+export const invalidateChecks = (propertyId, checkTypes) =>
+  checkTypes.length
+    ? run(
+        "none",
+        `UPDATE land.property_verification_checks
+         SET status = 'NOT_STARTED', requested_by_user_id = NULL, requested_at = NULL,
+             reviewed_by_user_id = NULL, reviewed_at = NULL, notes = NULL,
+             internal_notes = NULL
+         WHERE property_id = $1 AND check_type = ANY($2::varchar[])
+           AND status <> 'NOT_STARTED'`,
+        [propertyId, checkTypes]
+      )
+    : Promise.resolve();
 export const verification = propertyId =>
   run(
     "any",
-    `SELECT id, check_type AS "checkType", status, requested_at AS "requestedAt", reviewed_at AS "reviewedAt", notes AS "publicNote" FROM land.property_verification_checks WHERE property_id = $1 ORDER BY check_type`,
+    `SELECT check_type AS "checkType", status, requested_at AS "requestedAt", reviewed_at AS "reviewedAt", notes AS "publicNote" FROM land.property_verification_checks WHERE property_id = $1 ORDER BY check_type`,
     [propertyId]
   );
 export const scanner = propertyId =>
@@ -260,9 +276,16 @@ export const mediaForProperty = (propertyId, mediaId) =>
 // marketing media like video); SITE_PLAN stays uncounted (a document-like
 // asset, not marketing media). Mirrors the same mapping entitlements.service.js
 // used to apply before this limit check moved into this transaction.
-const mediaTypesForCategory = { IMAGE: ["IMAGE"], VIDEO: ["VIDEO", "DRONE_VIDEO"] };
+const mediaTypesForCategory = {
+  IMAGE: ["IMAGE"],
+  VIDEO: ["VIDEO", "DRONE_VIDEO"]
+};
 const categoryForMediaType = mediaType =>
-  mediaType === "IMAGE" ? "IMAGE" : mediaTypesForCategory.VIDEO.includes(mediaType) ? "VIDEO" : null;
+  mediaType === "IMAGE"
+    ? "IMAGE"
+    : mediaTypesForCategory.VIDEO.includes(mediaType)
+    ? "VIDEO"
+    : null;
 
 // Locks per-property (not per-owner like the listing/team-member limits —
 // media limits are per-property, not pooled across an owner's account) so
@@ -275,7 +298,9 @@ const categoryForMediaType = mediaType =>
 // batch would exceed one of the limits — nothing is inserted in that case.
 export const createMediaBatch = async (propertyId, items, limits = {}) => {
   const result = await pg.tx(async transaction => {
-    await transaction.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [`PROPERTY_MEDIA:${propertyId}`]);
+    await transaction.any(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+      `PROPERTY_MEDIA:${propertyId}`
+    ]);
     const addedByCategory = new Map();
     for (const item of items) {
       const category = categoryForMediaType(item.mediaType);
@@ -283,13 +308,25 @@ export const createMediaBatch = async (propertyId, items, limits = {}) => {
       addedByCategory.set(category, (addedByCategory.get(category) || 0) + 1);
     }
     for (const [category, addedCount] of addedByCategory) {
-      const limit = category === "IMAGE" ? limits.imagesPerProperty : limits.videosPerProperty;
+      const limit =
+        category === "IMAGE"
+          ? limits.imagesPerProperty
+          : limits.videosPerProperty;
       if (limit === null || limit === undefined) continue; // unlimited / not set
-      const { count } = await transaction.one(
+      const {
+        count
+      } = await transaction.one(
         `SELECT count(*)::int AS count FROM land.property_media WHERE property_id = $1 AND media_type = ANY($2::text[]) AND deleted_at IS NULL`,
         [propertyId, mediaTypesForCategory[category]]
       );
-      if (count + addedCount > limit) return { ids: null, reason: "LIMIT_REACHED", category, used: count, limit };
+      if (count + addedCount > limit)
+        return {
+          ids: null,
+          reason: "LIMIT_REACHED",
+          category,
+          used: count,
+          limit
+        };
     }
     const ids = [];
     for (const input of items) {

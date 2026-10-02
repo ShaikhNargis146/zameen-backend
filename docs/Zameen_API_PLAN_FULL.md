@@ -949,11 +949,11 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 
 | Method | Endpoint | Auth / Role | Request model | Response / UI use |
 |---|---|---|---|---|
-| POST | /properties/{propertyId}/verification/request | Owner | VerificationRequest | VerificationSummary |
+| POST | /properties/{propertyId}/verification/request | Owner, plan includes verification | VerificationRequest | VerificationSummary |
 | GET | /properties/{propertyId}/verification | Owner/Admin/Public-safe | none | VerificationSummary |
 | GET | /properties/{propertyId}/land-passport | Public / auth-aware | none | LandPassport |
 | GET | /properties/{propertyId}/scanner | Public / auth-aware | none | ScannerResult |
-| GET | /admin/verifications | ADMIN | VerificationListQuery | VerificationSummary[] + PaginationMeta |
+| GET | /admin/verifications | ADMIN | VerificationListQuery | VerificationCheck queue items + PaginationMeta. Each row is one type-specific check. |
 | GET | /admin/verifications/{verificationId} | ADMIN | none | VerificationDetail |
 | PATCH | /admin/verifications/{verificationId} | ADMIN | UpdateVerification | VerificationDetail |
 
@@ -964,23 +964,30 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 | checkTypes | string[]\|null | No | LOCATION/LAND_DETAILS/PARCEL_IDENTITY/DOCUMENTS/SITE_VISIT | Null means request applicable default checks. |
 | note | string\|null | No | <=500 | Seller note. |
 
+Submitting a request sets the selected checks to `PENDING`. Editing the related
+land details, location, parcel identifiers, or documents returns that check to
+`NOT_STARTED`; the owner must submit it again before an admin can review it.
+
 **VerificationSummary**
 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
 | propertyId | uuid | Yes | | Property. |
 | overallStatus | string | Yes | VerificationStatus | Overall status. |
-| checks | object[] | Yes | | Each: id,checkType,status,reviewedAt,publicNote. `id` is the type-specific value required for the admin update endpoint. |
+| checks | object[] | Yes | | Each: checkType,status,reviewedAt,publicNote. |
 | lastUpdatedAt | datetime | Yes | | Latest update. |
 
 **UpdateVerification**
 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
-| checkType | string | Yes | Verification check type | Check being reviewed. |
+| checkType | string | No | Deprecated compatibility field. The check type is derived from `{verificationId}` and cannot be changed. |
 | status | string | Yes | PENDING/VERIFIED/REJECTED/PARTIAL | New status. |
 | publicNote | string\|null | No | <=500 | Safe note visible to user. |
 | internalNote | string\|null | No | <=1000 | Admin-only note. |
+
+Only a `PENDING` check can be updated; otherwise the API returns
+`409 VERIFICATION_NOT_PENDING`.
 
 **LandPassport**
 
@@ -1017,6 +1024,16 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 | status | string\|null | No | VerificationStatus | Overall status filter. |
 | checkType | string\|null | No | Verification check type | Specific check filter. |
 | search | string\|null | No | <=200 | Property code/listing/seller search. |
+
+**VerificationQueueItem**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | uuid | Yes | Type-specific verification check ID used for the detail and update endpoints. |
+| checkType | string | Yes | Immutable verification check type. |
+| status | string | Yes | Current check status. |
+| property | PropertyCore | Yes | Property being reviewed. |
+| requestedAt / reviewedAt / publicNote | datetime / datetime / string\|null | Yes | Review workflow metadata. |
 
 **VerificationDetail**
 

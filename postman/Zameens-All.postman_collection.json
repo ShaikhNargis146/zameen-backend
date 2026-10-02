@@ -2597,7 +2597,7 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n  \"checkType\": \"LOCATION\",\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}"
+									"raw": "{\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}"
 								},
 								"url": "{{baseUrl}}/admin/verifications/{{verificationId}}"
 							}

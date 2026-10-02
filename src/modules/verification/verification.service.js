@@ -32,27 +32,28 @@ const detail = async verification => ({
     : null
 });
 
+export const verificationQueuePresentation = rows =>
+  rows.map(({ total: ignored, ...row }) => ({
+    id: row.id,
+    checkType: row.checkType,
+    status: row.status,
+    requestedAt: row.requestedAt,
+    reviewedAt: row.reviewedAt,
+    publicNote: row.publicNote,
+    property: {
+      id: row.propertyId,
+      publicCode: row.propertyCode
+    }
+  }));
+
+export const canReviewVerification = status => status === "PENDING";
+
 export const list = async filters => {
   const offset = (filters.page - 1) * filters.limit;
   const rows = await repository.list({ ...filters, offset });
   const total = rows[0]?.total || 0;
-  const checks = await repository.propertyChecksForProperties(
-    rows.map(row => row.propertyId)
-  );
-  const checksByProperty = new Map();
-  for (const check of checks) {
-    const existing = checksByProperty.get(check.propertyId) || [];
-    existing.push(check);
-    checksByProperty.set(check.propertyId, existing);
-  }
   return {
-    data: rows.map(({ total: ignored, ...row }) => ({
-      ...verificationSummaryForChecks(
-        row.propertyId,
-        checksByProperty.get(row.propertyId) || []
-      ),
-      verificationId: row.id
-    })),
+    data: verificationQueuePresentation(rows),
     meta: {
       page: filters.page,
       limit: filters.limit,
@@ -79,16 +80,23 @@ export const update = async ({ verificationId, actorId, changes, request }) => {
       "VERIFICATION_NOT_FOUND",
       "Verification was not found."
     );
-  if (before.checkType !== changes.checkType)
+  if (changes.checkType && before.checkType !== changes.checkType)
     throw new HttpError(
       400,
       "CHECK_TYPE_MISMATCH",
       "checkType does not match this verification record."
     );
+  if (!canReviewVerification(before.status))
+    throw new HttpError(
+      409,
+      "VERIFICATION_NOT_PENDING",
+      "Only a pending verification check can be reviewed."
+    );
   const result = await repository.updateWithAudit({
     verificationId,
     actorId,
     ...changes,
+    checkType: before.checkType,
     before,
     ...request
   });
@@ -102,10 +110,10 @@ export const update = async ({ verificationId, actorId, changes, request }) => {
   await notifications.notifyUser(before.propertyOwnerId, {
     type: "VERIFICATION_UPDATED",
     title: "Verification status updated",
-    body: `Your ${changes.checkType} verification is now ${changes.status}.`,
+    body: `Your ${before.checkType} verification is now ${changes.status}.`,
     data: {
       verificationId,
-      checkType: changes.checkType,
+      checkType: before.checkType,
       status: changes.status
     }
   });
