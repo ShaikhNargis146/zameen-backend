@@ -12,7 +12,10 @@ export const buildTemplateCsv = () => {
   const lines = [
     csvRow(COLUMNS.map(column => column.key)),
     csvRow(COLUMNS.map(column => column.example)),
-    csvRow(COLUMNS.map(column => column.example))
+    // Second sample row defaults to the same value as the first, except
+    // where a column defines example2 (see the locationId/pincode fallback
+    // columns in COLUMNS) to show an alternative valid input.
+    csvRow(COLUMNS.map(column => column.example2 ?? column.example))
   ];
   // Leading BOM so Excel/Numbers auto-detect UTF-8 instead of guessing a
   // local codepage when the file is opened directly.
