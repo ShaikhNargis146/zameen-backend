@@ -36,7 +36,12 @@ const requiredColumnKeys = COLUMNS.filter(column => column.required).map(
 const headerIndex = headerRow => {
   const byKey = new Map();
   headerRow.forEach((text, columnIndex) => {
+    // Trailing "*" is just the template's required-column marker (see
+    // buildTemplateCsv) -- strip it so a re-uploaded template, or a header
+    // typed without it, both still match.
     const key = String(text ?? "")
+      .trim()
+      .replace(/\*+$/, "")
       .trim()
       .toLowerCase();
     if (key) byKey.set(key, columnIndex);
