@@ -45,9 +45,15 @@ export const searchRateLimit = rateLimit({
   )
 });
 
+export const AI_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+export const AI_RATE_LIMIT_MAX = 60;
+
 export const aiRateLimit = rateLimit({
-  windowMs: 60 * 1000,
-  limit: 20,
+  windowMs: AI_RATE_LIMIT_WINDOW_MS,
+  // AI conversations can legitimately make several requests in quick
+  // succession (load, send, refresh). Keep a meaningful per-IP cost guard
+  // while allowing normal portal use and shared office networks.
+  limit: AI_RATE_LIMIT_MAX,
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: message(

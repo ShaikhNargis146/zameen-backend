@@ -9,7 +9,10 @@ import * as controller from "./ai.controller.js";
 import { aiRateLimit } from "../../config/rate-limit.config.js";
 
 const router = Router();
-router.use(aiRateLimit);
+// This router is mounted at the API root, so an unscoped `router.use` would
+// run for every later route (for example, content and catalog endpoints).
+// Keep the costly-AI budget exclusive to the `/ai/*` namespace.
+router.use("/ai", aiRateLimit);
 router.post("/ai/search", optionalAuth, asyncRoute(controller.search));
 router.post(
   "/ai/conversations",
