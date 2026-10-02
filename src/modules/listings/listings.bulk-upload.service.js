@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { parse } from "csv-parse/sync";
 import { HttpError } from "../../shared/http.js";
 import logger from "../../utils/logger.js";
-import { COLUMNS, MAX_ROWS_PER_UPLOAD } from "./listings.bulk-upload.constants.js";
+import {
+  COLUMNS,
+  MAX_ROWS_PER_UPLOAD
+} from "./listings.bulk-upload.constants.js";
 import * as repository from "./listings.bulk-upload.repository.js";
 import { buildTemplateCsv } from "./listings.bulk-upload.template.js";
 import { parseRow } from "./listings.bulk-upload.validation.js";
@@ -33,13 +36,16 @@ const requiredColumnKeys = COLUMNS.filter(column => column.required).map(
 const headerIndex = headerRow => {
   const byKey = new Map();
   headerRow.forEach((text, columnIndex) => {
-    const key = String(text ?? "").trim().toLowerCase();
+    const key = String(text ?? "")
+      .trim()
+      .toLowerCase();
     if (key) byKey.set(key, columnIndex);
   });
   const columnIndexByKey = new Map();
   for (const column of COLUMNS) {
     const columnIndex = byKey.get(column.key.toLowerCase());
-    if (columnIndex !== undefined) columnIndexByKey.set(column.key, columnIndex);
+    if (columnIndex !== undefined)
+      columnIndexByKey.set(column.key, columnIndex);
   }
   const missing = requiredColumnKeys.filter(key => !columnIndexByKey.has(key));
   if (missing.length)
@@ -47,7 +53,10 @@ const headerIndex = headerRow => {
       400,
       "TEMPLATE_INVALID",
       "The uploaded file is missing required columns. Please use the provided sample template.",
-      missing.map(field => ({ field, message: `Column "${field}" was not found.` }))
+      missing.map(field => ({
+        field,
+        message: `Column "${field}" was not found.`
+      }))
     );
   return columnIndexByKey;
 };
@@ -57,7 +66,89 @@ const priceToMinor = amountINR => {
   return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
 };
 
-const resolveRow = (data, masters, locationsById, postalCodesByCode, existingOrgIds) => {
+const EARTH_RADIUS_KM = 6371;
+const toRad = deg => (deg * Math.PI) / 180;
+const haversineDistanceKm = (lat1, lon1, lat2, lon2) => {
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a));
+};
+// Picks whichever candidate location is geographically closest to the row's
+// own latitude/longitude. Candidates with no stored center can't be ranked,
+// so they're dropped before comparing (caller handles the all-dropped case).
+const nearestLocation = (candidates, latitude, longitude) =>
+  candidates.reduce((closest, candidate) => {
+    const distance = haversineDistanceKm(
+      latitude,
+      longitude,
+      candidate.latitude,
+      candidate.longitude
+    );
+    return !closest || distance < closest.distance
+      ? { ...candidate, distance }
+      : closest;
+  }, null);
+
+// Resolves which location a row belongs to. If locationId is given, it must
+// exist. Otherwise the pincode (required by validation in that case) is
+// looked up in geo.postal_code_locations: one match is used directly, and
+// multiple matches are disambiguated by nearest-point distance against the
+// row's own latitude/longitude.
+const resolveLocation = (
+  data,
+  locationsById,
+  locationCandidatesByPincode,
+  errors
+) => {
+  if (data.locationId) {
+    const location = locationsById.get(data.locationId);
+    if (!location)
+      errors.push({
+        field: "locationId",
+        message: "locationId does not exist or is inactive."
+      });
+    return location || null;
+  }
+  const candidates = locationCandidatesByPincode.get(data.pincode) || [];
+  if (!candidates.length) {
+    errors.push({
+      field: "locationId",
+      message: `pincode "${data.pincode}" is not mapped to any location; please provide locationId directly.`
+    });
+    return null;
+  }
+  if (candidates.length === 1) return candidates[0];
+  if (data.latitude == null || data.longitude == null) {
+    errors.push({
+      field: "locationId",
+      message: `pincode "${data.pincode}" maps to multiple locations; please provide locationId, or latitude and longitude to disambiguate.`
+    });
+    return null;
+  }
+  const withCoordinates = candidates.filter(
+    candidate => candidate.latitude != null && candidate.longitude != null
+  );
+  if (!withCoordinates.length) {
+    errors.push({
+      field: "locationId",
+      message: `pincode "${data.pincode}" maps to multiple locations, none with stored coordinates to disambiguate; please provide locationId directly.`
+    });
+    return null;
+  }
+  return nearestLocation(withCoordinates, data.latitude, data.longitude);
+};
+
+const resolveRow = (
+  data,
+  masters,
+  locationsById,
+  locationCandidatesByPincode,
+  postalCodesByCode,
+  existingOrgIds
+) => {
   const errors = [];
   const propertyTypeId = masters.propertyTypesByCode.get(data.propertyTypeCode);
   if (!propertyTypeId)
@@ -88,19 +179,20 @@ const resolveRow = (data, masters, locationsById, postalCodesByCode, existingOrg
       field: "organizationId",
       message: "organizationId does not exist."
     });
-  const location = locationsById.get(data.locationId);
-  if (!location)
-    errors.push({
-      field: "locationId",
-      message: "locationId does not exist or is inactive."
-    });
+  const location = resolveLocation(
+    data,
+    locationsById,
+    locationCandidatesByPincode,
+    errors
+  );
   let postalCodeId = null;
   if (data.pincode) {
     postalCodeId = postalCodesByCode.get(data.pincode);
     if (!postalCodeId)
       errors.push({ field: "pincode", message: "pincode is not configured." });
   }
-  const areaUnitCandidates = masters.areaUnitsByCode.get(data.areaUnitCode) || [];
+  const areaUnitCandidates =
+    masters.areaUnitsByCode.get(data.areaUnitCode) || [];
   let areaUnit = null;
   if (!areaUnitCandidates.length)
     errors.push({
@@ -112,7 +204,9 @@ const resolveRow = (data, masters, locationsById, postalCodesByCode, existingOrg
     areaUnit =
       areaUnitCandidates.find(candidate => !candidate.stateCode) ||
       (location &&
-        areaUnitCandidates.find(candidate => candidate.stateCode === location.stateCode));
+        areaUnitCandidates.find(
+          candidate => candidate.stateCode === location.stateCode
+        ));
     if (!areaUnit)
       errors.push({
         field: "areaUnitCode",
@@ -131,7 +225,10 @@ const resolveRow = (data, masters, locationsById, postalCodesByCode, existingOrg
   }
   const priceAmountMinor = priceToMinor(data.priceAmountINR);
   if (priceAmountMinor == null)
-    errors.push({ field: "priceAmountINR", message: "priceAmountINR is out of range." });
+    errors.push({
+      field: "priceAmountINR",
+      message: "priceAmountINR is out of range."
+    });
   if (errors.length) return { errors };
   return {
     errors: [],
@@ -161,7 +258,7 @@ const resolveRow = (data, masters, locationsById, postalCodesByCode, existingOrg
       hasBoundaryWall: data.hasBoundaryWall,
       terrain: data.terrain,
       roadAccessType: data.roadAccessType,
-      locationId: data.locationId,
+      locationId: location.id,
       postalCodeId,
       addressLine: data.addressLine,
       landmark: data.landmark,
@@ -186,7 +283,11 @@ const insertWithRetry = async ({ actorId, row }) => {
   let lastError;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await repository.createPropertyListing({ actorId, row, randomUUID });
+      return await repository.createPropertyListing({
+        actorId,
+        row,
+        randomUUID
+      });
     } catch (error) {
       lastError = error;
       if (error?.code !== "23505") break;
@@ -200,7 +301,11 @@ export const processUpload = async ({ file, actorId }) => {
     throw new HttpError(400, "FILE_REQUIRED", "A CSV (.csv) file is required.");
   const records = parseCsv(file.buffer);
   if (!records.length)
-    throw new HttpError(400, "TEMPLATE_INVALID", "The uploaded file has no header row.");
+    throw new HttpError(
+      400,
+      "TEMPLATE_INVALID",
+      "The uploaded file has no header row."
+    );
   const columnIndexByKey = headerIndex(records[0]);
 
   const parsedByRow = new Map();
@@ -227,10 +332,18 @@ export const processUpload = async ({ file, actorId }) => {
 
   const mastersRaw = await repository.activeMasters();
   const masters = {
-    propertyTypesByCode: new Map(mastersRaw.propertyTypes.map(row => [row.code, row.id])),
-    landUseTypesByCode: new Map(mastersRaw.landUseTypes.map(row => [row.code, row.id])),
-    ownershipTypesByCode: new Map(mastersRaw.ownershipTypes.map(row => [row.code, row.id])),
-    amenitiesByCode: new Map(mastersRaw.amenities.map(row => [row.code, row.id])),
+    propertyTypesByCode: new Map(
+      mastersRaw.propertyTypes.map(row => [row.code, row.id])
+    ),
+    landUseTypesByCode: new Map(
+      mastersRaw.landUseTypes.map(row => [row.code, row.id])
+    ),
+    ownershipTypesByCode: new Map(
+      mastersRaw.ownershipTypes.map(row => [row.code, row.id])
+    ),
+    amenitiesByCode: new Map(
+      mastersRaw.amenities.map(row => [row.code, row.id])
+    ),
     areaUnitsByCode: mastersRaw.areaUnits.reduce((map, row) => {
       if (!map.has(row.code)) map.set(row.code, []);
       map.get(row.code).push(row);
@@ -259,13 +372,31 @@ export const processUpload = async ({ file, actorId }) => {
         .map(parsed => parsed.data.organizationId)
     )
   ];
-  const [locations, postalCodes, existingOrgIds] = await Promise.all([
+  const [
+    locations,
+    postalCodes,
+    locationCandidates,
+    existingOrgIds
+  ] = await Promise.all([
     repository.locationsByIds(locationIds),
     repository.postalCodesByCodes(pincodes),
+    repository.locationCandidatesByPincodes(pincodes),
     repository.existingOrganizationIds(organizationIds)
   ]);
   const locationsById = new Map(locations.map(row => [row.id, row]));
   const postalCodesByCode = new Map(postalCodes.map(row => [row.code, row.id]));
+  const locationCandidatesByPincode = locationCandidates.reduce((map, row) => {
+    if (!map.has(row.code)) map.set(row.code, []);
+    map
+      .get(row.code)
+      .push({
+        id: row.id,
+        stateCode: row.stateCode,
+        latitude: row.latitude,
+        longitude: row.longitude
+      });
+    return map;
+  }, new Map());
 
   const created = [];
   const failed = [];
@@ -278,6 +409,7 @@ export const processUpload = async ({ file, actorId }) => {
       parsed.data,
       masters,
       locationsById,
+      locationCandidatesByPincode,
       postalCodesByCode,
       existingOrgIds
     );
@@ -297,7 +429,9 @@ export const processUpload = async ({ file, actorId }) => {
         listingCode: saved.listingCode
       });
     } catch (error) {
-      logger.error(`Bulk listing upload row ${rowNumber} failed: ${error?.message}`);
+      logger.error(
+        `Bulk listing upload row ${rowNumber} failed: ${error?.message}`
+      );
       failed.push({
         rowNumber,
         errors: [{ field: null, message: dbErrorMessage(error) }]

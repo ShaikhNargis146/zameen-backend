@@ -37,7 +37,10 @@ const optionalText = (raw, field, max, errors) => {
   const value = cellText(raw);
   if (!value) return null;
   if (value.length > max) {
-    errors.push({ field, message: `${field} must be at most ${max} characters.` });
+    errors.push({
+      field,
+      message: `${field} must be at most ${max} characters.`
+    });
     return null;
   }
   return value;
@@ -137,18 +140,6 @@ const optionalBoolean = (raw, field, errors, fallback = null) => {
   errors.push({ field, message: `${field} must be TRUE or FALSE.` });
   return fallback;
 };
-const requiredUuid = (raw, field, errors) => {
-  const value = cellText(raw);
-  if (!value) {
-    errors.push({ field, message: `${field} is required.` });
-    return null;
-  }
-  if (!isUuid(value)) {
-    errors.push({ field, message: `${field} must be a valid UUID.` });
-    return null;
-  }
-  return value.toLowerCase();
-};
 const optionalUuid = (raw, field, errors) => {
   const value = cellText(raw);
   if (!value) return null;
@@ -163,7 +154,10 @@ const optionalRangedNumber = (raw, field, min, max, errors) => {
   if (!text) return null;
   const value = Number(text);
   if (!Number.isFinite(value) || value < min || value > max) {
-    errors.push({ field, message: `${field} must be a number from ${min} to ${max}.` });
+    errors.push({
+      field,
+      message: `${field} must be a number from ${min} to ${max}.`
+    });
     return null;
   }
   return value;
@@ -197,7 +191,10 @@ const optionalAmenityCodes = (raw, field, errors) => {
     }
     codes.add(code);
     const valueText = noteParts.join(":").trim();
-    result.push({ code, valueText: valueText ? valueText.slice(0, 255) : null });
+    result.push({
+      code,
+      valueText: valueText ? valueText.slice(0, 255) : null
+    });
   }
   return result;
 };
@@ -214,7 +211,13 @@ export const parseRow = valuesByColumn => {
 
   const data = {
     title: requiredText(get("title"), "title", 10, 255, errors),
-    description: requiredText(get("description"), "description", 20, 5000, errors),
+    description: requiredText(
+      get("description"),
+      "description",
+      20,
+      5000,
+      errors
+    ),
     transactionType: requiredEnum(
       get("transactionType"),
       "transactionType",
@@ -226,7 +229,12 @@ export const parseRow = valuesByColumn => {
       "priceAmountINR",
       errors
     ),
-    isNegotiable: optionalBoolean(get("isNegotiable"), "isNegotiable", errors, false),
+    isNegotiable: optionalBoolean(
+      get("isNegotiable"),
+      "isNegotiable",
+      errors,
+      false
+    ),
     canonicalLanguage: optionalLowerEnum(
       get("canonicalLanguage"),
       "canonicalLanguage",
@@ -241,21 +249,72 @@ export const parseRow = valuesByColumn => {
       50,
       errors
     )?.toUpperCase(),
-    landUseTypeCode: optionalText(get("landUseTypeCode"), "landUseTypeCode", 50, errors)?.toUpperCase() || null,
-    ownershipTypeCode: optionalText(get("ownershipTypeCode"), "ownershipTypeCode", 50, errors)?.toUpperCase() || null,
-    organizationId: optionalUuid(get("organizationId"), "organizationId", errors),
+    landUseTypeCode:
+      optionalText(
+        get("landUseTypeCode"),
+        "landUseTypeCode",
+        50,
+        errors
+      )?.toUpperCase() || null,
+    ownershipTypeCode:
+      optionalText(
+        get("ownershipTypeCode"),
+        "ownershipTypeCode",
+        50,
+        errors
+      )?.toUpperCase() || null,
+    organizationId: optionalUuid(
+      get("organizationId"),
+      "organizationId",
+      errors
+    ),
     areaValue: requiredPositiveNumber(get("areaValue"), "areaValue", errors),
-    areaUnitCode: requiredText(get("areaUnitCode"), "areaUnitCode", 1, 30, errors)?.toUpperCase(),
-    lengthValue: optionalPositiveNumber(get("lengthValue"), "lengthValue", errors),
+    areaUnitCode: requiredText(
+      get("areaUnitCode"),
+      "areaUnitCode",
+      1,
+      30,
+      errors
+    )?.toUpperCase(),
+    lengthValue: optionalPositiveNumber(
+      get("lengthValue"),
+      "lengthValue",
+      errors
+    ),
     widthValue: optionalPositiveNumber(get("widthValue"), "widthValue", errors),
-    dimensionUnit: optionalEnum(get("dimensionUnit"), "dimensionUnit", DIMENSION_UNITS, errors),
+    dimensionUnit: optionalEnum(
+      get("dimensionUnit"),
+      "dimensionUnit",
+      DIMENSION_UNITS,
+      errors
+    ),
     frontageM: optionalNonNegativeNumber(get("frontageM"), "frontageM", errors),
-    roadWidthM: optionalNonNegativeNumber(get("roadWidthM"), "roadWidthM", errors),
+    roadWidthM: optionalNonNegativeNumber(
+      get("roadWidthM"),
+      "roadWidthM",
+      errors
+    ),
     roadType: optionalEnum(get("roadType"), "roadType", ROAD_TYPES, errors),
     facing: optionalEnum(get("facing"), "facing", FACINGS, errors),
-    openSides: optionalIntegerInRange(get("openSides"), "openSides", 0, 4, errors),
-    isCornerPlot: optionalBoolean(get("isCornerPlot"), "isCornerPlot", errors, false),
-    hasBoundaryWall: optionalBoolean(get("hasBoundaryWall"), "hasBoundaryWall", errors, null),
+    openSides: optionalIntegerInRange(
+      get("openSides"),
+      "openSides",
+      0,
+      4,
+      errors
+    ),
+    isCornerPlot: optionalBoolean(
+      get("isCornerPlot"),
+      "isCornerPlot",
+      errors,
+      false
+    ),
+    hasBoundaryWall: optionalBoolean(
+      get("hasBoundaryWall"),
+      "hasBoundaryWall",
+      errors,
+      null
+    ),
     terrain: optionalEnum(get("terrain"), "terrain", TERRAINS, errors),
     roadAccessType: optionalEnum(
       get("roadAccessType"),
@@ -263,27 +322,53 @@ export const parseRow = valuesByColumn => {
       ROAD_ACCESS_TYPES,
       errors
     ),
-    locationId: requiredUuid(get("locationId"), "locationId", errors),
+    locationId: optionalUuid(get("locationId"), "locationId", errors),
     pincode: optionalPincode(get("pincode"), "pincode", errors),
     addressLine: optionalText(get("addressLine"), "addressLine", 500, errors),
     landmark: optionalText(get("landmark"), "landmark", 255, errors),
-    latitude: optionalRangedNumber(get("latitude"), "latitude", -90, 90, errors),
-    longitude: optionalRangedNumber(get("longitude"), "longitude", -180, 180, errors),
+    latitude: optionalRangedNumber(
+      get("latitude"),
+      "latitude",
+      -90,
+      90,
+      errors
+    ),
+    longitude: optionalRangedNumber(
+      get("longitude"),
+      "longitude",
+      -180,
+      180,
+      errors
+    ),
     locationPrecision:
-      optionalEnum(get("locationPrecision"), "locationPrecision", LOCATION_PRECISIONS, errors) ||
-      "APPROXIMATE",
+      optionalEnum(
+        get("locationPrecision"),
+        "locationPrecision",
+        LOCATION_PRECISIONS,
+        errors
+      ) || "APPROXIMATE",
     showExactLocation: optionalBoolean(
       get("showExactLocation"),
       "showExactLocation",
       errors,
       false
     ),
-    amenityCodes: optionalAmenityCodes(get("amenityCodes"), "amenityCodes", errors)
+    amenityCodes: optionalAmenityCodes(
+      get("amenityCodes"),
+      "amenityCodes",
+      errors
+    )
   };
   if ((data.latitude == null) !== (data.longitude == null))
     errors.push({
       field: "latitude",
-      message: "latitude and longitude must both be provided, or both left blank."
+      message:
+        "latitude and longitude must both be provided, or both left blank."
+    });
+  if (!data.locationId && !data.pincode)
+    errors.push({
+      field: "locationId",
+      message: "locationId is required when pincode is not provided."
     });
   return { blank: false, errors, data };
 };

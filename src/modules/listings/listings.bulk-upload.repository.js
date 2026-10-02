@@ -2,21 +2,32 @@ import { pg, run } from "../../shared/db.js";
 
 export const activeMasters = () =>
   Promise.all([
-    run("any", `SELECT id, code FROM land.property_types WHERE is_active = true`),
-    run("any", `SELECT id, code FROM land.land_use_types WHERE is_active = true`),
-    run("any", `SELECT id, code FROM land.ownership_types WHERE is_active = true`),
+    run(
+      "any",
+      `SELECT id, code FROM land.property_types WHERE is_active = true`
+    ),
+    run(
+      "any",
+      `SELECT id, code FROM land.land_use_types WHERE is_active = true`
+    ),
+    run(
+      "any",
+      `SELECT id, code FROM land.ownership_types WHERE is_active = true`
+    ),
     run(
       "any",
       `SELECT u.id, u.code, state.state_code AS "stateCode", u.sqft_multiplier AS "sqftMultiplier" FROM land.area_units u LEFT JOIN geo.locations state ON state.id = u.state_location_id WHERE u.is_active = true`
     ),
     run("any", `SELECT id, code FROM land.amenities WHERE is_active = true`)
-  ]).then(([propertyTypes, landUseTypes, ownershipTypes, areaUnits, amenities]) => ({
-    propertyTypes,
-    landUseTypes,
-    ownershipTypes,
-    areaUnits,
-    amenities
-  }));
+  ]).then(
+    ([propertyTypes, landUseTypes, ownershipTypes, areaUnits, amenities]) => ({
+      propertyTypes,
+      landUseTypes,
+      ownershipTypes,
+      areaUnits,
+      amenities
+    })
+  );
 
 export const locationsByIds = ids =>
   ids.length
@@ -29,9 +40,30 @@ export const locationsByIds = ids =>
 
 export const postalCodesByCodes = codes =>
   codes.length
-    ? run("any", `SELECT id, code FROM geo.postal_codes WHERE code = ANY($1::varchar[])`, [
-        codes
-      ])
+    ? run(
+        "any",
+        `SELECT id, code FROM geo.postal_codes WHERE code = ANY($1::varchar[])`,
+        [codes]
+      )
+    : Promise.resolve([]);
+
+// Used to resolve a row's location when locationId is left blank: a pincode
+// maps to one or more localities/villages via geo.postal_code_locations, so
+// every candidate (with coordinates, for nearest-point disambiguation) is
+// returned and the service picks among them.
+export const locationCandidatesByPincodes = codes =>
+  codes.length
+    ? run(
+        "any",
+        `SELECT p.code, l.id, l.state_code AS "stateCode",
+                CASE WHEN l.center IS NULL THEN NULL ELSE ST_Y(l.center::geometry) END AS latitude,
+                CASE WHEN l.center IS NULL THEN NULL ELSE ST_X(l.center::geometry) END AS longitude
+         FROM geo.postal_codes p
+         JOIN geo.postal_code_locations pl ON pl.postal_code_id = p.id
+         JOIN geo.locations l ON l.id = pl.location_id AND l.is_active = true
+         WHERE p.code = ANY($1::varchar[])`,
+        [codes]
+      )
     : Promise.resolve([]);
 
 // This endpoint is admin-only: the caller is doing back-office data entry
@@ -50,9 +82,15 @@ export const existingOrganizationIds = ids =>
   ).then(rows => new Set(rows.map(row => row.id)));
 
 const listingCode = randomUUID =>
-  `ZMN-L-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+  `ZMN-L-${randomUUID()
+    .replace(/-/g, "")
+    .slice(0, 12)
+    .toUpperCase()}`;
 const propertyCode = randomUUID =>
-  `ZMN-P-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+  `ZMN-P-${randomUUID()
+    .replace(/-/g, "")
+    .slice(0, 12)
+    .toUpperCase()}`;
 
 /**
  * Creates the property, its land details, location, amenities, and a draft
