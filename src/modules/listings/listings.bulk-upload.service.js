@@ -141,13 +141,38 @@ const resolveLocation = (
   return nearestLocation(withCoordinates, data.latitude, data.longitude);
 };
 
+// Resolves the row's seller from sellerMobile. The phone must match an
+// already-registered user — bulk upload never creates accounts, since that
+// would mean an unverified user entering the system with no OTP step. When
+// that user is an active member of exactly one organization, the listing is
+// attributed to that organization too; zero or multiple memberships just
+// attribute the listing to the user alone, since there's no column left to
+// disambiguate which organization was meant.
+const resolveSeller = (data, usersByPhone, organizationIdsByUserId, errors) => {
+  const user = usersByPhone.get(data.sellerMobile);
+  if (!user) {
+    errors.push({
+      field: "sellerMobile",
+      message: `No registered user found for sellerMobile "${data.sellerMobile}".`
+    });
+    return null;
+  }
+  const organizationIds = organizationIdsByUserId.get(user.id);
+  const organizationId =
+    organizationIds && organizationIds.size === 1
+      ? [...organizationIds][0]
+      : null;
+  return { userId: user.id, organizationId };
+};
+
 const resolveRow = (
   data,
   masters,
   locationsById,
   locationCandidatesByPincode,
   postalCodesByCode,
-  existingOrgIds
+  usersByPhone,
+  organizationIdsByUserId
 ) => {
   const errors = [];
   const propertyTypeId = masters.propertyTypesByCode.get(data.propertyTypeCode);
@@ -174,11 +199,12 @@ const resolveRow = (
         message: `ownershipTypeCode "${data.ownershipTypeCode}" was not found.`
       });
   }
-  if (data.organizationId && !existingOrgIds.has(data.organizationId))
-    errors.push({
-      field: "organizationId",
-      message: "organizationId does not exist."
-    });
+  const seller = resolveSeller(
+    data,
+    usersByPhone,
+    organizationIdsByUserId,
+    errors
+  );
   const location = resolveLocation(
     data,
     locationsById,
@@ -242,7 +268,8 @@ const resolveRow = (
       propertyTypeId,
       landUseTypeId,
       ownershipTypeId,
-      organizationId: data.organizationId,
+      sellerUserId: seller.userId,
+      organizationId: seller.organizationId,
       areaValue: data.areaValue,
       areaUnitId: areaUnit.id,
       areaSqft: data.areaValue * Number(areaUnit.sqftMultiplier),
@@ -273,7 +300,7 @@ const resolveRow = (
 
 const dbErrorMessage = error => {
   if (error?.code === "23503")
-    return "One or more referenced values (organisation, property type, land use, ownership, area unit, or location) no longer exist.";
+    return "One or more referenced values (seller, seller's organisation, property type, land use, ownership, area unit, or location) no longer exist.";
   if (error?.code === "23514")
     return "One or more values violate a database constraint. Please check numeric ranges and enum values.";
   return "This row could not be saved due to a server error.";
@@ -365,36 +392,45 @@ export const processUpload = async ({ file, actorId }) => {
         .map(parsed => parsed.data.pincode)
     )
   ];
-  const organizationIds = [
+  const sellerMobiles = [
     ...new Set(
       [...parsedByRow.values()]
-        .filter(parsed => !parsed.errors.length && parsed.data.organizationId)
-        .map(parsed => parsed.data.organizationId)
+        .filter(parsed => !parsed.errors.length)
+        .map(parsed => parsed.data.sellerMobile)
     )
   ];
   const [
     locations,
     postalCodes,
     locationCandidates,
-    existingOrgIds
+    users
   ] = await Promise.all([
     repository.locationsByIds(locationIds),
     repository.postalCodesByCodes(pincodes),
     repository.locationCandidatesByPincodes(pincodes),
-    repository.existingOrganizationIds(organizationIds)
+    repository.usersByPhones(sellerMobiles)
   ]);
   const locationsById = new Map(locations.map(row => [row.id, row]));
   const postalCodesByCode = new Map(postalCodes.map(row => [row.code, row.id]));
   const locationCandidatesByPincode = locationCandidates.reduce((map, row) => {
     if (!map.has(row.code)) map.set(row.code, []);
-    map
-      .get(row.code)
-      .push({
-        id: row.id,
-        stateCode: row.stateCode,
-        latitude: row.latitude,
-        longitude: row.longitude
-      });
+    map.get(row.code).push({
+      id: row.id,
+      stateCode: row.stateCode,
+      latitude: row.latitude,
+      longitude: row.longitude
+    });
+    return map;
+  }, new Map());
+  const usersByPhone = new Map(users.map(row => [row.phoneE164, row]));
+  // Membership lookup depends on which phones actually matched a user, so
+  // this can't join the Promise.all above — it needs those ids first.
+  const organizationMemberships = await repository.activeOrganizationMembershipsByUserIds(
+    [...new Set(users.map(row => row.id))]
+  );
+  const organizationIdsByUserId = organizationMemberships.reduce((map, row) => {
+    if (!map.has(row.userId)) map.set(row.userId, new Set());
+    map.get(row.userId).add(row.organizationId);
     return map;
   }, new Map());
 
@@ -411,7 +447,8 @@ export const processUpload = async ({ file, actorId }) => {
       locationsById,
       locationCandidatesByPincode,
       postalCodesByCode,
-      existingOrgIds
+      usersByPhone,
+      organizationIdsByUserId
     );
     if (resolved.errors.length) {
       failed.push({ rowNumber, errors: resolved.errors });

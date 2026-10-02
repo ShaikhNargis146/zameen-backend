@@ -57,7 +57,12 @@ export const COLUMNS = [
   { key: "propertyTypeCode", required: true, example: "AGRICULTURAL_LAND" },
   { key: "landUseTypeCode", required: false, example: "AGRICULTURAL" },
   { key: "ownershipTypeCode", required: false, example: "FREEHOLD" },
-  { key: "organizationId", required: false, example: "" },
+  // The seller is identified by mobile number, not a raw uuid: the row is
+  // rejected if no registered user has this phone number. When that user is
+  // an active member of exactly one organization, the listing is attributed
+  // to that organization too; zero or multiple memberships fall back to
+  // attributing the listing to the user alone.
+  { key: "sellerMobile", required: true, example: "9876543210" },
   { key: "areaValue", required: true, example: 2 },
   { key: "areaUnitCode", required: true, example: "ACRE" },
   { key: "lengthValue", required: false, example: "" },
@@ -74,14 +79,9 @@ export const COLUMNS = [
   { key: "roadAccessType", required: false, example: "DIRECT" },
   // locationId may be left blank if pincode is given instead: the row is
   // then resolved via geo.postal_code_locations, using latitude/longitude
-  // to disambiguate a pincode that maps to more than one locality. The
-  // template's second sample row (example2) demonstrates this fallback.
-  {
-    key: "locationId",
-    required: false,
-    example: "00000000-0000-0000-0000-000000000000",
-    example2: ""
-  },
+  // to disambiguate a pincode that maps to more than one locality. Left
+  // blank in both sample rows so the template demonstrates that path.
+  { key: "locationId", required: false, example: "" },
   { key: "pincode", required: false, example: "410206" },
   { key: "addressLine", required: false, example: "" },
   { key: "landmark", required: false, example: "" },

@@ -1,4 +1,5 @@
 import { isUuid } from "../../shared/request-validation.js";
+import { phoneE164 } from "../auth/auth.service.js";
 import {
   DIMENSION_UNITS,
   FACINGS,
@@ -171,6 +172,21 @@ const optionalPincode = (raw, field, errors) => {
   }
   return value;
 };
+// Normalizes to the same phone_e164 format auth.users is keyed on, so the
+// service can look sellers up by an exact match.
+const requiredPhone = (raw, field, errors) => {
+  const value = cellText(raw);
+  if (!value) {
+    errors.push({ field, message: `${field} is required.` });
+    return null;
+  }
+  const normalized = phoneE164(value);
+  if (!normalized) {
+    errors.push({ field, message: `${field} must be a valid phone number.` });
+    return null;
+  }
+  return normalized;
+};
 // "WATER;ELECTRICITY:Available 24x7" -> [{ code: "WATER", valueText: null }, { code: "ELECTRICITY", valueText: "Available 24x7" }]
 const optionalAmenityCodes = (raw, field, errors) => {
   const text = cellText(raw);
@@ -263,11 +279,7 @@ export const parseRow = valuesByColumn => {
         50,
         errors
       )?.toUpperCase() || null,
-    organizationId: optionalUuid(
-      get("organizationId"),
-      "organizationId",
-      errors
-    ),
+    sellerMobile: requiredPhone(get("sellerMobile"), "sellerMobile", errors),
     areaValue: requiredPositiveNumber(get("areaValue"), "areaValue", errors),
     areaUnitCode: requiredText(
       get("areaUnitCode"),
