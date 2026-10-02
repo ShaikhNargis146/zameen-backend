@@ -970,7 +970,7 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 |---|---|---|---|---|
 | propertyId | uuid | Yes | | Property. |
 | overallStatus | string | Yes | VerificationStatus | Overall status. |
-| checks | object[] | Yes | | Each: checkType,status,reviewedAt,publicNote. |
+| checks | object[] | Yes | | Each: id,checkType,status,reviewedAt,publicNote. `id` is the type-specific value required for the admin update endpoint. |
 | lastUpdatedAt | datetime | Yes | | Latest update. |
 
 **UpdateVerification**
@@ -1023,6 +1023,8 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
 | id | uuid | Yes | | Verification request/check record ID. |
+| checkType | string | Yes | | Immutable type of the record addressed by `id`. |
+| status | string | Yes | | Current status of the record addressed by `id`. |
 | summary | VerificationSummary | Yes | | Current property verification summary. |
 | property | PropertyCore | Yes | | Property. |
 | documents | DocumentItem[] | Yes | | Documents relevant to review. |

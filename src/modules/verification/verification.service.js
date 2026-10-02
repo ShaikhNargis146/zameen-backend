@@ -9,6 +9,11 @@ const summary = async propertyId => {
 };
 const detail = async verification => ({
   id: verification.id,
+  // `id` identifies this specific check. The summary exposes the IDs for all
+  // sibling checks so an admin UI can update LAND_DETAILS, LOCATION, etc.
+  // without reusing the current record's ID.
+  checkType: verification.checkType,
+  status: verification.status,
   summary: await summary(verification.propertyId),
   property: {
     id: verification.propertyId,
@@ -98,7 +103,11 @@ export const update = async ({ verificationId, actorId, changes, request }) => {
     type: "VERIFICATION_UPDATED",
     title: "Verification status updated",
     body: `Your ${changes.checkType} verification is now ${changes.status}.`,
-    data: { verificationId, checkType: changes.checkType, status: changes.status }
+    data: {
+      verificationId,
+      checkType: changes.checkType,
+      status: changes.status
+    }
   });
   return get(verificationId);
 };

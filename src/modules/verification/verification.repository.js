@@ -56,7 +56,7 @@ export const internalNotes = verificationId =>
 export const propertyChecks = propertyId =>
   run(
     "any",
-    `SELECT check_type AS "checkType", status, reviewed_at AS "reviewedAt", notes AS "publicNote", updated_at AS "updatedAt"
+    `SELECT id, check_type AS "checkType", status, reviewed_at AS "reviewedAt", notes AS "publicNote", updated_at AS "updatedAt"
      FROM land.property_verification_checks WHERE property_id = $1 ORDER BY check_type`,
     [propertyId]
   );
@@ -64,7 +64,7 @@ export const propertyChecksForProperties = propertyIds =>
   propertyIds.length
     ? run(
         "any",
-        `SELECT property_id AS "propertyId", check_type AS "checkType", status,
+        `SELECT id, property_id AS "propertyId", check_type AS "checkType", status,
            reviewed_at AS "reviewedAt", requested_at AS "requestedAt",
            notes AS "publicNote", updated_at AS "updatedAt"
          FROM land.property_verification_checks
@@ -96,7 +96,15 @@ export const updateWithAudit = ({
            reviewed_by_user_id = $6, reviewed_at = now()
        WHERE id = $1 AND check_type = $2 AND status = $7
        RETURNING id`,
-      [verificationId, checkType, status, publicNote, internalNote, actorId, before.status]
+      [
+        verificationId,
+        checkType,
+        status,
+        publicNote,
+        internalNote,
+        actorId,
+        before.status
+      ]
     );
     if (!updated) return null;
     await transaction.none(
