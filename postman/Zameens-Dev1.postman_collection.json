@@ -164,7 +164,7 @@
         { "name": "Compare listings", "request": { "method": "POST", "auth": { "type": "noauth" }, "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"listingIds\": [\"{{listingId}}\", \"replace-with-second-listing-id\"]\n}" }, "url": "{{baseUrl}}/listings/compare" } },
         { "name": "Admin — verification queue", "request": { "method": "GET", "url": "{{baseUrl}}/admin/verifications?status=PENDING&page=1&limit=20" } },
         { "name": "Admin — verification detail", "request": { "method": "GET", "url": "{{baseUrl}}/admin/verifications/{{verificationId}}" } },
-        { "name": "Admin — update verification", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"checkType\": \"LOCATION\",\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}" }, "url": "{{baseUrl}}/admin/verifications/{{verificationId}}" } }
+        { "name": "Admin — update verification", "request": { "method": "PATCH", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}" }, "url": "{{baseUrl}}/admin/verifications/{{verificationId}}" } }
       ]
     },
     {

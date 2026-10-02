@@ -796,9 +796,9 @@ Dev 1 owns database design/migrations, auth/users, locations, property/land/list
 
 **Bulk upload (CSV)** — admin-only back-office data entry, not a seller self-service tool.
 
-`GET /admin/listings/bulk-upload/template` downloads a sample `.csv` (UTF-8 with BOM, header row + two example rows) covering every column below. `POST /admin/listings/bulk-upload` accepts that file (field name `file`, max 10MB, at most 500 data rows) and creates one property + draft listing per row — equivalent to CreateProperty + LandDetailsInput + PropertyLocationInput + CreateListing combined, using human-entered codes (e.g. `propertyTypeCode`, `areaUnitCode`) instead of master UUIDs, plus a required `locationId` (looked up via `/locations/search` beforehand). `organizationId`, if given, just needs to exist — the admin is not required to be a member of it. Rows are each created independently: one invalid or failing row never blocks the others. Every property created this way is recorded with `source=ADMIN`. Created listings land in the same `DRAFT`/`INACTIVE` state as a normal creation — media, documents, and parcel identifiers still need to be added afterward, and the listing still needs `/listings/{listingId}/submit` before moderation.
+`GET /admin/listings/bulk-upload/template` downloads a sample `.csv` (UTF-8 with BOM, header row + two example rows — one with `locationId` set, one showing the `pincode`/lat-long fallback below) covering every column below. `POST /admin/listings/bulk-upload` accepts that file (field name `file`, max 10MB, at most 500 data rows) and creates one property + draft listing per row — equivalent to CreateProperty + LandDetailsInput + PropertyLocationInput + CreateListing combined, using human-entered codes (e.g. `propertyTypeCode`, `areaUnitCode`) instead of master UUIDs, plus a location resolved either from an explicit `locationId` (looked up via `/locations/search` beforehand) or, when left blank, from `pincode` alone — matched the same way `/locations/pincode/{pincode}` resolves it. Since one pincode can map to more than one locality, a row whose pincode is ambiguous also needs `latitude`/`longitude`, used to pick the nearest match; an ambiguous pincode with no coordinates (or no locality at all) fails that row with an explanatory error rather than guessing. The seller is identified by `sellerMobile` rather than an internal id: it must match an already-registered user's phone number (bulk upload never creates accounts, so an unmatched number fails that row) and is normalized the same way phone login is (bare 10-digit Indian numbers are accepted). When that user is an active member of exactly one organization the listing is attributed to that organization too; zero or multiple memberships attribute it to the user alone, since the admin is not required to already know — or specify — which organization was meant. Rows are each created independently: one invalid or failing row never blocks the others. Every property created this way is recorded with `source=ADMIN` and `created_by_user_id` set to the uploading admin, distinct from the resolved seller. Created listings land in the same `DRAFT`/`INACTIVE` state as a normal creation — media, documents, and parcel identifiers still need to be added afterward, and the listing still needs `/listings/{listingId}/submit` before moderation.
 
-Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 chars), `transactionType` (SALE/LEASE), `priceAmountINR` (rupees, converted internally to paise), `isNegotiable` (optional, TRUE/FALSE), `canonicalLanguage` (optional, en/hi/mr/gu/pa/te/ta), `propertyTypeCode`, `landUseTypeCode` (optional), `ownershipTypeCode` (optional), `organizationId` (optional uuid), `areaValue`, `areaUnitCode`, `lengthValue`/`widthValue` (optional), `dimensionUnit` (optional, FT/M), `frontageM`/`roadWidthM` (optional), `roadType` (optional, PUCCA/KUTCHA/HIGHWAY/OTHER), `facing` (optional, N/NE/E/SE/S/SW/W/NW), `openSides` (optional, 0-4), `isCornerPlot` (optional, TRUE/FALSE), `hasBoundaryWall` (optional, TRUE/FALSE), `terrain` (optional, FLAT/SLOPED/UNEVEN/OTHER), `roadAccessType` (optional, DIRECT/SHARED/NO_DIRECT/OTHER), `locationId` (uuid), `pincode`/`addressLine`/`landmark` (optional), `latitude`/`longitude` (optional, both or neither), `locationPrecision` (optional, EXACT/APPROXIMATE), `showExactLocation` (optional, TRUE/FALSE), `amenityCodes` (optional, semicolon-separated, e.g. `WATER;ELECTRICITY:Available 24x7`).
+Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 chars), `transactionType` (SALE/LEASE), `priceAmountINR` (rupees, converted internally to paise), `isNegotiable` (optional, TRUE/FALSE), `canonicalLanguage` (optional, en/hi/mr/gu/pa/te/ta), `propertyTypeCode`, `landUseTypeCode` (optional), `ownershipTypeCode` (optional), `sellerMobile` (phone number of a registered user — the seller), `areaValue`, `areaUnitCode`, `lengthValue`/`widthValue` (optional), `dimensionUnit` (optional, FT/M), `frontageM`/`roadWidthM` (optional), `roadType` (optional, PUCCA/KUTCHA/HIGHWAY/OTHER), `facing` (optional, N/NE/E/SE/S/SW/W/NW), `openSides` (optional, 0-4), `isCornerPlot` (optional, TRUE/FALSE), `hasBoundaryWall` (optional, TRUE/FALSE), `terrain` (optional, FLAT/SLOPED/UNEVEN/OTHER), `roadAccessType` (optional, DIRECT/SHARED/NO_DIRECT/OTHER), `locationId` (uuid — optional if `pincode` is given instead), `pincode` (6 digits — optional if `locationId` is given, otherwise required; at least one of the two must be present), `addressLine`/`landmark` (optional), `latitude`/`longitude` (optional, both or neither; required when `locationId` is blank and `pincode` maps to more than one locality), `locationPrecision` (optional, EXACT/APPROXIMATE), `showExactLocation` (optional, TRUE/FALSE), `amenityCodes` (optional, semicolon-separated, e.g. `WATER;ELECTRICITY:Available 24x7`).
 
 **BulkUploadResult**
 
@@ -949,11 +949,11 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 
 | Method | Endpoint | Auth / Role | Request model | Response / UI use |
 |---|---|---|---|---|
-| POST | /properties/{propertyId}/verification/request | Owner | VerificationRequest | VerificationSummary |
+| POST | /properties/{propertyId}/verification/request | Owner, plan includes verification | VerificationRequest | VerificationSummary |
 | GET | /properties/{propertyId}/verification | Owner/Admin/Public-safe | none | VerificationSummary |
 | GET | /properties/{propertyId}/land-passport | Public / auth-aware | none | LandPassport |
 | GET | /properties/{propertyId}/scanner | Public / auth-aware | none | ScannerResult |
-| GET | /admin/verifications | ADMIN | VerificationListQuery | VerificationSummary[] + PaginationMeta |
+| GET | /admin/verifications | ADMIN | VerificationListQuery | VerificationCheck queue items + PaginationMeta. Each row is one type-specific check. |
 | GET | /admin/verifications/{verificationId} | ADMIN | none | VerificationDetail |
 | PATCH | /admin/verifications/{verificationId} | ADMIN | UpdateVerification | VerificationDetail |
 
@@ -963,6 +963,10 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 |---|---|---|---|---|
 | checkTypes | string[]\|null | No | LOCATION/LAND_DETAILS/PARCEL_IDENTITY/DOCUMENTS/SITE_VISIT | Null means request applicable default checks. |
 | note | string\|null | No | <=500 | Seller note. |
+
+Submitting a request sets the selected checks to `PENDING`. Editing the related
+land details, location, parcel identifiers, or documents returns that check to
+`NOT_STARTED`; the owner must submit it again before an admin can review it.
 
 **VerificationSummary**
 
@@ -977,10 +981,13 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
-| checkType | string | Yes | Verification check type | Check being reviewed. |
+| checkType | string | No | Deprecated compatibility field. The check type is derived from `{verificationId}` and cannot be changed. |
 | status | string | Yes | PENDING/VERIFIED/REJECTED/PARTIAL | New status. |
 | publicNote | string\|null | No | <=500 | Safe note visible to user. |
 | internalNote | string\|null | No | <=1000 | Admin-only note. |
+
+Only a `PENDING` check can be updated; otherwise the API returns
+`409 VERIFICATION_NOT_PENDING`.
 
 **LandPassport**
 
@@ -1018,11 +1025,23 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 | checkType | string\|null | No | Verification check type | Specific check filter. |
 | search | string\|null | No | <=200 | Property code/listing/seller search. |
 
+**VerificationQueueItem**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | uuid | Yes | Type-specific verification check ID used for the detail and update endpoints. |
+| checkType | string | Yes | Immutable verification check type. |
+| status | string | Yes | Current check status. |
+| property | PropertyCore | Yes | Property being reviewed. |
+| requestedAt / reviewedAt / publicNote | datetime / datetime / string\|null | Yes | Review workflow metadata. |
+
 **VerificationDetail**
 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
 | id | uuid | Yes | | Verification request/check record ID. |
+| checkType | string | Yes | | Immutable type of the record addressed by `id`. |
+| status | string | Yes | | Current status of the record addressed by `id`. |
 | summary | VerificationSummary | Yes | | Current property verification summary. |
 | property | PropertyCore | Yes | | Property. |
 | documents | DocumentItem[] | Yes | | Documents relevant to review. |
