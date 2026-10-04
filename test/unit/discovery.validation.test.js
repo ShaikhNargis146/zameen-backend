@@ -3,7 +3,8 @@ import test from "node:test";
 import {
   compare,
   map,
-  search
+  search,
+  suggestions
 } from "../../src/modules/discovery/discovery.validation.js";
 
 const unitId = "11111111-1111-1111-1111-111111111111";
@@ -51,6 +52,14 @@ test("discovery search rejects an invalid regex search term", () => {
     () => search({ search: "(unclosed" }),
     error => error.code === "VALIDATION_ERROR"
   );
+});
+
+test("discovery suggestions treats 2 to 6 digit queries as pincode prefixes", () => {
+  assert.equal(suggestions({ q: " 4102 " }).pincodePrefix, "4102");
+  assert.equal(suggestions({ q: "410206" }).pincodePrefix, "410206");
+  assert.equal(suggestions({ q: "panvel" }).pincodePrefix, null);
+  assert.equal(suggestions({ q: "4102060" }).pincodePrefix, null);
+  assert.equal(suggestions({ q: "41a2" }).pincodePrefix, null);
 });
 
 test("discovery search rejects an overly long search term", () => {

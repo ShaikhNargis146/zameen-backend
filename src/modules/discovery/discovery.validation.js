@@ -155,7 +155,11 @@ export const suggestions = query => {
   const q = String(query.q || "").trim();
   if (q.length < 2 || q.length > 100)
     invalid("VALIDATION_ERROR", "q must contain 2 to 100 characters.", "q");
-  return { q, limit: Math.min(Math.max(Number(query.limit || 10), 1), 25) };
+  return {
+    q,
+    limit: Math.min(Math.max(Number(query.limit || 10), 1), 25),
+    pincodePrefix: /^\d{2,6}$/.test(q) ? q : null
+  };
 };
 
 export const map = body => {

@@ -110,7 +110,7 @@ export const searchIds = filters =>
     [...params(filters), filters.limit, filters.offset]
   );
 
-export const suggestions = ({ q, limit }) =>
+export const suggestions = ({ q, limit, pincodePrefix }) =>
   run(
     "any",
     `SELECT 'LOCATION' AS type, l.name AS label, l.id::text AS value,
@@ -118,10 +118,24 @@ export const suggestions = ({ q, limit }) =>
      FROM geo.locations l LEFT JOIN geo.locations parent ON parent.id = l.parent_id
      WHERE l.is_active AND l.name ILIKE $1 ESCAPE '\\'
      UNION ALL
+     SELECT 'PINCODE' AS type, postal.code AS label, postal.code AS value, area.name AS "secondaryLabel"
+     FROM geo.postal_codes postal
+     CROSS JOIN LATERAL (
+       SELECT l.name FROM geo.postal_code_locations pcl
+       JOIN geo.locations l ON l.id = pcl.location_id
+       WHERE pcl.postal_code_id = postal.id AND l.is_active
+       ORDER BY l.name LIMIT 1
+     ) area
+     WHERE $3::varchar IS NOT NULL AND postal.code LIKE $3
+     UNION ALL
      SELECT 'PROPERTY_TYPE' AS type, pt.name AS label, pt.id::text AS value, NULL AS "secondaryLabel"
      FROM land.property_types pt WHERE pt.is_active AND pt.name ILIKE $1 ESCAPE '\\'
      ORDER BY type, label LIMIT $2`,
-    [`%${q.replace(/[\\%_]/g, "\\\\$&")}%`, limit]
+    [
+      `%${q.replace(/[\\%_]/g, "\\\\$&")}%`,
+      limit,
+      pincodePrefix ? `${pincodePrefix}%` : null
+    ]
   );
 
 export const mapPins = filters =>

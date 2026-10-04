@@ -900,10 +900,10 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
-| type | string | Yes | LOCATION/PROPERTY_TYPE/POPULAR_SEARCH | Suggestion type. |
+| type | string | Yes | LOCATION/PINCODE/PROPERTY_TYPE/POPULAR_SEARCH | Suggestion type. |
 | label | string | Yes | | Display label. |
-| value | string | Yes | | ID/code/text sent into next search. |
-| secondaryLabel | string\|null | No | | Example district/state. |
+| value | string | Yes | | ID/code/text sent into next search. For PINCODE this is the 6-digit pincode, sent as `pincode` in `/search/listings`. |
+| secondaryLabel | string\|null | No | | Example district/state. For PINCODE, the first active location under that pincode. |
 
 **MapSearchInput**
 
