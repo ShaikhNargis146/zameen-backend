@@ -54,6 +54,9 @@ const invoiceSellerLegalName =
   process.env.INVOICE_SELLER_LEGAL_NAME || "Zameens Investments";
 const invoiceSellerGstin =
   process.env.INVOICE_SELLER_GSTIN || "27DEVTESTGSTIN1Z5";
+// Printed on the invoice only when INVOICE_SELLER_GSTIN is set in the env.
+// The tax split above still uses invoiceSellerGstin's state code either way.
+const invoiceSellerGstinOnInvoice = process.env.INVOICE_SELLER_GSTIN || null;
 const invoiceSellerAddress =
   process.env.INVOICE_SELLER_ADDRESS || "Address not configured";
 if (!isNonProductionEnv) {
@@ -555,7 +558,7 @@ export const generateOrderInvoice = async ({ orderId, actor }) => {
   const buffer = await renderInvoicePdf({
     seller: {
       legalName: invoiceSellerLegalName,
-      gstin: invoiceSellerGstin,
+      gstin: invoiceSellerGstinOnInvoice,
       address: invoiceSellerAddress
     },
     order: row,
