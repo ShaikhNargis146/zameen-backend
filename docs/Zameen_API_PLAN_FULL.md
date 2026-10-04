@@ -878,9 +878,10 @@ Columns (required unless noted): `title` (10-255 chars), `description` (20-5000 
 | Field | Type | Required | Validation / enum | Description |
 |---|---|---|---|---|
 | locationIds | uuid[] | No | Valid locations | Locations. |
+| pincode | string\|null | No | 6 digits | Matches listings whose stored postal code is this pincode, or whose location falls under it (via the same geo.postal_code_locations mapping `/locations/pincode/{pincode}` uses). ANDed with locationIds when both are given. |
 | propertyTypeIds | uuid[] | No | Valid master IDs | Land types. |
 | transactionTypes | string[] | No | SALE/LEASE | Transaction filter. |
-| search | string\|null | No | Max 100 chars, valid regex | Case-insensitive regex matched against title, price (as text), and property type name. |
+| search | string\|null | No | Max 100 chars, valid regex | Case-insensitive regex matched against title, price (as text), and property type name; also matches as an exact pincode the same way the dedicated `pincode` field does, so a 6-digit search term works without using that field. |
 | minPriceMinor | integer\|null | No | >=0 | Minimum price. |
 | maxPriceMinor | integer\|null | No | >= min | Maximum price. |
 | minArea | number\|null | No | >=0 | Minimum area in selected input unit. |
