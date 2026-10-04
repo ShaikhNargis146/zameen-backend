@@ -48,8 +48,11 @@ const apiPublicBaseUrl = (
   process.env.API_PUBLIC_BASE_URL ||
   `http://localhost:${process.env.PORT || 8080}`
 ).replace(/\/+$/, "");
-// Where we redirect the browser after handling the Payment Link callback.
-const commerceReturnBaseUrl = apiPublicBaseUrl;
+// Where we redirect the browser after handling the Payment Link callback. This
+// is the FRONTEND origin (it serves /payments/result), not the API origin.
+const commerceReturnBaseUrl = (
+  process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:5173"
+).replace(/\/+$/, "");
 // The invoice's "Sold By" block — this business's own GST registration.
 // Its state-code prefix (first 2 digits) is also what decides CGST+SGST vs
 // IGST on every invoice (see capturePaymentAndApplyEntitlements).
@@ -68,6 +71,7 @@ if (!isNonProductionEnv) {
     ["RAZORPAY_KEY_SECRET", process.env.RAZORPAY_KEY_SECRET],
     ["RAZORPAY_WEBHOOK_SECRET", process.env.RAZORPAY_WEBHOOK_SECRET],
     ["API_PUBLIC_BASE_URL", process.env.API_PUBLIC_BASE_URL],
+    ["COMMERCE_RETURN_BASE_URL", process.env.COMMERCE_RETURN_BASE_URL],
     ["INVOICE_SELLER_LEGAL_NAME", process.env.INVOICE_SELLER_LEGAL_NAME],
     ["INVOICE_SELLER_GSTIN", process.env.INVOICE_SELLER_GSTIN],
     ["INVOICE_SELLER_ADDRESS", process.env.INVOICE_SELLER_ADDRESS]
