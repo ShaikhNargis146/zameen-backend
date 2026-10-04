@@ -89,7 +89,7 @@ export const resolveTeamMemberLimit = async organizationId => {
 // never whichever member happened to submit the request.
 export const assertVerificationIncluded = async owner => {
   const active = await repository.resolveEffectivePlanForOwner(owner);
-  if (active?.verificationIncluded) return;
+  if (active?.features?.verificationIncluded === true) return;
   throw new HttpError(
     403,
     "VERIFICATION_NOT_INCLUDED",

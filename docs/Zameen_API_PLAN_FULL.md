@@ -1515,8 +1515,7 @@ Dev 2 owns marketplace interaction workflows, organizations, favorites, buyer re
 | durationDays | integer\|null | No | >0 | Validity. |
 | listingLimit | integer\|null | No | >=0 | Quota. |
 | featuredDays | integer\|null | No | >=0 | Featured duration. |
-| verificationIncluded | boolean | Yes | | Included. |
-| features | object | Yes | | Frontend display flags/text. |
+| features | object | Yes | | Frontend display/business configuration, including `verificationIncluded` (boolean). |
 | isActive | boolean | Yes | | Purchasable. |
 
 **CreateOrder**
@@ -1594,8 +1593,7 @@ Dev 2 owns marketplace interaction workflows, organizations, favorites, buyer re
 | durationDays | integer\|null | No | >0 | Validity. |
 | listingLimit | integer\|null | No | >=0 | Listing quota. |
 | featuredDays | integer\|null | No | >=0 | Featured duration. |
-| verificationIncluded | boolean | No | default false | Verification benefit. |
-| features | object\|null | No | | Display/business configuration. |
+| features | object\|null | No | | Display/business configuration. Set `features.verificationIncluded` to enable property verification. |
 | isActive | boolean | No | default true | Availability. |
 
 **UpdatePlan**

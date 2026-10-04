@@ -55,8 +55,7 @@ Query: `?audience=FREE|PREMIUM|BROKER` (optional).
       "durationDays": 30,
       "listingLimit": 5,
       "featuredDays": 7,
-      "verificationIncluded": true,
-      "features": { "badge": "PREMIUM" },
+      "features": { "badge": "PREMIUM", "verificationIncluded": true },
       "isActive": true,
       "aiMonthlyQuota": null
     }

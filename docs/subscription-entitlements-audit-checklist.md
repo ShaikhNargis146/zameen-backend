@@ -34,7 +34,7 @@ Legend: ✅ Implemented and verified · ⚠️ Partial / works but has a real ca
 | B5 | `aiMonthlyQuota` | ✅ | `ai.service.js#reserveAiQuota`, reserve/confirm/release, locked. Org-pooling scope corrected — see Critical 3. |
 | B6 | `features.featuredListingsPerMonth` | ✅ | `commerce.repository.js#grantFeaturedListingFromAllowance`, atomic, now also reports `alreadyFeatured` accurately regardless of plan tier. |
 | B7 | `features.advancedAnalytics`/`verifiedBadge`/`bulkUpload` | ⚠️ Scaffolding only | `assertFeature` exists, unit-tested, zero call sites — the gated features have no endpoints yet. |
-| B8 | `verificationIncluded` (plan column) | 🔧 Resolved | `properties.service.js#requestVerification` resolves the property's actual owner and rejects requests when that owner's effective plan does not include verification. |
+| B8 | `features.verificationIncluded` | 🔧 Resolved | `properties.service.js#requestVerification` resolves the property's actual owner and rejects requests when that owner's effective plan does not include verification. |
 | B9 | `durationDays` | ✅ | Pre-existing, re-verified. |
 
 ---

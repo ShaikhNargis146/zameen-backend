@@ -12,7 +12,7 @@ const planColumns = `
   pl.id, pr.id AS "productId", pr.code, pr.name, pl.plan_type AS "planType", pr.description,
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
-  pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
+  pl.features, pr.is_active AS "isActive",
   pl.ai_monthly_quota AS "aiMonthlyQuota", pr.gst_rate_bps AS "gstRateBps", pr.hsn_sac_code AS "hsnSacCode",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
@@ -446,7 +446,6 @@ export const createPlan = ({
   durationDays,
   listingLimit,
   featuredDays,
-  verificationIncluded,
   features,
   aiMonthlyQuota,
   gstRateBps,
@@ -468,15 +467,14 @@ export const createPlan = ({
       ]
     );
     const plan = await t.one(
-      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING id`,
+      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, features, ai_monthly_quota)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) RETURNING id`,
       [
         product.id,
         planType,
         durationDays,
         listingLimit,
         featuredDays,
-        verificationIncluded,
         JSON.stringify(features || {}),
         aiMonthlyQuota ?? null
       ]
@@ -499,7 +497,6 @@ const planColumnMap = {
   durationDays: "duration_days",
   listingLimit: "listing_limit",
   featuredDays: "featured_days",
-  verificationIncluded: "verification_included",
   features: "features",
   aiMonthlyQuota: "ai_monthly_quota"
 };

@@ -99,7 +99,6 @@ const toPlan = row =>
     durationDays: row.durationDays,
     listingLimit: row.listingLimit,
     featuredDays: row.featuredDays,
-    verificationIncluded: row.verificationIncluded,
     features: row.features || {},
     isActive: row.isActive,
     // NULL means unlimited AI Property Assistant questions for this plan.
@@ -233,12 +232,14 @@ const FREE_PLAN_DEFAULTS = {
   durationDays: null,
   listingLimit: DEFAULT_FREE_LISTING_LIMIT,
   featuredDays: null,
-  verificationIncluded: false,
   // contactUnlocks mirrors entitlements.service.js#consumeContactUnlock's
   // own DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME fallback -- without it, this
   // display path would report contactUnlocks as unlimited (limit: null) while
   // enforcement still caps it at 5, the moment PLAN_FREE itself isn't seeded.
-  features: { contactUnlocks: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME },
+  features: {
+    contactUnlocks: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME,
+    verificationIncluded: false
+  },
   isActive: true,
   aiMonthlyQuota: DEFAULT_FREE_AI_MONTHLY_QUOTA
 };
