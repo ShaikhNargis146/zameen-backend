@@ -35,7 +35,7 @@ This keeps the spirit of the brief's "Final Recommendation" section (3 tables, o
 
 ## 1. What already fully works (no action needed)
 
-- **Plan catalog**: `GET /plans` (public), `GET /plans/me` (auth) — already returns `listingLimit`, `featuredDays`, `verificationIncluded`, `features` (jsonb), `aiMonthlyQuota`.
+- **Plan catalog**: `GET /plans` (public), `GET /plans/me` (auth) — returns `listingLimit`, `featuredDays`, `features` (including `verificationIncluded`), and `aiMonthlyQuota`.
 - **Admin plan CRUD**: `GET/POST /admin/plans`, `PATCH /admin/plans/:planId`, `.../activate`, `.../deactivate` — admin can already change any plan's limits/price without a deploy (brief §17 — done).
 - **Checkout → payment → activation**: `POST /orders`, `POST /payments/:orderId/create`, `POST /payments/webhook` (Razorpay, HMAC-verified, idempotent) — brief §8/§9 — done. `commerce.repository.capturePaymentAndApplyEntitlements` already extends `ends_at` correctly if the user/org already has an active plan (upgrade/renewal), not just overwrite. Orders already support buying a plan on behalf of an organization (`organizationId` in `POST /orders`, membership-validated).
 - **AI query quota enforcement**: `ai.service.js`'s `reserveAiQuota` (reserve → confirm/release) already gates `POST /ai/conversations/:id/messages` against `commerce.plans.ai_monthly_quota`, with an ambient `DEFAULT_FREE_AI_MONTHLY_QUOTA = 5` for users with no plan row, and a Postgres advisory-lock query to stay race-safe under concurrent requests. **This reserve/confirm/release + advisory-lock shape is the reference pattern for every other limit check below — mirror it, don't reinvent it.**

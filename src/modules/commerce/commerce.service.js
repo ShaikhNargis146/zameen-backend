@@ -41,12 +41,18 @@ const razorpayApiTimeoutMs = Number(
 // The base URL Razorpay redirects the customer's browser to after payment —
 // must be our own deployed, publicly reachable API origin, not localhost, in
 // any environment Razorpay can actually call back to.
-const apiPublicBaseUrl =
+// Trailing slashes are stripped: the callback URL is built as
+// `${apiPublicBaseUrl}/api/v1/...`, and a value like "https://host/" would
+// otherwise produce "https://host//api/v1/..." which Express does not route.
+const apiPublicBaseUrl = (
   process.env.API_PUBLIC_BASE_URL ||
-  `http://localhost:${process.env.PORT || 8080}`;
-// Where we redirect the browser after handling the Payment Link callback.
-const commerceReturnBaseUrl =
-  process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:3000";
+  `http://localhost:${process.env.PORT || 8080}`
+).replace(/\/+$/, "");
+// Where we redirect the browser after handling the Payment Link callback. This
+// is the FRONTEND origin (it serves /payments/result), not the API origin.
+const commerceReturnBaseUrl = (
+  process.env.COMMERCE_RETURN_BASE_URL || "http://localhost:5173"
+).replace(/\/+$/, "");
 // The invoice's "Sold By" block — this business's own GST registration.
 // Its state-code prefix (first 2 digits) is also what decides CGST+SGST vs
 // IGST on every invoice (see capturePaymentAndApplyEntitlements).
@@ -54,6 +60,9 @@ const invoiceSellerLegalName =
   process.env.INVOICE_SELLER_LEGAL_NAME || "Zameens Investments";
 const invoiceSellerGstin =
   process.env.INVOICE_SELLER_GSTIN || "27DEVTESTGSTIN1Z5";
+// Printed on the invoice only when INVOICE_SELLER_GSTIN is set in the env.
+// The tax split above still uses invoiceSellerGstin's state code either way.
+const invoiceSellerGstinOnInvoice = process.env.INVOICE_SELLER_GSTIN || null;
 const invoiceSellerAddress =
   process.env.INVOICE_SELLER_ADDRESS || "Address not configured";
 if (!isNonProductionEnv) {
@@ -99,7 +108,6 @@ const toPlan = row =>
     durationDays: row.durationDays,
     listingLimit: row.listingLimit,
     featuredDays: row.featuredDays,
-    verificationIncluded: row.verificationIncluded,
     features: row.features || {},
     isActive: row.isActive,
     // NULL means unlimited AI Property Assistant questions for this plan.
@@ -233,12 +241,14 @@ const FREE_PLAN_DEFAULTS = {
   durationDays: null,
   listingLimit: DEFAULT_FREE_LISTING_LIMIT,
   featuredDays: null,
-  verificationIncluded: false,
   // contactUnlocks mirrors entitlements.service.js#consumeContactUnlock's
   // own DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME fallback -- without it, this
   // display path would report contactUnlocks as unlimited (limit: null) while
   // enforcement still caps it at 5, the moment PLAN_FREE itself isn't seeded.
-  features: { contactUnlocks: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME },
+  features: {
+    contactUnlocks: DEFAULT_FREE_CONTACT_UNLOCKS_LIFETIME,
+    verificationIncluded: false
+  },
   isActive: true,
   aiMonthlyQuota: DEFAULT_FREE_AI_MONTHLY_QUOTA
 };
@@ -554,7 +564,7 @@ export const generateOrderInvoice = async ({ orderId, actor }) => {
   const buffer = await renderInvoicePdf({
     seller: {
       legalName: invoiceSellerLegalName,
-      gstin: invoiceSellerGstin,
+      gstin: invoiceSellerGstinOnInvoice,
       address: invoiceSellerAddress
     },
     order: row,
@@ -712,10 +722,20 @@ export const paymentCallback = async ({ query }) => {
   if (!signatureValid)
     return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
 
-  const payment = await repository.findPaymentByProviderOrderId(
-    "RAZORPAY",
-    paymentLinkId
-  );
+  let payment;
+  try {
+    payment = await repository.findPaymentByProviderOrderId(
+      "RAZORPAY",
+      paymentLinkId
+    );
+  } catch (error) {
+    // A DB failure here must still redirect the browser, not surface a JSON
+    // error page; the webhook remains the source of truth for capture.
+    logger.error(
+      `payment callback lookup failed for ${paymentLinkId}: ${error.message}`
+    );
+    return { redirectUrl: paymentResultUrl({ status: "pending" }) };
+  }
   if (!payment) return { redirectUrl: paymentResultUrl({ status: "invalid" }) };
 
   if (payment.status !== "CAPTURED" && status === "paid") {
@@ -756,11 +776,15 @@ export const paymentCallback = async ({ query }) => {
         },
         sellerGstin: invoiceSellerGstin
       });
-      await notifyPaymentCaptured(captured);
-    } catch {
+      // null means the webhook captured this payment first; nothing to do.
+      if (captured) await notifyPaymentCaptured(captured);
+    } catch (error) {
       // The webhook is authoritative and will retry this independently — the
       // browser must still get a redirect, not a raw error page, so surface
       // a "pending" status rather than letting this throw out of the handler.
+      logger.error(
+        `payment callback capture failed for payment ${payment.id}: ${error.message}`
+      );
       return {
         redirectUrl: paymentResultUrl({
           orderId: payment.orderId,
@@ -776,6 +800,99 @@ export const paymentCallback = async ({ query }) => {
       status: status === "paid" ? "success" : status
     })
   };
+};
+
+const RECONCILE_AFTER_MINUTES = 5;
+const RECONCILE_BATCH_SIZE = 50;
+
+// Decides what to do with one stale payment given Razorpay's view of its
+// Payment Link. Pure, so it can be unit-tested without a database. Exported
+// for that reason; reconcileStalePayments below is the only caller.
+export const reconciliationDecision = ({ payment, link }) => {
+  if (!link || link.reference_id !== payment.id)
+    return { action: "skip", reason: "reference_mismatch" };
+  if (link.status === "paid") {
+    const captured = (link.payments || []).find(p => p.status === "captured");
+    if (!captured?.payment_id)
+      return { action: "skip", reason: "paid_without_captured_payment" };
+    return { action: "capture", providerPaymentId: captured.payment_id };
+  }
+  if (link.status === "expired" || link.status === "cancelled")
+    return { action: "fail", reason: link.status };
+  return { action: "wait", reason: link.status };
+};
+
+// Safety net for payments whose browser callback and webhook both never
+// landed (e.g. the callback 404'd and the webhook failed). Asks Razorpay
+// about each stale CREATED payment and resolves it the same way the callback
+// does. Every write goes through the guarded repository calls, so a sweep that
+// races a late callback or webhook cannot double-capture or overwrite a capture.
+export const reconcileStalePayments = async () => {
+  const stale = await repository.findStaleCreatedPayments({
+    olderThanMinutes: RECONCILE_AFTER_MINUTES,
+    limit: RECONCILE_BATCH_SIZE
+  });
+  const summary = { checked: stale.length, captured: 0, failed: 0, waiting: 0, skipped: 0 };
+
+  for (const payment of stale) {
+    try {
+      const link = await razorpayProvider.fetchPaymentLink({
+        keyId: razorpayKeyId,
+        keySecret: razorpayKeySecret,
+        timeoutMs: razorpayApiTimeoutMs,
+        providerPaymentLinkId: payment.providerOrderId
+      });
+      const decision = reconciliationDecision({ payment, link });
+
+      if (decision.action === "capture") {
+        const providerPayment = await razorpayProvider.fetchPayment({
+          keyId: razorpayKeyId,
+          keySecret: razorpayKeySecret,
+          timeoutMs: razorpayApiTimeoutMs,
+          providerPaymentId: decision.providerPaymentId
+        });
+        if (
+          !paymentMatchesProvider({
+            payment,
+            providerAmountMinor: providerPayment?.amount,
+            providerCurrency: providerPayment?.currency,
+            providerStatus: providerPayment?.status
+          })
+        ) {
+          summary.skipped += 1;
+          logger.warn(`reconciliation: payment ${payment.id} does not match Razorpay; not captured`);
+          continue;
+        }
+        const captured = await repository.capturePaymentAndApplyEntitlements({
+          id: payment.id,
+          orderId: payment.orderId,
+          providerPaymentId: decision.providerPaymentId,
+          providerPayload: { source: "reconciliation", link, providerPayment },
+          sellerGstin: invoiceSellerGstin
+        });
+        if (captured) {
+          await notifyPaymentCaptured(captured);
+          summary.captured += 1;
+        } else summary.skipped += 1;
+      } else if (decision.action === "fail") {
+        const failed = await repository.failCreatedPayment({
+          id: payment.id,
+          providerPayload: { source: "reconciliation", link }
+        });
+        if (failed) summary.failed += 1;
+        else summary.skipped += 1;
+      } else if (decision.action === "wait") {
+        summary.waiting += 1;
+      } else {
+        summary.skipped += 1;
+        logger.warn(`reconciliation: skipped payment ${payment.id} (${decision.reason})`);
+      }
+    } catch (error) {
+      summary.skipped += 1;
+      logger.error(`reconciliation failed for payment ${payment.id}: ${error.message}`);
+    }
+  }
+  return summary;
 };
 
 const toPaymentAdmin = row =>
@@ -865,6 +982,8 @@ const capturableWebhookEvents = new Set([
   "payment.captured",
   "payment_link.paid"
 ]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   const provider = "RAZORPAY";
@@ -891,10 +1010,21 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
   // traceability) and is reused in the capture/fail branches below instead
   // of querying twice.
   const paymentEntity = body?.payload?.payment?.entity;
-  const internalPaymentId = paymentEntity?.notes?.internalPaymentId || null;
+  // Fallback: a payment_link.* event also carries the link entity, whose
+  // reference_id is the internal payment id we set at creation time. Used
+  // when the payment entity's notes don't come through on this event type.
+  const linkReferenceId = body?.payload?.payment_link?.entity?.reference_id;
+  const internalPaymentId =
+    paymentEntity?.notes?.internalPaymentId ||
+    (UUID_PATTERN.test(linkReferenceId || "") ? linkReferenceId : null);
   const payment = internalPaymentId
     ? await repository.findPaymentById(internalPaymentId)
     : null;
+  if (!payment && capturableWebhookEvents.has(eventType))
+    logger.warn(
+      `webhook ${eventType} (${eventId}) did not resolve to an internal payment; ` +
+        `payment_link reference_id=${linkReferenceId || "none"}`
+    );
 
   const event = await repository.insertWebhookEvent({
     provider,
@@ -934,7 +1064,8 @@ export const handleWebhook = async ({ signatureHeader, rawBody, body }) => {
         providerPayload: body,
         sellerGstin: invoiceSellerGstin
       });
-      await notifyPaymentCaptured(captured);
+      // null means the callback (or an earlier delivery) already captured it.
+      if (captured) await notifyPaymentCaptured(captured);
     } else if (
       payment &&
       eventType === "payment.failed" &&

@@ -53,15 +53,32 @@ test("createPayment no longer accepts a returnUrl (redirect target is fixed by t
   });
 });
 
-test("createPlan accepts the single contactUnlocks plan feature", () => {
+test("createPlan accepts verification and contact unlocks as plan features", () => {
   const result = validation.createPlan({
     code: "PLAN_TEST",
     name: "Test",
     planType: "FREE",
     amountMinor: 0,
-    features: { contactUnlocks: 5 }
+    features: { contactUnlocks: 5, verificationIncluded: true }
   });
-  assert.deepEqual(result.features, { contactUnlocks: 5 });
+  assert.deepEqual(result.features, {
+    contactUnlocks: 5,
+    verificationIncluded: true
+  });
+});
+
+test("createPlan rejects the retired top-level verification field", () => {
+  assert.throws(
+    () =>
+      validation.createPlan({
+        code: "PLAN_TEST",
+        name: "Test",
+        planType: "FREE",
+        amountMinor: 0,
+        verificationIncluded: true
+      }),
+    error => error.code === "INVALID_VERIFICATION_INCLUDED"
+  );
 });
 
 test("createPlan rejects retired duplicate contact-unlock feature keys", () => {

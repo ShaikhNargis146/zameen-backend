@@ -55,7 +55,21 @@ const filteredListingWhere = `
     AND ($14::varchar IS NULL OR
       l.title ~* $14 OR
       CAST(l.price_amount_minor AS varchar) ~* $14 OR
-      pt.name ~* $14
+      pt.name ~* $14 OR
+      pl.postal_code_id IN (SELECT id FROM geo.postal_codes WHERE code = $14) OR
+      pl.location_id IN (
+        SELECT pcl.location_id FROM geo.postal_codes pc
+        JOIN geo.postal_code_locations pcl ON pcl.postal_code_id = pc.id
+        WHERE pc.code = $14
+      )
+    )
+    AND ($15::varchar IS NULL OR
+      pl.postal_code_id IN (SELECT id FROM geo.postal_codes WHERE code = $15) OR
+      pl.location_id IN (
+        SELECT pcl.location_id FROM geo.postal_codes pc
+        JOIN geo.postal_code_locations pcl ON pcl.postal_code_id = pc.id
+        WHERE pc.code = $15
+      )
     )`;
 
 const filteredListingSql = `
@@ -81,7 +95,8 @@ const params = filters => [
   filters.facing,
   filters.cornerPlot,
   filters.sellerType,
-  filters.search
+  filters.search,
+  filters.pincode
 ];
 
 export const searchIds = filters =>
@@ -91,11 +106,11 @@ export const searchIds = filters =>
          EXISTS (SELECT 1 FROM marketplace.listing_promotions promotion WHERE promotion.listing_id = l.id AND promotion.status = 'ACTIVE' AND promotion.starts_at <= now() AND (promotion.ends_at IS NULL OR promotion.ends_at > now())) AS is_premium,
          EXISTS (SELECT 1 FROM land.property_verification_checks verification WHERE verification.property_id = p.id AND verification.status = 'VERIFIED') AS is_verified
        ${filteredListingSql}
-     ) filtered ORDER BY ${orderBy[filters.sort]} LIMIT $15 OFFSET $16`,
+     ) filtered ORDER BY ${orderBy[filters.sort]} LIMIT $16 OFFSET $17`,
     [...params(filters), filters.limit, filters.offset]
   );
 
-export const suggestions = ({ q, limit }) =>
+export const suggestions = ({ q, limit, pincodePrefix }) =>
   run(
     "any",
     `SELECT 'LOCATION' AS type, l.name AS label, l.id::text AS value,
@@ -103,10 +118,24 @@ export const suggestions = ({ q, limit }) =>
      FROM geo.locations l LEFT JOIN geo.locations parent ON parent.id = l.parent_id
      WHERE l.is_active AND l.name ILIKE $1 ESCAPE '\\'
      UNION ALL
+     SELECT 'PINCODE' AS type, postal.code AS label, postal.code AS value, area.name AS "secondaryLabel"
+     FROM geo.postal_codes postal
+     CROSS JOIN LATERAL (
+       SELECT l.name FROM geo.postal_code_locations pcl
+       JOIN geo.locations l ON l.id = pcl.location_id
+       WHERE pcl.postal_code_id = postal.id AND l.is_active
+       ORDER BY l.name LIMIT 1
+     ) area
+     WHERE $3::varchar IS NOT NULL AND postal.code LIKE $3
+     UNION ALL
      SELECT 'PROPERTY_TYPE' AS type, pt.name AS label, pt.id::text AS value, NULL AS "secondaryLabel"
      FROM land.property_types pt WHERE pt.is_active AND pt.name ILIKE $1 ESCAPE '\\'
      ORDER BY type, label LIMIT $2`,
-    [`%${q.replace(/[\\%_]/g, "\\\\$&")}%`, limit]
+    [
+      `%${q.replace(/[\\%_]/g, "\\\\$&")}%`,
+      limit,
+      pincodePrefix ? `${pincodePrefix}%` : null
+    ]
   );
 
 export const mapPins = filters =>
@@ -128,9 +157,9 @@ export const mapPins = filters =>
      LEFT JOIN land.area_units au ON au.id = d.area_unit_id
      LEFT JOIN land.property_media media ON media.property_id = p.id AND media.is_cover AND media.deleted_at IS NULL
      ${filteredListingWhere}
-     AND (CASE WHEN pl.show_exact_location THEN ST_Y(pl.coordinates::geometry) ELSE ST_Y(loc.center::geometry) END) BETWEEN $15 AND $16
-     AND (CASE WHEN pl.show_exact_location THEN ST_X(pl.coordinates::geometry) ELSE ST_X(loc.center::geometry) END) BETWEEN $17 AND $18
-     ORDER BY "publishedAt" DESC LIMIT $19`,
+     AND (CASE WHEN pl.show_exact_location THEN ST_Y(pl.coordinates::geometry) ELSE ST_Y(loc.center::geometry) END) BETWEEN $16 AND $17
+     AND (CASE WHEN pl.show_exact_location THEN ST_X(pl.coordinates::geometry) ELSE ST_X(loc.center::geometry) END) BETWEEN $18 AND $19
+     ORDER BY "publishedAt" DESC LIMIT $20`,
     [
       ...params(filters),
       filters.south,

@@ -9,10 +9,18 @@ const csvField = value => {
 const csvRow = values => values.map(csvField).join(",");
 
 export const buildTemplateCsv = () => {
+  // Trailing "*" flags a required column. headerIndex() in the service
+  // strips it back off before matching, so this is purely a visual aid --
+  // it doesn't change what the uploader has to type back in.
   const lines = [
-    csvRow(COLUMNS.map(column => column.key)),
+    csvRow(
+      COLUMNS.map(column => (column.required ? `${column.key}*` : column.key))
+    ),
     csvRow(COLUMNS.map(column => column.example)),
-    csvRow(COLUMNS.map(column => column.example))
+    // Second sample row defaults to the same value as the first, except
+    // where a column defines example2 (see the locationId/pincode fallback
+    // columns in COLUMNS) to show an alternative valid input.
+    csvRow(COLUMNS.map(column => column.example2 ?? column.example))
   ];
   // Leading BOM so Excel/Numbers auto-detect UTF-8 instead of guessing a
   // local codepage when the file is opened directly.

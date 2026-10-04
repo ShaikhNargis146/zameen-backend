@@ -34,7 +34,7 @@ Legend: ✅ Implemented and verified · ⚠️ Partial / works but has a real ca
 | B5 | `aiMonthlyQuota` | ✅ | `ai.service.js#reserveAiQuota`, reserve/confirm/release, locked. Org-pooling scope corrected — see Critical 3. |
 | B6 | `features.featuredListingsPerMonth` | ✅ | `commerce.repository.js#grantFeaturedListingFromAllowance`, atomic, now also reports `alreadyFeatured` accurately regardless of plan tier. |
 | B7 | `features.advancedAnalytics`/`verifiedBadge`/`bulkUpload` | ⚠️ Scaffolding only | `assertFeature` exists, unit-tested, zero call sites — the gated features have no endpoints yet. |
-| B8 | `verificationIncluded` (plan column) | ❌ Gap | Still never read anywhere outside catalog CRUD/display. Not fixed this session — no verification endpoint was touched. |
+| B8 | `features.verificationIncluded` | 🔧 Resolved | `properties.service.js#requestVerification` resolves the property's actual owner and rejects requests when that owner's effective plan does not include verification. |
 | B9 | `durationDays` | ✅ | Pre-existing, re-verified. |
 
 ---
@@ -82,8 +82,8 @@ The ambient last-resort fallback (no real subscription row to anchor to at all �
 | Area | Verdict |
 |---|---|
 | Registration → plan allocation | Solid. Only the dev-only demo seed script bypasses it. |
-| Per-feature tracking/enforcement | Solid for every numeric limit, now including approval-side listing enforcement. Boolean feature gating is unused scaffolding; `verificationIncluded` remains unenforced. |
+| Per-feature tracking/enforcement | Solid for every numeric limit, now including approval-side listing enforcement and verification-plan enforcement. Boolean feature gating remains unused scaffolding. |
 | Plan flexibility | Works via "buy a product" only — no admin override (still a gap), no self-service downgrade (by design). |
 | Usage reset on plan change | **D1 (lapsed-paid-plan fallback) and D3 (period-counters now reset on renewal, not just the calendar month) are both fixed.** Live-count limits (D2) remain intentionally not retroactive. |
 
-**Still open, not addressed this session:** A7 (demo seed bypass, dev-only), B8 (`verificationIncluded` never enforced), C7 (no admin plan-assignment override).
+**Still open, not addressed this session:** A7 (demo seed bypass, dev-only), C7 (no admin plan-assignment override).

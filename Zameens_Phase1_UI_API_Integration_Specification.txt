@@ -2634,7 +2634,7 @@ Field
 	type
 	string
 	Yes
-	LOCATION/PROPERTY_TYPE/POPULAR_SEARCH
+	LOCATION/PINCODE/PROPERTY_TYPE/POPULAR_SEARCH
 	Suggestion type.
 	label
 	string

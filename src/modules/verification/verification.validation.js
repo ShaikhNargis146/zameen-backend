@@ -7,7 +7,14 @@ const checkTypes = new Set([
   "DOCUMENTS",
   "SITE_VISIT"
 ]);
-const statuses = new Set(["PENDING", "VERIFIED", "REJECTED", "PARTIAL"]);
+const statuses = new Set([
+  "NOT_STARTED",
+  "PENDING",
+  "VERIFIED",
+  "REJECTED",
+  "PARTIAL"
+]);
+const reviewStatuses = new Set(["PENDING", "VERIFIED", "REJECTED", "PARTIAL"]);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const optionalText = (value, max, field) => {
@@ -42,13 +49,17 @@ export const id = value => {
   const text = String(value || "").trim();
   if (!uuidPattern.test(text)) {
     const message = "verificationId must be a valid UUID.";
-    throw new HttpError(400, "INVALID_ID", message, [{ field: "verificationId", message }]);
+    throw new HttpError(400, "INVALID_ID", message, [
+      { field: "verificationId", message }
+    ]);
   }
   return text;
 };
 export const update = body => ({
-  checkType: enumValue(body.checkType, checkTypes, "checkType", true),
-  status: enumValue(body.status, statuses, "status", true),
+  // The URL identifies one immutable check. Keep this optional only while
+  // older clients still send it; the service rejects any conflicting value.
+  checkType: enumValue(body.checkType, checkTypes, "checkType"),
+  status: enumValue(body.status, reviewStatuses, "status", true),
   publicNote: optionalText(body.publicNote, 500, "publicNote"),
   internalNote: optionalText(body.internalNote, 1000, "internalNote")
 });
