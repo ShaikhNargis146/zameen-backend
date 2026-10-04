@@ -96,6 +96,18 @@ export const cancelPaymentLink = ({ keyId, keySecret, timeoutMs, providerOrderId
     timeoutMs
   }).then(payload => ({ id: payload.id, status: payload.status, raw: payload }));
 
+// Reads a Payment Link's own state from Razorpay. `payments` is populated only
+// once the customer has actually paid, so the reconciliation sweep can use it
+// without depending on a callback or webhook having arrived.
+export const fetchPaymentLink = ({ keyId, keySecret, timeoutMs, providerPaymentLinkId }) =>
+  request({
+    method: "GET",
+    path: `/payment_links/${providerPaymentLinkId}`,
+    keyId,
+    keySecret,
+    timeoutMs
+  });
+
 // Confirm this field order/format against the current Razorpay Payment Links
 // API reference before relying on it in production — see
 // docs/razorpay-integration-plan.md section 19.
