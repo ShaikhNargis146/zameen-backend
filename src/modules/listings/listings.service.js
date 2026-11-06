@@ -159,16 +159,18 @@ export const submit = async listing => {
   // comment for why a plain check-then-write would race.
   const limit = await resolveListingLimit(owner);
   const scanner = await propertyScanner(listing.property_id);
-  // Property documents are optional for submission; they still count toward
-  // the readiness score and verification, but never block a submit.
+  // Property media and documents are optional for submission; they still
+  // count toward the readiness score and verification, but never block a
+  // submit.
+  const optionalItems = ["PROPERTY_DOCUMENT", "PROPERTY_MEDIA"];
   const blockingItems = scanner.missingItems.filter(
-    item => item.code !== "PROPERTY_DOCUMENT"
+    item => !optionalItems.includes(item.code)
   );
   if (blockingItems.length)
     throw new HttpError(
       409,
       "LISTING_NOT_READY",
-      "Complete the required land, location, parcel, and media details before submitting this listing.",
+      "Complete the required land, location, and parcel details before submitting this listing.",
       blockingItems
     );
   let result;
