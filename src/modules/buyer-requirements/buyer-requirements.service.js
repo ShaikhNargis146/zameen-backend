@@ -1,5 +1,9 @@
 import { HttpError } from "../../shared/http.js";
-import { parsePagination, paginationMeta, splitCountedRows } from "../../shared/pagination.js";
+import {
+  parsePagination,
+  paginationMeta,
+  splitCountedRows
+} from "../../shared/pagination.js";
 import * as repository from "./buyer-requirements.repository.js";
 import { uuid } from "./buyer-requirements.validation.js";
 
@@ -52,16 +56,23 @@ const toBuyerRequirement = row => {
     minArea: extra.minArea ?? null,
     maxArea: extra.maxArea ?? null,
     areaUnitId: extra.areaUnitId ?? null,
-    minBudgetMinor: row.minBudgetMinor === null ? null : Number(row.minBudgetMinor),
-    maxBudgetMinor: row.maxBudgetMinor === null ? null : Number(row.maxBudgetMinor),
+    minBudgetMinor:
+      row.minBudgetMinor === null ? null : Number(row.minBudgetMinor),
+    maxBudgetMinor:
+      row.maxBudgetMinor === null ? null : Number(row.maxBudgetMinor),
     purpose: row.purpose,
     roadWidthMinM: extra.roadWidthMinM ?? null,
+    roadWidthUnit: extra.roadWidthUnit ?? null,
     verifiedOnly: extra.verifiedOnly ?? false,
     status: row.status,
     normalizedMinAreaSqft:
-      row.normalizedMinAreaSqft === null ? null : Number(row.normalizedMinAreaSqft),
+      row.normalizedMinAreaSqft === null
+        ? null
+        : Number(row.normalizedMinAreaSqft),
     normalizedMaxAreaSqft:
-      row.normalizedMaxAreaSqft === null ? null : Number(row.normalizedMaxAreaSqft),
+      row.normalizedMaxAreaSqft === null
+        ? null
+        : Number(row.normalizedMaxAreaSqft),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -99,6 +110,7 @@ export const create = async ({ actorId, input }) => {
       maxArea: input.maxArea,
       areaUnitId: input.areaUnitId,
       roadWidthMinM: input.roadWidthMinM,
+      roadWidthUnit: input.roadWidthUnit,
       verifiedOnly: input.verifiedOnly
     }
   });
@@ -110,7 +122,10 @@ export const get = requirement => toBuyerRequirement(requirement);
 
 export const list = async ({ actorId, filters, query }) => {
   const { page, limit, offset } = parsePagination(query);
-  const counted = await repository.listForUser(actorId, filters, { limit, offset });
+  const counted = await repository.listForUser(actorId, filters, {
+    limit,
+    offset
+  });
   const { data: rows, total } = splitCountedRows(counted);
   return {
     data: rows.map(toBuyerRequirement),
@@ -124,8 +139,12 @@ export const update = async ({ requirement, changes }) => {
     Object.hasOwn(changes, key)
   );
   const effectiveArea = {
-    minArea: Object.hasOwn(changes, "minArea") ? changes.minArea : extra.minArea ?? null,
-    maxArea: Object.hasOwn(changes, "maxArea") ? changes.maxArea : extra.maxArea ?? null,
+    minArea: Object.hasOwn(changes, "minArea")
+      ? changes.minArea
+      : extra.minArea ?? null,
+    maxArea: Object.hasOwn(changes, "maxArea")
+      ? changes.maxArea
+      : extra.maxArea ?? null,
     areaUnitId: Object.hasOwn(changes, "areaUnitId")
       ? changes.areaUnitId
       : extra.areaUnitId ?? null
@@ -133,10 +152,14 @@ export const update = async ({ requirement, changes }) => {
 
   const set = {};
   if (Object.hasOwn(changes, "name")) set.name = changes.name;
-  if (Object.hasOwn(changes, "locationId")) set.location_id = changes.locationId;
-  if (Object.hasOwn(changes, "propertyTypeId")) set.property_type_id = changes.propertyTypeId;
-  if (Object.hasOwn(changes, "minBudgetMinor")) set.min_budget_minor = changes.minBudgetMinor;
-  if (Object.hasOwn(changes, "maxBudgetMinor")) set.max_budget_minor = changes.maxBudgetMinor;
+  if (Object.hasOwn(changes, "locationId"))
+    set.location_id = changes.locationId;
+  if (Object.hasOwn(changes, "propertyTypeId"))
+    set.property_type_id = changes.propertyTypeId;
+  if (Object.hasOwn(changes, "minBudgetMinor"))
+    set.min_budget_minor = changes.minBudgetMinor;
+  if (Object.hasOwn(changes, "maxBudgetMinor"))
+    set.max_budget_minor = changes.maxBudgetMinor;
   if (Object.hasOwn(changes, "purpose")) set.purpose = changes.purpose;
   if (Object.hasOwn(changes, "status")) set.status = changes.status;
 
@@ -153,6 +176,9 @@ export const update = async ({ requirement, changes }) => {
     roadWidthMinM: Object.hasOwn(changes, "roadWidthMinM")
       ? changes.roadWidthMinM
       : extra.roadWidthMinM ?? null,
+    roadWidthUnit: Object.hasOwn(changes, "roadWidthUnit")
+      ? changes.roadWidthUnit
+      : extra.roadWidthUnit ?? null,
     verifiedOnly: Object.hasOwn(changes, "verifiedOnly")
       ? changes.verifiedOnly
       : extra.verifiedOnly ?? false

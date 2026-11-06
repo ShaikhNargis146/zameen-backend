@@ -3852,6 +3852,11 @@ Field
 	No
 	>=0
 	Road width preference.
+	roadWidthUnit
+	string|null
+	No
+	FT/M
+	Unit of roadWidthMinM.
 	verifiedOnly
 	boolean
 	No

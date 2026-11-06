@@ -1607,7 +1607,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"name\": \"3 acre industrial plot near highway\",\n  \"locationId\": \"{{locationId}}\",\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"minArea\": 1,\n  \"maxArea\": 5,\n  \"areaUnitId\": \"{{areaUnitId}}\",\n  \"minBudgetMinor\": 5000000000,\n  \"maxBudgetMinor\": 20000000000,\n  \"purpose\": \"INDUSTRIAL\",\n  \"roadWidthMinM\": 12,\n  \"verifiedOnly\": true,\n  \"status\": \"ACTIVE\"\n}"
+							"raw": "{\n  \"name\": \"3 acre industrial plot near highway\",\n  \"locationId\": \"{{locationId}}\",\n  \"propertyTypeId\": \"{{propertyTypeId}}\",\n  \"minArea\": 1,\n  \"maxArea\": 5,\n  \"areaUnitId\": \"{{areaUnitId}}\",\n  \"minBudgetMinor\": 5000000000,\n  \"maxBudgetMinor\": 20000000000,\n  \"purpose\": \"INDUSTRIAL\",\n  \"roadWidthMinM\": 12,\n  \"roadWidthUnit\": \"FT\",\n  \"verifiedOnly\": true,\n  \"status\": \"ACTIVE\"\n}"
 						},
 						"url": "{{baseUrl}}/buyer-requirements"
 					}

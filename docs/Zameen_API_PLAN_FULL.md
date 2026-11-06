@@ -1266,6 +1266,7 @@ Dev 2 owns marketplace interaction workflows, organizations, favorites, buyer re
 | maxBudgetMinor | integer\|null | No | >=min | Max budget. |
 | purpose | string\|null | No | INVESTMENT/RESIDENTIAL/INDUSTRIAL/COMMERCIAL/WAREHOUSE/AGRICULTURE/OTHER | Buyer intent. |
 | roadWidthMinM | number\|null | No | >=0 | Road width preference. |
+| roadWidthUnit | string\|null | No | FT/M | Unit of roadWidthMinM. |
 | verifiedOnly | boolean | No | default false | Verified preference. |
 | status | string\|null | No | ACTIVE/PAUSED/CLOSED | Requirement status. |
 

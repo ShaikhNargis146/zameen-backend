@@ -342,6 +342,7 @@ CREATE TABLE land.property_land_details (
   dimension_unit varchar(20) CHECK (dimension_unit IS NULL OR dimension_unit IN ('FT','M')),
   frontage_m numeric(18,4) CHECK (frontage_m IS NULL OR frontage_m >= 0),
   road_width_m numeric(18,4) CHECK (road_width_m IS NULL OR road_width_m >= 0),
+  road_width_unit varchar(20) CHECK (road_width_unit IS NULL OR road_width_unit IN ('FT','M')),
   road_type varchar(50) CHECK (road_type IS NULL OR road_type IN ('PUCCA','KUTCHA','HIGHWAY','OTHER')),
   facing varchar(2) CHECK (facing IS NULL OR facing IN ('N','NE','E','SE','S','SW','W','NW')),
   open_sides smallint CHECK (open_sides IS NULL OR open_sides BETWEEN 0 AND 4),
