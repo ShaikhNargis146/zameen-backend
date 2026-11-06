@@ -50,8 +50,7 @@ const activePlanRow = overrides => ({
   durationDays: 30,
   listingLimit: null,
   featuredDays: 15,
-  verificationIncluded: true,
-  features: {},
+  features: { verificationIncluded: true },
   isActive: true,
   aiMonthlyQuota: null,
   ...overrides

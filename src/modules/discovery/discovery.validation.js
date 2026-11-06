@@ -78,6 +78,13 @@ const optionalRegexSearch = (value, field) => {
   }
   return text;
 };
+const optionalPincode = (value, field) => {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim();
+  if (!/^\d{6}$/.test(text))
+    invalid("VALIDATION_ERROR", `${field} must contain 6 digits.`, field);
+  return text;
+};
 
 export const search = (body = {}) => {
   const minPriceMinor = optionalNumber(body.minPriceMinor, "minPriceMinor", {
@@ -117,6 +124,7 @@ export const search = (body = {}) => {
   const limit = Math.min(Math.max(Number(body.limit || 20), 1), 100);
   return {
     locationIds: uuidList(body.locationIds, "locationIds"),
+    pincode: optionalPincode(body.pincode, "pincode"),
     propertyTypeIds: uuidList(body.propertyTypeIds, "propertyTypeIds"),
     transactionTypes: enumList(
       body.transactionTypes,
@@ -147,7 +155,11 @@ export const suggestions = query => {
   const q = String(query.q || "").trim();
   if (q.length < 2 || q.length > 100)
     invalid("VALIDATION_ERROR", "q must contain 2 to 100 characters.", "q");
-  return { q, limit: Math.min(Math.max(Number(query.limit || 10), 1), 25) };
+  return {
+    q,
+    limit: Math.min(Math.max(Number(query.limit || 10), 1), 25),
+    pincodePrefix: /^\d{2,6}$/.test(q) ? q : null
+  };
 };
 
 export const map = body => {

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../../shared/http.js";
-import { resolveMediaLimits } from "../commerce/entitlements.service.js";
+import {
+  assertVerificationIncluded,
+  resolveMediaLimits
+} from "../commerce/entitlements.service.js";
 import { scannerPresentation } from "../../shared/scanner.js";
 import {
   belongsToProperty,
@@ -130,6 +133,7 @@ export const saveLandDetails = async ({ propertyId, input }) => {
     propertyId,
     areaSqft: input.areaValue * Number(unit.sqft_multiplier)
   });
+  await repository.invalidateChecks(propertyId, ["LAND_DETAILS"]);
   return repository.landDetails(propertyId);
 };
 export const getLocation = repository.location;
@@ -144,6 +148,7 @@ export const saveLocation = async ({ propertyId, input }) => {
     propertyId,
     postalCodeId: postal?.id || null
   });
+  await repository.invalidateChecks(propertyId, ["LOCATION"]);
   return repository.location(propertyId);
 };
 export const getAmenities = repository.amenities;
@@ -186,6 +191,7 @@ export const saveIdentifiers = async ({ propertyId, identifiers }) => {
       "One or more identifier types are not configured for this property's state."
     );
   await repository.replaceIdentifiers(propertyId, resolvedIdentifiers);
+  await repository.invalidateChecks(propertyId, ["PARCEL_IDENTITY"]);
   return repository.identifiers(propertyId);
 };
 export const requestVerification = async ({
@@ -194,6 +200,13 @@ export const requestVerification = async ({
   checkTypes,
   note = null
 }) => {
+  const owner = await repository.ownerFields(propertyId);
+  if (!owner)
+    throw new HttpError(404, "PROPERTY_NOT_FOUND", "Property was not found.");
+  await assertVerificationIncluded({
+    userId: owner.createdByUserId,
+    organizationId: owner.ownerOrganizationId
+  });
   await repository.requestVerification({
     propertyId,
     userId: actorId,
@@ -313,9 +326,14 @@ export const completeMedia = async ({ property, actorId, input }) => {
     throw new HttpError(
       403,
       "PLAN_LIMIT_REACHED",
-      `This plan allows up to ${result.limit} ${result.category === "IMAGE" ? "images" : "videos"} per property.`,
+      `This plan allows up to ${result.limit} ${
+        result.category === "IMAGE" ? "images" : "videos"
+      } per property.`,
       {
-        feature: result.category === "IMAGE" ? "IMAGES_PER_PROPERTY" : "VIDEOS_PER_PROPERTY",
+        feature:
+          result.category === "IMAGE"
+            ? "IMAGES_PER_PROPERTY"
+            : "VIDEOS_PER_PROPERTY",
         used: result.used,
         limit: result.limit,
         upgradeRequired: true
@@ -393,6 +411,7 @@ export const completeDocument = async ({ propertyId, actorId, input }) => {
       propertyId,
       userId: actorId
     });
+    await repository.invalidateChecks(propertyId, ["DOCUMENTS"]);
     return documentResponse(
       await repository.document(propertyId, saved.id),
       true
@@ -518,4 +537,5 @@ export const deleteDocument = async ({ propertyId, documentId }) => {
   if (!(await repository.document(propertyId, documentId)))
     throw new HttpError(404, "DOCUMENT_NOT_FOUND", "Document was not found.");
   await repository.deleteDocument(documentId);
+  await repository.invalidateChecks(propertyId, ["DOCUMENTS"]);
 };

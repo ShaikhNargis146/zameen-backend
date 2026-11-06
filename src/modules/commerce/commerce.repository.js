@@ -12,7 +12,7 @@ const planColumns = `
   pl.id, pr.id AS "productId", pr.code, pr.name, pl.plan_type AS "planType", pr.description,
   pr.amount_minor AS "amountMinor", pr.currency, pl.duration_days AS "durationDays",
   pl.listing_limit AS "listingLimit", pl.featured_days AS "featuredDays",
-  pl.verification_included AS "verificationIncluded", pl.features, pr.is_active AS "isActive",
+  pl.features, pr.is_active AS "isActive",
   pl.ai_monthly_quota AS "aiMonthlyQuota", pr.gst_rate_bps AS "gstRateBps", pr.hsn_sac_code AS "hsnSacCode",
   pl.created_at AS "createdAt", pl.updated_at AS "updatedAt"
 `;
@@ -446,7 +446,6 @@ export const createPlan = ({
   durationDays,
   listingLimit,
   featuredDays,
-  verificationIncluded,
   features,
   aiMonthlyQuota,
   gstRateBps,
@@ -468,15 +467,14 @@ export const createPlan = ({
       ]
     );
     const plan = await t.one(
-      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, verification_included, features, ai_monthly_quota)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING id`,
+      `INSERT INTO commerce.plans (product_id, plan_type, duration_days, listing_limit, featured_days, features, ai_monthly_quota)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) RETURNING id`,
       [
         product.id,
         planType,
         durationDays,
         listingLimit,
         featuredDays,
-        verificationIncluded,
         JSON.stringify(features || {}),
         aiMonthlyQuota ?? null
       ]
@@ -499,7 +497,6 @@ const planColumnMap = {
   durationDays: "duration_days",
   listingLimit: "listing_limit",
   featuredDays: "featured_days",
-  verificationIncluded: "verification_included",
   features: "features",
   aiMonthlyQuota: "ai_monthly_quota"
 };
@@ -858,6 +855,31 @@ export const failPayment = ({ id, providerPayload }) =>
     jsonbCols: ["provider_payload"]
   });
 
+// Razorpay payments still CREATED long after the customer should have finished
+// paying — the input to the reconciliation sweep (commerce.service.js
+// reconcileStalePayments). Oldest first, so a backlog drains in order.
+export const findStaleCreatedPayments = ({ olderThanMinutes, limit }) =>
+  run(
+    "any",
+    `SELECT ${paymentSelectColumns} FROM commerce.payments pay
+     WHERE pay.provider = 'RAZORPAY' AND pay.status = 'CREATED'
+       AND pay.provider_order_id IS NOT NULL
+       AND pay.created_at < now() - make_interval(mins => $1)
+     ORDER BY pay.created_at ASC LIMIT $2`,
+    [olderThanMinutes, limit]
+  );
+
+// Only flips a payment that is still CREATED, so a capture that lands first
+// (callback or webhook) can never be overwritten with FAILED.
+export const failCreatedPayment = ({ id, providerPayload }) =>
+  run(
+    "oneOrNone",
+    `UPDATE commerce.payments SET status = 'FAILED', provider_payload = $2::jsonb
+     WHERE id = $1 AND status = 'CREATED'
+     RETURNING ${paymentInsertColumns}`,
+    [id, JSON.stringify(providerPayload || {})]
+  );
+
 // Extends an existing plan_subscriptions.ends_at, or starts a fresh window
 // from `now` if there is no still-active existing entitlement to extend.
 // Exported for unit testing independent of the database.
@@ -873,8 +895,8 @@ export const computePlanEndsAt = ({ existingEndsAt, durationDays, now }) => {
 // is never left CAPTURED without its entitlement effect (or vice versa).
 // Shared by both the Payment Link callback handler and the webhook handler
 // (Sections 10-11 of docs/razorpay-integration-plan.md) so the two paths
-// cannot disagree; each entitlement write is independently idempotent so
-// calling this twice for the same payment is harmless.
+// cannot disagree. A call for a payment that is already CAPTURED returns null
+// and writes nothing (see the status guard on the first UPDATE below).
 export const capturePaymentAndApplyEntitlements = ({
   id,
   orderId,
@@ -883,13 +905,18 @@ export const capturePaymentAndApplyEntitlements = ({
   sellerGstin
 }) =>
   runTx(async t => {
-    const payment = await t.one(
+    // The status guard is what makes a racing callback + webhook safe: the
+    // second transaction blocks on this row lock, then finds no row to update
+    // and returns null instead of re-stamping paid_at, re-issuing the invoice
+    // number, and notifying the buyer a second time.
+    const payment = await t.oneOrNone(
       `UPDATE commerce.payments
        SET status = 'CAPTURED', paid_at = now(), provider_payment_id = $2, provider_payload = $3::jsonb
-       WHERE id = $1
+       WHERE id = $1 AND status <> 'CAPTURED'
        RETURNING ${paymentInsertColumns}`,
       [id, providerPaymentId, JSON.stringify(providerPayload || {})]
     );
+    if (!payment) return null;
     const order = await t.one(
       `UPDATE commerce.orders SET status = 'PAID' WHERE id = $1
        RETURNING user_id AS "userId", organization_id AS "organizationId"`,

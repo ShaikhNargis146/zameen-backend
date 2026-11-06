@@ -24,9 +24,19 @@ export const latestVerificationUpdate = checks => {
   return latest;
 };
 
+const summaryCheck = check => ({
+  checkType: check.checkType,
+  status: check.status,
+  reviewedAt: check.reviewedAt || null,
+  publicNote: check.publicNote || null,
+  updatedAt: check.updatedAt || null
+});
+
 export const verificationSummaryForChecks = (propertyId, checks) => ({
   propertyId,
   overallStatus: overallVerificationStatus(checks),
-  checks,
+  // This summary is also safely returned to property viewers. Admin action
+  // IDs belong to VerificationQueueItem / VerificationCheckDetail instead.
+  checks: checks.map(summaryCheck),
   lastUpdatedAt: latestVerificationUpdate(checks)
 });

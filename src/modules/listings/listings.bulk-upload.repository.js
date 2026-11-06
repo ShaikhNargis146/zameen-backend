@@ -2,21 +2,32 @@ import { pg, run } from "../../shared/db.js";
 
 export const activeMasters = () =>
   Promise.all([
-    run("any", `SELECT id, code FROM land.property_types WHERE is_active = true`),
-    run("any", `SELECT id, code FROM land.land_use_types WHERE is_active = true`),
-    run("any", `SELECT id, code FROM land.ownership_types WHERE is_active = true`),
+    run(
+      "any",
+      `SELECT id, code FROM land.property_types WHERE is_active = true`
+    ),
+    run(
+      "any",
+      `SELECT id, code FROM land.land_use_types WHERE is_active = true`
+    ),
+    run(
+      "any",
+      `SELECT id, code FROM land.ownership_types WHERE is_active = true`
+    ),
     run(
       "any",
       `SELECT u.id, u.code, state.state_code AS "stateCode", u.sqft_multiplier AS "sqftMultiplier" FROM land.area_units u LEFT JOIN geo.locations state ON state.id = u.state_location_id WHERE u.is_active = true`
     ),
     run("any", `SELECT id, code FROM land.amenities WHERE is_active = true`)
-  ]).then(([propertyTypes, landUseTypes, ownershipTypes, areaUnits, amenities]) => ({
-    propertyTypes,
-    landUseTypes,
-    ownershipTypes,
-    areaUnits,
-    amenities
-  }));
+  ]).then(
+    ([propertyTypes, landUseTypes, ownershipTypes, areaUnits, amenities]) => ({
+      propertyTypes,
+      landUseTypes,
+      ownershipTypes,
+      areaUnits,
+      amenities
+    })
+  );
 
 export const locationsByIds = ids =>
   ids.length
@@ -29,30 +40,70 @@ export const locationsByIds = ids =>
 
 export const postalCodesByCodes = codes =>
   codes.length
-    ? run("any", `SELECT id, code FROM geo.postal_codes WHERE code = ANY($1::varchar[])`, [
-        codes
-      ])
-    : Promise.resolve([]);
-
-// This endpoint is admin-only: the caller is doing back-office data entry
-// on behalf of whichever organisation owns each row, not just their own —
-// so this checks the organisation exists at all, not that the admin
-// belongs to it (compare the seller-facing activeOrganizationMembership
-// checks in properties.repository.js / listings.repository.js).
-export const existingOrganizationIds = ids =>
-  (ids.length
     ? run(
         "any",
-        `SELECT id FROM account.organizations WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
-        [ids]
+        `SELECT id, code FROM geo.postal_codes WHERE code = ANY($1::varchar[])`,
+        [codes]
       )
-    : Promise.resolve([])
-  ).then(rows => new Set(rows.map(row => row.id)));
+    : Promise.resolve([]);
+
+// Used to resolve a row's location when locationId is left blank: a pincode
+// maps to one or more localities/villages via geo.postal_code_locations, so
+// every candidate (with coordinates, for nearest-point disambiguation) is
+// returned and the service picks among them.
+export const locationCandidatesByPincodes = codes =>
+  codes.length
+    ? run(
+        "any",
+        `SELECT p.code, l.id, l.state_code AS "stateCode",
+                CASE WHEN l.center IS NULL THEN NULL ELSE ST_Y(l.center::geometry) END AS latitude,
+                CASE WHEN l.center IS NULL THEN NULL ELSE ST_X(l.center::geometry) END AS longitude
+         FROM geo.postal_codes p
+         JOIN geo.postal_code_locations pl ON pl.postal_code_id = p.id
+         JOIN geo.locations l ON l.id = pl.location_id AND l.is_active = true
+         WHERE p.code = ANY($1::varchar[])`,
+        [codes]
+      )
+    : Promise.resolve([]);
+
+// This endpoint is admin-only back-office data entry on behalf of whichever
+// seller owns each row, so the seller is identified by phone number rather
+// than requiring the admin to already know (or be a member of) their
+// internal user/organization ids.
+export const usersByPhones = phones =>
+  phones.length
+    ? run(
+        "any",
+        `SELECT id, phone_e164 AS "phoneE164" FROM auth.users WHERE phone_e164 = ANY($1::varchar[]) AND deleted_at IS NULL`,
+        [phones]
+      )
+    : Promise.resolve([]);
+
+// Only active memberships in a non-deleted organization count. The service
+// attributes a listing to an organization only when a seller has exactly
+// one such membership — this just returns the raw rows for it to count.
+export const activeOrganizationMembershipsByUserIds = userIds =>
+  userIds.length
+    ? run(
+        "any",
+        `SELECT om.user_id AS "userId", om.organization_id AS "organizationId"
+         FROM account.organization_members om
+         JOIN account.organizations o ON o.id = om.organization_id AND o.deleted_at IS NULL
+         WHERE om.user_id = ANY($1::uuid[]) AND om.status = 'ACTIVE'`,
+        [userIds]
+      )
+    : Promise.resolve([]);
 
 const listingCode = randomUUID =>
-  `ZMN-L-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+  `ZMN-L-${randomUUID()
+    .replace(/-/g, "")
+    .slice(0, 12)
+    .toUpperCase()}`;
 const propertyCode = randomUUID =>
-  `ZMN-P-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+  `ZMN-P-${randomUUID()
+    .replace(/-/g, "")
+    .slice(0, 12)
+    .toUpperCase()}`;
 
 /**
  * Creates the property, its land details, location, amenities, and a draft
@@ -121,11 +172,12 @@ export const createPropertyListing = async ({ actorId, row, randomUUID }) => {
       );
     const listing = await transaction.one(
       `INSERT INTO marketplace.listings (listing_code, property_id, created_by_user_id, seller_user_id, seller_organization_id, transaction_type, title, description, canonical_language, price_amount_minor, currency, is_negotiable)
-       VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,'INR',$10) RETURNING id, listing_code AS "listingCode"`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'INR',$11) RETURNING id, listing_code AS "listingCode"`,
       [
         listingCode(randomUUID),
         property.id,
         actorId,
+        row.sellerUserId,
         row.organizationId,
         row.transactionType,
         row.title,

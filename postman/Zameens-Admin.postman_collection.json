@@ -464,7 +464,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"checkType\": \"LOCATION\",\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}"
+              "raw": "{\n  \"status\": \"VERIFIED\",\n  \"publicNote\": \"Location details verified.\",\n  \"internalNote\": \"Matched submitted coordinates.\"\n}"
             },
             "url": "{{baseUrl}}/admin/verifications/{{verificationId}}"
           }
@@ -500,7 +500,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"PREMIUM_30\",\n  \"name\": \"Premium 30 Days\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"30-day premium listing boost.\",\n  \"amountMinor\": 99900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 7,\n  \"verificationIncluded\": true,\n  \"features\": { \"badge\": \"PREMIUM\" },\n  \"isActive\": true\n}"
+              "raw": "{\n  \"code\": \"PREMIUM_30\",\n  \"name\": \"Premium 30 Days\",\n  \"planType\": \"PREMIUM\",\n  \"description\": \"30-day premium listing boost.\",\n  \"amountMinor\": 99900,\n  \"currency\": \"INR\",\n  \"durationDays\": 30,\n  \"listingLimit\": 5,\n  \"featuredDays\": 7,\n  \"features\": { \"badge\": \"PREMIUM\", \"verificationIncluded\": true },\n  \"isActive\": true\n}"
             },
             "url": "{{baseUrl}}/admin/plans"
           }

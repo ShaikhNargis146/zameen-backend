@@ -24,38 +24,47 @@ export const profileChanges = body => {
         { field: "displayName", message: "Name cannot be empty." }
       ]);
     if (name.length > 200)
-      throw new HttpError(400, "VALIDATION_ERROR", "displayName must be at most 200 characters.", [
-        { field: "displayName", message: "displayName must be at most 200 characters." }
-      ]);
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        "displayName must be at most 200 characters.",
+        [
+          {
+            field: "displayName",
+            message: "displayName must be at most 200 characters."
+          }
+        ]
+      );
     changes.display_name = name;
   }
   if (Object.hasOwn(body, "firstName"))
     changes.first_name = nullableText(body.firstName, "firstName", 100);
   if (Object.hasOwn(body, "lastName"))
     changes.last_name = nullableText(body.lastName, "lastName", 100);
-  // email is deliberately NOT accepted here — see emailChangeRequest /
-  // emailChangeConfirm below. Setting it directly with no proof of ownership
-  // of the new address let one account claim an email nobody there had
-  // verified; a later legitimate OTP login to that address would then land
-  // in this account instead of the real owner's.
-  if (Object.hasOwn(body, "email"))
-    throw new HttpError(
-      400,
-      "EMAIL_CHANGE_REQUIRES_VERIFICATION",
-      "email cannot be changed here — use POST /users/me/email/change to verify the new address first.",
-      [
-        {
-          field: "email",
-          message: "email cannot be changed here — use POST /users/me/email/change."
-        }
-      ]
-    );
+  if (Object.hasOwn(body, "email")) {
+    const email = nullableText(body.email, "email", 255)?.toLowerCase();
+    if (!email || !emailPattern.test(email))
+      throw new HttpError(400, "INVALID_EMAIL", "email must be valid.", [
+        { field: "email", message: "email must be valid." }
+      ]);
+    changes.email = email;
+    // Changed without OTP, so the new address is not proven to be theirs.
+    changes.email_verified_at = null;
+  }
   if (Object.hasOwn(body, "preferredLanguage")) {
     const language = String(body.preferredLanguage || "").trim();
     if (!languages.has(language))
-      throw new HttpError(400, "INVALID_LANGUAGE", "preferredLanguage must be a language code.", [
-        { field: "preferredLanguage", message: "preferredLanguage must be a language code." }
-      ]);
+      throw new HttpError(
+        400,
+        "INVALID_LANGUAGE",
+        "preferredLanguage must be a language code.",
+        [
+          {
+            field: "preferredLanguage",
+            message: "preferredLanguage must be a language code."
+          }
+        ]
+      );
     changes.preferred_language = language;
   }
   if (!Object.keys(changes).length)
@@ -96,18 +105,24 @@ export const selfRole = body => {
   // left as-is pending that larger piece of work.
   const role = String(body.roleCode || body.role || "").toUpperCase();
   if (!["BUYER", "SELLER", "BROKER", "DEVELOPER", "CORPORATE"].includes(role))
-    throw new HttpError(400, "ROLE_NOT_SELF_ASSIGNABLE", "This role cannot be self-assigned.", [
-      { field: "roleCode", message: "This role cannot be self-assigned." }
-    ]);
+    throw new HttpError(
+      400,
+      "ROLE_NOT_SELF_ASSIGNABLE",
+      "This role cannot be self-assigned.",
+      [{ field: "roleCode", message: "This role cannot be self-assigned." }]
+    );
   return role;
 };
 
 export const userStatus = body => {
   const status = String(body.status || "").toUpperCase();
   if (!statuses.has(status))
-    throw new HttpError(400, "INVALID_STATUS", "status must be ACTIVE or BLOCKED.", [
-      { field: "status", message: "status must be ACTIVE or BLOCKED." }
-    ]);
+    throw new HttpError(
+      400,
+      "INVALID_STATUS",
+      "status must be ACTIVE or BLOCKED.",
+      [{ field: "status", message: "status must be ACTIVE or BLOCKED." }]
+    );
   return { status, reason: nullableText(body.reason, "reason", 500) };
 };
 
@@ -116,9 +131,12 @@ export const roles = body => {
     ? [...new Set(body.roles.map(role => String(role).toUpperCase()))]
     : [];
   if (!result.length)
-    throw new HttpError(400, "ROLES_REQUIRED", "roles must be a non-empty array.", [
-      { field: "roles", message: "roles must be a non-empty array." }
-    ]);
+    throw new HttpError(
+      400,
+      "ROLES_REQUIRED",
+      "roles must be a non-empty array.",
+      [{ field: "roles", message: "roles must be a non-empty array." }]
+    );
   return {
     roleCodes: result,
     reason: nullableText(body.reason, "reason", 500)

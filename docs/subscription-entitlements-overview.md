@@ -28,7 +28,7 @@ Seeded by `migrations/016_subscription_entitlements.sql` (limits) and `migration
 | `durationDays` | `NULL` (never expires) | 30 | 30 |
 | `listingLimit` | 2 | 20 | `NULL` (unlimited) |
 | `featuredDays` | `NULL` | 15 | 30 |
-| `verificationIncluded` | false | true | true |
+| `features.verificationIncluded` | false | true | true |
 | `aiMonthlyQuota` | 5 | 100 | `NULL` (unlimited) |
 | `features.imagesPerProperty` | 5 | 20 | 50 |
 | `features.videosPerProperty` | 0 | 2 | 5 |
@@ -124,9 +124,9 @@ Every one of these is an **advisory-locked** transaction (`pg_advisory_xact_lock
 
 `aiMonthlyQuota: null` or `features.featuredListingsPerMonth: 0`/unset short-circuits before ever opening a transaction: `null` means unlimited (skip enforcement entirely), `0`/unset on featured listings means "no allowance, but still check if this exact listing is already featured" (a cheap read-only check, not a ledger write).
 
-### 4c. Boolean feature flags — scaffolding, not yet wired up
+### 4c. Boolean feature flags and verification entitlement
 
-`features.advancedAnalytics` / `verifiedBadge` / `bulkUpload` have a real gate — `entitlements.service.js#assertFeature` — throwing `HttpError(403, "FEATURE_NOT_AVAILABLE", ..., { feature, upgradeRequired: true })` when the flag isn't set on the actor's plan. It's unit-tested but has **zero call sites** anywhere else in `src/` — no route or service currently calls it. The gated capabilities (analytics dashboard, a verified badge, bulk CSV upload) don't have endpoints yet. Likewise `verificationIncluded` (a plan column, not a `features` key) is read only for catalog display — no verification endpoint checks it. Both are tracked as open gaps in the audit doc (B7, B8), not this session's concern.
+`features.advancedAnalytics` / `verifiedBadge` / `bulkUpload` have a real gate — `entitlements.service.js#assertFeature` — throwing `HttpError(403, "FEATURE_NOT_AVAILABLE", ..., { feature, upgradeRequired: true })` when the flag isn't set on the actor's plan. The gated capabilities (analytics dashboard, a verified badge, bulk CSV upload) do not yet have call sites. `features.verificationIncluded`, however, is enforced by `entitlements.service.js#assertVerificationIncluded` when a property owner requests verification; it resolves the property owner's effective personal or organisation plan, not the particular member making the request.
 
 ---
 
@@ -216,7 +216,7 @@ For a user on PRO who's used 8/20 listings, 42/100 AI queries this cycle, 1/2 fe
 
 - **No admin plan-assignment override** — an admin can edit the catalog but can't directly grant/force a specific plan onto one account (C7).
 - **No self-service downgrade/cancel** — by design; nothing auto-renews, so there's no charge to stop (C6).
-- **`verificationIncluded` and the boolean feature flags are unenforced scaffolding** (B7, B8) — see §4c.
+- **Boolean feature flags remain unenforced scaffolding** (B7) — see §4c. `features.verificationIncluded` is enforced on verification requests.
 - **The dev-only demo seed script bypasses `grantFreePlan`** — gated behind `DEMO_DATA=true`, never runs in production (A7).
 
 Full detail and status on each: [`subscription-entitlements-audit-checklist.md`](./subscription-entitlements-audit-checklist.md).

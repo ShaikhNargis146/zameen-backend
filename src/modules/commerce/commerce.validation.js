@@ -188,6 +188,7 @@ const optionalObject = (value, field) => {
 const planFeatures = value => {
   const features = optionalObject(value, "FEATURES");
   if (!features) return null;
+  const normalized = { ...features };
   const legacyKey = [
     "contactUnlocksLifetime",
     "contactUnlocksPerMonth"
@@ -198,15 +199,26 @@ const planFeatures = value => {
       { field: `features.${legacyKey}`, message }
     ]);
   }
-  if (!Object.hasOwn(features, "contactUnlocks")) return features;
-  return {
-    ...features,
-    contactUnlocks: optionalNonNegativeInteger(
+  if (Object.hasOwn(features, "contactUnlocks"))
+    normalized.contactUnlocks = optionalNonNegativeInteger(
       features.contactUnlocks,
       "CONTACT_UNLOCKS",
       "features.contactUnlocks"
-    )
-  };
+    );
+  if (Object.hasOwn(features, "verificationIncluded"))
+    normalized.verificationIncluded = optionalBoolean(
+      features.verificationIncluded,
+      false
+    );
+  return normalized;
+};
+
+const rejectLegacyVerificationField = body => {
+  if (!Object.hasOwn(body, "verificationIncluded")) return;
+  const message = "Use features.verificationIncluded instead.";
+  throw new HttpError(400, "INVALID_VERIFICATION_INCLUDED", message, [
+    { field: "features.verificationIncluded", message }
+  ]);
 };
 
 const optionalBoolean = (value, fallback) =>
@@ -351,35 +363,44 @@ export const adminPlanListQuery = query => ({
   search: optionalString(query.search, 200, "SEARCH")
 });
 
-export const createPlan = body => ({
-  code: requiredString(body.code, 2, 100, "CODE"),
-  name: requiredString(body.name, 2, 255, "NAME"),
-  planType: requiredEnum(
-    body.planType,
-    planTypes,
-    "PLAN_TYPE",
-    "FREE, PREMIUM, or BROKER"
-  ),
-  description: optionalString(body.description, 2000, "DESCRIPTION"),
-  amountMinor: requiredNonNegativeInteger(body.amountMinor, "AMOUNT_MINOR"),
-  currency: body.currency
-    ? requiredEnum(body.currency, currencies, "CURRENCY", "INR")
-    : "INR",
-  durationDays: optionalPositiveInteger(body.durationDays, "DURATION_DAYS"),
-  listingLimit: optionalNonNegativeInteger(body.listingLimit, "LISTING_LIMIT"),
-  featuredDays: optionalNonNegativeInteger(body.featuredDays, "FEATURED_DAYS"),
-  verificationIncluded: optionalBoolean(body.verificationIncluded, false),
-  features: planFeatures(body.features) || {},
-  isActive: optionalBoolean(body.isActive, true),
-  aiMonthlyQuota: optionalNonNegativeInteger(
-    body.aiMonthlyQuota,
-    "AI_MONTHLY_QUOTA"
-  ),
-  gstRateBps: optionalGstRateBps(body.gstRateBps, "GST_RATE_BPS") ?? 1800,
-  hsnSacCode: optionalString(body.hsnSacCode, 20, "HSN_SAC_CODE")
-});
+export const createPlan = body => {
+  rejectLegacyVerificationField(body);
+  return {
+    code: requiredString(body.code, 2, 100, "CODE"),
+    name: requiredString(body.name, 2, 255, "NAME"),
+    planType: requiredEnum(
+      body.planType,
+      planTypes,
+      "PLAN_TYPE",
+      "FREE, PREMIUM, or BROKER"
+    ),
+    description: optionalString(body.description, 2000, "DESCRIPTION"),
+    amountMinor: requiredNonNegativeInteger(body.amountMinor, "AMOUNT_MINOR"),
+    currency: body.currency
+      ? requiredEnum(body.currency, currencies, "CURRENCY", "INR")
+      : "INR",
+    durationDays: optionalPositiveInteger(body.durationDays, "DURATION_DAYS"),
+    listingLimit: optionalNonNegativeInteger(
+      body.listingLimit,
+      "LISTING_LIMIT"
+    ),
+    featuredDays: optionalNonNegativeInteger(
+      body.featuredDays,
+      "FEATURED_DAYS"
+    ),
+    features: planFeatures(body.features) || {},
+    isActive: optionalBoolean(body.isActive, true),
+    aiMonthlyQuota: optionalNonNegativeInteger(
+      body.aiMonthlyQuota,
+      "AI_MONTHLY_QUOTA"
+    ),
+    gstRateBps: optionalGstRateBps(body.gstRateBps, "GST_RATE_BPS") ?? 1800,
+    hsnSacCode: optionalString(body.hsnSacCode, 20, "HSN_SAC_CODE")
+  };
+};
 
 export const updatePlan = body => {
+  rejectLegacyVerificationField(body);
   const changes = {};
   if (Object.hasOwn(body, "code"))
     changes.code = requiredString(body.code, 2, 100, "CODE");
@@ -421,8 +442,6 @@ export const updatePlan = body => {
       body.featuredDays,
       "FEATURED_DAYS"
     );
-  if (Object.hasOwn(body, "verificationIncluded"))
-    changes.verificationIncluded = Boolean(body.verificationIncluded);
   if (Object.hasOwn(body, "features"))
     changes.features = planFeatures(body.features) || {};
   if (Object.hasOwn(body, "isActive"))

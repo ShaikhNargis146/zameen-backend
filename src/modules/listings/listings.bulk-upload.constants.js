@@ -1,4 +1,5 @@
-export const TEMPLATE_FILE_NAME = "zameen-property-listing-bulk-upload-template.csv";
+export const TEMPLATE_FILE_NAME =
+  "zameen-property-listing-bulk-upload-template.csv";
 export const MAX_ROWS_PER_UPLOAD = 500;
 export const MAX_UPLOAD_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 // Browsers/OS report wildly inconsistent mimetypes for .csv (text/csv,
@@ -31,9 +32,24 @@ export const LOCATION_PRECISIONS = new Set(["EXACT", "APPROXIMATE"]);
 // row-parsing lookup and the downloadable sample stay driven by this single
 // list. Full format/allowed-value documentation lives in
 // docs/Zameen_API_PLAN_FULL.md (Listing Creation & Management).
+// `example2`, where present, drives the template's second sample row instead
+// of `example` -- used to show the locationId-blank + pincode/lat-long
+// fallback path alongside the classic locationId-provided path.
 export const COLUMNS = [
-  { key: "title", required: true, example: "2 Acre Agricultural Land near Panvel Highway" },
-  { key: "description", required: true, example: "Well-connected agricultural land with borewell and approach road, close to the highway." },
+  {
+    key: "title",
+    required: true,
+    example: "2 Acre Agricultural Land near Panvel Highway",
+    example2: "1.5 Acre Residential Plot near Panvel Station"
+  },
+  {
+    key: "description",
+    required: true,
+    example:
+      "Well-connected agricultural land with borewell and approach road, close to the highway.",
+    example2:
+      "Clear-title residential plot in a gated layout, 10 minutes from Panvel station, ready for construction."
+  },
   { key: "transactionType", required: true, example: "SALE" },
   { key: "priceAmountINR", required: true, example: 4250000 },
   { key: "isNegotiable", required: false, example: "FALSE" },
@@ -41,7 +57,12 @@ export const COLUMNS = [
   { key: "propertyTypeCode", required: true, example: "AGRICULTURAL_LAND" },
   { key: "landUseTypeCode", required: false, example: "AGRICULTURAL" },
   { key: "ownershipTypeCode", required: false, example: "FREEHOLD" },
-  { key: "organizationId", required: false, example: "" },
+  // The seller is identified by mobile number, not a raw uuid: the row is
+  // rejected if no registered user has this phone number. When that user is
+  // an active member of exactly one organization, the listing is attributed
+  // to that organization too; zero or multiple memberships fall back to
+  // attributing the listing to the user alone.
+  { key: "sellerMobile", required: true, example: "9876543210" },
   { key: "areaValue", required: true, example: 2 },
   { key: "areaUnitCode", required: true, example: "ACRE" },
   { key: "lengthValue", required: false, example: "" },
@@ -56,12 +77,16 @@ export const COLUMNS = [
   { key: "hasBoundaryWall", required: false, example: "" },
   { key: "terrain", required: false, example: "FLAT" },
   { key: "roadAccessType", required: false, example: "DIRECT" },
-  { key: "locationId", required: true, example: "00000000-0000-0000-0000-000000000000" },
+  // locationId may be left blank if pincode is given instead: the row is
+  // then resolved via geo.postal_code_locations, using latitude/longitude
+  // to disambiguate a pincode that maps to more than one locality. Left
+  // blank in both sample rows so the template demonstrates that path.
+  { key: "locationId", required: false, example: "" },
   { key: "pincode", required: false, example: "410206" },
   { key: "addressLine", required: false, example: "" },
   { key: "landmark", required: false, example: "" },
-  { key: "latitude", required: false, example: "" },
-  { key: "longitude", required: false, example: "" },
+  { key: "latitude", required: false, example: "", example2: 18.9894 },
+  { key: "longitude", required: false, example: "", example2: 73.1175 },
   { key: "locationPrecision", required: false, example: "APPROXIMATE" },
   { key: "showExactLocation", required: false, example: "FALSE" },
   { key: "amenityCodes", required: false, example: "WATER;ELECTRICITY" }

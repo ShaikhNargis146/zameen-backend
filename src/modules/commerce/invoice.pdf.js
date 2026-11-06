@@ -59,8 +59,8 @@ export const renderInvoicePdf = ({ seller, order, items }) =>
     doc
       .font("Helvetica")
       .fontSize(9)
-      .text(seller.address)
-      .text(`GSTIN: ${seller.gstin}`);
+      .text(seller.address);
+    if (seller.gstin) doc.text(`GSTIN: ${seller.gstin}`);
 
     doc.moveDown(1);
     doc.font("Helvetica-Bold").fontSize(14).text("TAX INVOICE", { align: "center" });

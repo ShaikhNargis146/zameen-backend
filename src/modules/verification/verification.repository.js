@@ -16,7 +16,8 @@ export const list = ({ status, checkType, search, limit, offset }) =>
      JOIN land.properties p ON p.id = c.property_id AND p.deleted_at IS NULL
      LEFT JOIN auth.users owner ON owner.id = p.created_by_user_id
      ${where}
-     ORDER BY c.requested_at DESC NULLS LAST, c.created_at DESC LIMIT $4 OFFSET $5`,
+     ORDER BY c.requested_at DESC NULLS LAST, c.created_at DESC
+     LIMIT $4 OFFSET $5`,
     [status, checkType, search ? `%${search}%` : null, limit, offset]
   );
 export const find = verificationId =>
@@ -60,18 +61,6 @@ export const propertyChecks = propertyId =>
      FROM land.property_verification_checks WHERE property_id = $1 ORDER BY check_type`,
     [propertyId]
   );
-export const propertyChecksForProperties = propertyIds =>
-  propertyIds.length
-    ? run(
-        "any",
-        `SELECT property_id AS "propertyId", check_type AS "checkType", status,
-           reviewed_at AS "reviewedAt", requested_at AS "requestedAt",
-           notes AS "publicNote", updated_at AS "updatedAt"
-         FROM land.property_verification_checks
-         WHERE property_id = ANY($1::uuid[]) ORDER BY property_id, check_type`,
-        [propertyIds]
-      )
-    : Promise.resolve([]);
 export const updateWithAudit = ({
   verificationId,
   checkType,
@@ -96,7 +85,15 @@ export const updateWithAudit = ({
            reviewed_by_user_id = $6, reviewed_at = now()
        WHERE id = $1 AND check_type = $2 AND status = $7
        RETURNING id`,
-      [verificationId, checkType, status, publicNote, internalNote, actorId, before.status]
+      [
+        verificationId,
+        checkType,
+        status,
+        publicNote,
+        internalNote,
+        actorId,
+        before.status
+      ]
     );
     if (!updated) return null;
     await transaction.none(

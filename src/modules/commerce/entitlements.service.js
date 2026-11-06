@@ -84,6 +84,20 @@ export const resolveTeamMemberLimit = async organizationId => {
   return limit === null || limit === undefined ? null : limit;
 };
 
+// Verification is a property-owner entitlement, like listing and media
+// limits. Resolve the property's actual owner (personal or organisation),
+// never whichever member happened to submit the request.
+export const assertVerificationIncluded = async owner => {
+  const active = await repository.resolveEffectivePlanForOwner(owner);
+  if (active?.features?.verificationIncluded === true) return;
+  throw new HttpError(
+    403,
+    "VERIFICATION_NOT_INCLUDED",
+    "Verification is not included in this plan.",
+    { feature: "VERIFICATION", upgradeRequired: true }
+  );
+};
+
 // Boolean feature gating (advancedAnalytics, verifiedBadge, bulkUpload) —
 // these read as the acting user's own capability, not a property of a
 // specific listing/property, so they resolve through the actor's
